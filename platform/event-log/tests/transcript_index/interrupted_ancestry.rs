@@ -93,7 +93,12 @@ async fn interrupted_streaming_tool_ancestry_and_later_model_step_replay_exactly
         .unwrap();
     let db = Connection::open(&path).unwrap();
 
-    assert_eq!(rows(&db, "a").len(), 4);
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a"))
+            .await
+            .len(),
+        4
+    );
 
     // The ordinary Message main-request append contract permits this order.
     // Current engine direct-tool cleanup is stricter; this test covers the log.
@@ -175,7 +180,10 @@ async fn interrupted_streaming_tool_ancestry_and_later_model_step_replay_exactly
     let prepared = crate::transcript_cache::materialize_all_rows(&log, "a", through).await;
     prepared.expect("append-accepted evidence must preserve the selected-boundary contract");
 
-    assert_eq!(rows(&db, "a"), expected);
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+        expected
+    );
     drop(db);
     log.close().await.unwrap();
 }

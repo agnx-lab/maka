@@ -20,7 +20,6 @@
 use crate::{EventLog, StoreError};
 use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::Prompt;
-use sqlx::Connection;
 
 const QUERY: &str = "SELECT source_sequence,item_index FROM transcript_directory
     WHERE session_id=?1 AND (source_sequence,item_index)<=(?2,?3) AND role='user'
@@ -47,20 +46,19 @@ impl EventLog {
         let session = session.to_owned();
         self.connection
             .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin().await?;
-                    super::directory::check_read(&mut tx, &session, through).await?;
+                super::bodycache::run(connection, move |tx| Box::pin(async move {
+                    super::directory::check_read(tx, &session, through).await?;
                     let row: Option<(i64,i64)> = sqlx::query_as(QUERY)
                         .bind(&session).bind(source_sequence).bind(item_index)
                         .fetch_optional(&mut *tx).await?;
                     let Some((source,item)) = row else { return Ok(None) };
                     let position = super::read::row_position(source,item)?;
-                    super::bodycache::ensure(&mut tx,&session,position).await?;
-                    let text: String = sqlx::query_scalar("SELECT COALESCE(navigation_preview(COALESCE(json_extract(payload,'$.displayText'),json_extract(payload,'$.text'),''),4096),'[attachments]') FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+                    super::bodycache::ensure(tx,&session,position).await?;
+                    let text: String = sqlx::query_scalar("SELECT COALESCE(navigation_preview(COALESCE(json_extract(payload,'$.displayText'),json_extract(payload,'$.text'),''),4096),'[attachments]') FROM transcript_cache.rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
                         .bind(&session).bind(source).bind(item).fetch_one(&mut *tx).await?;
-                    tx.commit().await?;
+
                     Ok(Some(Prompt { position,text }))
-                })
+                }))
             })
             .await
     }

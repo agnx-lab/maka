@@ -338,24 +338,33 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         .unwrap();
     assert!(first_page.next_position.is_some());
     // Every landmark is an actual persisted user row, not an opening/header guess.
-    let db = rusqlite::Connection::open(&path).unwrap();
     for landmark in log
         .navigation_landmarks("session", current, 64, None)
         .await
         .unwrap()
     {
-        let payload: Vec<u8> = db
-            .query_row(
-                "SELECT payload FROM transcript_rows WHERE source_sequence=? AND item_index=? AND session_id='session'",
-                [landmark.position.source_sequence as i64, landmark.position.item_index as i64],
-                |row| row.get(0),
+        let header = log
+            .transcript_headers(
+                "session",
+                &maka_event_log::transcript::TranscriptRead {
+                    through: current,
+                    position: Some(landmark.position),
+                    direction: maka_event_log::transcript::TranscriptDirection::Newer,
+                    limit: 1,
+                },
             )
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(header.position, landmark.position);
+        let payload = log
+            .transcript_fragment("session", header.position, 0, header.total_bytes)
+            .await
             .unwrap();
         let row: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(row["type"], "user");
         assert_eq!(row["turnId"], landmark.turn_id);
     }
-    drop(db);
     log.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
     assert_eq!(pages(&reopened, fence, 1).await, initial);

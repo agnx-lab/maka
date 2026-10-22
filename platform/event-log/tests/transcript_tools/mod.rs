@@ -17,9 +17,6 @@
  * under the License.
  */
 
-#[path = "support/transcript.rs"]
-mod transcript_cache;
-
 use maka_agent_facts::event::EventWrite;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
@@ -40,7 +37,7 @@ use maka_presentation::tool_message_id;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-#[path = "transcript_tools/payloads.rs"]
+#[path = "payloads.rs"]
 mod payloads;
 
 fn event(fact: Fact) -> EventWrite {
@@ -118,7 +115,7 @@ async fn accepted(log: &EventLog, step: &str, name: &str) -> u64 {
         .unwrap()
 }
 fn rows(db: &Connection) -> Vec<(maka_agent_facts::history::RowPosition, Vec<u8>, String)> {
-    db.prepare("SELECT source_sequence, item_index, payload, digest FROM transcript_rows ORDER BY source_sequence, item_index")
+    db.prepare("SELECT source_sequence, item_index, payload, digest FROM transcript_cache.rows ORDER BY source_sequence, item_index")
         .unwrap()
         .query_map([], |row| Ok((maka_agent_facts::history::RowPosition { source_sequence: row.get::<_, i64>(0)? as u64, item_index: row.get::<_, i64>(1)? as u64 }, row.get(2)?, row.get(3)?)))
         .unwrap()
@@ -210,11 +207,10 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         .await
         .unwrap();
     let notices = log.subscribe_commits();
-    let db = Connection::open(&path).unwrap();
     // A historical fence sees the planned provider call, but no later dispatch,
     // nested call, result or rejection from the already-existing future suffix.
     materialize_all(&log, accepted_fence).await;
-    let first = rows(&db);
+    let first = crate::test_store::inspect(&log, rows).await;
     assert_eq!(first.len(), 3);
     let parent_id = tool_message_id("invocation", parent);
     let planned: Value = serde_json::from_slice(&first[2].1).unwrap();
@@ -229,7 +225,7 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         !notices.has_changed().unwrap(),
         "derived cache must not publish execution commits"
     );
-    let original = rows(&db);
+    let original = crate::test_store::inspect(&log, rows).await;
     assert_eq!(&original[..3], first.as_slice());
     assert_eq!(original.len(), 17);
     let values: Vec<Value> = original
@@ -331,13 +327,16 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         "search emits no execution commits"
     );
     let canonical = log.prefix(128, 32 * 1024 * 1024).await.unwrap().digest;
-    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-        .unwrap();
+    crate::test_store::inspect(&log, move |db| {
+        db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+            .unwrap()
+    })
+    .await;
     log.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
     materialize_all(&reopened, through).await;
     assert_eq!(
-        rows(&db),
+        crate::test_store::inspect(&reopened, rows).await,
         original,
         "replaying earlier call evidence must be idempotent"
     );
@@ -345,9 +344,19 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         reopened.prefix(128, 32 * 1024 * 1024).await.unwrap().digest,
         canonical
     );
-    db.execute("DELETE FROM transcript_rows", []).unwrap();
-    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-        .unwrap();
+    crate::test_store::inspect(&reopened, move |db| {
+        db.execute("DELETE FROM transcript_cache.rows", []).unwrap()
+    })
+    .await;
+    crate::test_store::inspect(&reopened, move |db| {
+        db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+            .unwrap()
+    })
+    .await;
     materialize_all(&reopened, through).await;
-    assert_eq!(rows(&db), original, "the complete index is disposable");
+    assert_eq!(
+        crate::test_store::inspect(&reopened, rows).await,
+        original,
+        "the complete index is disposable"
+    );
 }

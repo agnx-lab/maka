@@ -17,9 +17,6 @@
  * under the License.
  */
 
-#[path = "support/transcript.rs"]
-mod transcript_cache;
-
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationInput;
@@ -38,29 +35,29 @@ use rusqlite::Connection;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-#[path = "transcript_index/accepted_observations.rs"]
+#[path = "accepted_observations.rs"]
 mod accepted_observations;
-#[path = "transcript_index/fixtures.rs"]
+#[path = "fixtures.rs"]
 mod fixtures;
-#[path = "transcript_index/history.rs"]
+#[path = "history.rs"]
 mod history;
-#[path = "transcript_index/image.rs"]
+#[path = "image.rs"]
 mod image;
-#[path = "transcript_index/interrupted_ancestry.rs"]
+#[path = "interrupted_ancestry.rs"]
 mod interrupted_ancestry;
-#[path = "transcript_index/large_siblings.rs"]
+#[path = "large_siblings.rs"]
 mod large_siblings;
-#[path = "transcript_index/observation_count.rs"]
+#[path = "observation_count.rs"]
 mod observation_count;
-#[path = "transcript_index/performance.rs"]
+#[path = "performance.rs"]
 mod performance;
-#[path = "transcript_index/performance_executor.rs"]
+#[path = "performance_executor.rs"]
 mod performance_executor;
-#[path = "transcript_index/prefix_replay.rs"]
+#[path = "prefix_replay.rs"]
 mod prefix_replay;
-#[path = "transcript_index/source.rs"]
+#[path = "source.rs"]
 mod source;
-#[path = "transcript_index/sparse_directory.rs"]
+#[path = "sparse_directory.rs"]
 mod sparse_directory;
 use fixtures::*;
 
@@ -131,7 +128,7 @@ async fn completed_bytes_digest_identity_reopen_and_selected_rebuild() {
         .unwrap();
     assert!(!wake.has_changed().unwrap());
     let db = Connection::open(&path).unwrap();
-    let original = rows(&db, "a");
+    let original = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert_eq!(original.len(), 5);
     let assistant: Value = serde_json::from_slice(&original[2].1).unwrap();
     assert_eq!(assistant["id"], id);
@@ -144,18 +141,27 @@ async fn completed_bytes_digest_identity_reopen_and_selected_rebuild() {
         );
     }
     // Optional bodies may be discarded; selected reconstruction preserves the same rows.
-    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-        .unwrap();
+    crate::test_store::inspect(&log, move |db| {
+        db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+            .unwrap()
+    })
+    .await;
     crate::transcript_cache::materialize_all_rows(&log, "a", through)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), original);
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+        original
+    );
     log.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
     crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), original);
+    assert_eq!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "a")).await,
+        original
+    );
     let canonical = serde_json::to_vec(&reopened.prefix(32, 65536).await.unwrap()).unwrap();
     // This real completed producer emits assistant then usage. Derive positions
     // from the emitted fixture, rather than assuming fixed event/ordinal numbers.
@@ -182,13 +188,13 @@ async fn completed_bytes_digest_identity_reopen_and_selected_rebuild() {
     let usage_item = i64::try_from(usage_row.0.item_index).unwrap();
     // Preserve the original byte-identity refusal: a missing sibling triggers
     // whole-S reconstruction, which must not overwrite an existing bad payload.
-    db.execute("UPDATE transcript_rows SET payload=X'00' WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[assistant_source,assistant_item]).unwrap();
-    db.execute(
-        "DELETE FROM transcript_rows WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",
+    crate::test_store::inspect(&reopened, move |db| { db.execute("UPDATE transcript_cache.rows SET payload=X'00' WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[assistant_source,assistant_item]).unwrap() }).await;
+    crate::test_store::inspect(&reopened, move |db| { db.execute(
+        "DELETE FROM transcript_cache.rows WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",
         [usage_source, usage_item],
     )
-    .unwrap();
-    let damaged = rows(&db, "a");
+    .unwrap() }).await;
+    let damaged = crate::test_store::inspect(&reopened, |db| rows(db, "a")).await;
     assert!(matches!(
         reopened
             .transcript_headers(
@@ -203,22 +209,30 @@ async fn completed_bytes_digest_identity_reopen_and_selected_rebuild() {
             .await,
         Err(StoreError::TranscriptConflict)
     ));
-    assert_eq!(rows(&db, "a"), damaged);
+    assert_eq!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "a")).await,
+        damaged
+    );
     assert_eq!(
         serde_json::to_vec(&reopened.prefix(32, 65536).await.unwrap()).unwrap(),
         canonical
     );
-    db.execute("UPDATE transcript_rows SET payload=?1 WHERE session_id='a' AND source_sequence=?2 AND item_index=?3",rusqlite::params![&assistant_row.1,assistant_source,assistant_item]).unwrap();
+    let restore_payload = assistant_row.1.clone();
+    crate::test_store::inspect(&reopened, move |db| { db.execute("UPDATE transcript_cache.rows SET payload=?1 WHERE session_id='a' AND source_sequence=?2 AND item_index=?3",rusqlite::params![restore_payload,assistant_source,assistant_item]).unwrap() }).await;
     crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), original);
+    assert_eq!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "a")).await,
+        original
+    );
     // Cache hits retain their separate directory-identity check without hashing
     // every cached payload on each fragment.
-    db.execute(
-        "UPDATE transcript_rows SET turn_id = 'wrong-turn' WHERE source_sequence = ? AND item_index = ?",
-        [i64::try_from(original[1].0.source_sequence).unwrap(),i64::try_from(original[1].0.item_index).unwrap()],
-    ).unwrap();
+    let identity_position = original[1].0;
+    crate::test_store::inspect(&reopened, move |db| { db.execute(
+        "UPDATE transcript_cache.rows SET turn_id = 'wrong-turn' WHERE source_sequence = ? AND item_index = ?",
+        [i64::try_from(identity_position.source_sequence).unwrap(),i64::try_from(identity_position.item_index).unwrap()],
+    ).unwrap() }).await;
     assert!(matches!(
         crate::transcript_cache::materialize_all_rows(&reopened, "a", through).await,
         Err(StoreError::TranscriptConflict)
@@ -228,25 +242,21 @@ async fn completed_bytes_digest_identity_reopen_and_selected_rebuild() {
         canonical
     );
     reopened.close().await.unwrap();
-    db.execute(
-        "UPDATE transcript_rows SET turn_id='turn-a' WHERE session_id='a'",
-        [],
-    )
-    .unwrap();
     db.close().map_err(|(_, error)| error).unwrap();
     // All connections are now closed (including the last SQLite connection's
     // WAL close/checkpoint). Copy this task fixture, never a live-WAL DB or hardlink.
     for operation in ["headers", "fragment", "turn_bounds"] {
         let copy = temp.path().join(format!("{operation}.sqlite"));
         std::fs::copy(&path, &copy).unwrap();
-        let fault = Connection::open(&copy).unwrap();
+        let copied = EventLog::open(&copy).await.unwrap();
+        crate::transcript_cache::materialize_all_rows(&copied, "a", through)
+            .await
+            .unwrap();
         // A miss inserts the first emitted row, then the existing second row
         // fails the exact byte comparison. Only optional cache bytes are damaged.
-        fault.execute("DELETE FROM transcript_rows WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[assistant_source,assistant_item]).unwrap();
-        fault.execute("UPDATE transcript_rows SET payload=X'00' WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[usage_source,usage_item]).unwrap();
-        let before = rows(&fault, "a");
-        fault.close().map_err(|(_, error)| error).unwrap();
-        let copied = EventLog::open(&copy).await.unwrap();
+        crate::test_store::inspect(&copied, move |fault| { fault.execute("DELETE FROM transcript_cache.rows WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[assistant_source,assistant_item]).unwrap() }).await;
+        crate::test_store::inspect(&copied, move |fault| { fault.execute("UPDATE transcript_cache.rows SET payload=X'00' WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[usage_source,usage_item]).unwrap() }).await;
+        let before = crate::test_store::inspect(&copied, |db| rows(db, "a")).await;
         let error = match operation {
             "headers" => copied
                 .transcript_headers(
@@ -278,13 +288,12 @@ async fn completed_bytes_digest_identity_reopen_and_selected_rebuild() {
             serde_json::to_vec(&copied.prefix(32, 65536).await.unwrap()).unwrap(),
             canonical
         );
-        copied.close().await.unwrap();
-        let after = Connection::open(&copy).unwrap();
         assert_eq!(
-            rows(&after, "a"),
+            crate::test_store::inspect(&copied, |db| rows(db, "a")).await,
             before,
             "{operation}: failed source fill must roll back its first row"
         );
+        copied.close().await.unwrap();
     }
 }
 
@@ -322,8 +331,7 @@ async fn interleaved_stream_preserves_order_and_excludes_other_session_evidence(
         .await
         .unwrap();
 
-    let db = Connection::open(&path).unwrap();
-    let projected = rows(&db, "a");
+    let projected = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert_eq!(projected.len(), 3);
     let assistant: Value = serde_json::from_slice(&projected[2].1).unwrap();
     assert_eq!(assistant["id"], id);
@@ -333,13 +341,16 @@ async fn interleaved_stream_preserves_order_and_excludes_other_session_evidence(
     crate::transcript_cache::materialize_all_rows(&log, "b", other)
         .await
         .unwrap();
-    let other_rows = rows(&db, "b");
+    let other_rows = crate::test_store::inspect(&log, |db| rows(db, "b")).await;
     let assistant: Value = serde_json::from_slice(&other_rows[2].1).unwrap();
     assert_eq!(
         assistant["text"],
         format!("unrelated{}", "not part of a".repeat(1024))
     );
-    assert_eq!(rows(&db, "a"), projected);
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+        projected
+    );
 }
 
 #[tokio::test]
@@ -357,7 +368,6 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
         },
     )
     .await;
-    let db = Connection::open(&path).unwrap();
     let invocation = event("a", opening()).event().invocation.clone();
     let overlay = log.active_transcript(&invocation, live).await.unwrap();
     assert_eq!(overlay.len(), 1);
@@ -377,7 +387,7 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
     crate::transcript_cache::materialize_all_rows(&log, "a", live)
         .await
         .unwrap();
-    let running = rows(&db, "a");
+    let running = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert_eq!(running.len(), 2);
     let state: Value = serde_json::from_slice(&running[1].1).unwrap();
     assert_eq!(state["type"], "turn_state");
@@ -389,7 +399,7 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
     crate::transcript_cache::materialize_all_rows(&log, "a", interrupted)
         .await
         .unwrap();
-    let frozen = rows(&db, "a");
+    let frozen = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert_eq!(frozen.len(), 3);
     let assistant: Value = serde_json::from_slice(&frozen[2].1).unwrap();
     assert_eq!(assistant["id"], id);
@@ -397,7 +407,7 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
     crate::transcript_cache::materialize_all_rows(&log, "a", ended)
         .await
         .unwrap();
-    let final_rows = rows(&db, "a");
+    let final_rows = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert_eq!(&final_rows[..3], frozen.as_slice());
     assert_eq!(final_rows.len(), 4); // no invented unknown usage
     let terminal: Value = serde_json::from_slice(&final_rows[3].1).unwrap();
@@ -413,19 +423,33 @@ async fn directory_fences_and_sparse_body_session_isolation() {
     log.append(&event("b", opening())).await.unwrap();
     let a_end = end(&log, "a", InvocationOutcome::Completed).await;
     let through = end(&log, "b", InvocationOutcome::Completed).await;
-    let db = Connection::open(&path).unwrap();
-    assert!(rows(&db, "a").is_empty() && rows(&db, "b").is_empty());
+    assert!(
+        crate::test_store::inspect(&log, |db| rows(db, "a"))
+            .await
+            .is_empty()
+            && crate::test_store::inspect(&log, |db| rows(db, "b"))
+                .await
+                .is_empty()
+    );
     crate::transcript_cache::materialize_all_rows(&log, "a", through)
         .await
         .unwrap();
     assert_eq!(
-        rows(&db, "a").last().unwrap().0,
+        crate::test_store::inspect(&log, |db| rows(db, "a"))
+            .await
+            .last()
+            .unwrap()
+            .0,
         RowPosition {
             source_sequence: a_end,
             item_index: 0
         }
     );
-    assert!(rows(&db, "b").is_empty());
+    assert!(
+        crate::test_store::inspect(&log, |db| rows(db, "b"))
+            .await
+            .is_empty()
+    );
     assert!(
         crate::transcript_cache::materialize_all_rows(&log, "a", through + 1)
             .await
@@ -467,8 +491,7 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
                 .unwrap()
                 .is_empty()
         );
-        let db = Connection::open(&path).unwrap();
-        let original = rows(&db, "a");
+        let original = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
         assert_eq!(original.len(), 4); // user, running, factual partial, terminal; no usage
         let assistant: Value = serde_json::from_slice(&original[2].1).unwrap();
         assert_eq!(assistant["id"], id);
@@ -502,14 +525,20 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
             }
         );
         // Index reset and process reopen must not drop or relabel the prefix.
-        db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-            .unwrap();
+        crate::test_store::inspect(&log, move |db| {
+            db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+                .unwrap()
+        })
+        .await;
         log.close().await.unwrap();
         let reopened = EventLog::open(&path).await.unwrap();
         crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
             .await
             .unwrap();
-        assert_eq!(rows(&db, "a"), original);
+        assert_eq!(
+            crate::test_store::inspect(&reopened, |db| rows(db, "a")).await,
+            original
+        );
         assert_eq!(
             reopened.active_transcript(&invocation, live).await.unwrap(),
             overlay
@@ -525,11 +554,10 @@ async fn complete_projection_and_malformed_source_preserve_canonical_admission()
     let expected = "x".repeat(16 * 1024 * 1024);
     let (id, _) = partial(&log, "a", &expected).await;
     let through = interrupt(&log, "a").await;
-    let db = Connection::open(&path).unwrap();
     crate::transcript_cache::materialize_all_rows(&log, "a", through)
         .await
         .unwrap();
-    let original = rows(&db, "a");
+    let original = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert_eq!(original.len(), 3);
     let assistant: Value = serde_json::from_slice(&original[2].1).unwrap();
     assert_eq!(assistant["id"], id);
@@ -537,13 +565,16 @@ async fn complete_projection_and_malformed_source_preserve_canonical_admission()
         assistant["text"].as_str() == Some(expected.as_str()),
         "complete assistant text must survive projection"
     );
-    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-        .unwrap();
+    crate::test_store::inspect(&log, move |db| {
+        db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+            .unwrap()
+    })
+    .await;
     crate::transcript_cache::materialize_all_rows(&log, "a", through)
         .await
         .unwrap();
     assert!(
-        rows(&db, "a") == original,
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await == original,
         "cold rebuild must preserve full rows, digests and positions"
     );
     log.append(&event("b", opening())).await.unwrap();
@@ -566,7 +597,11 @@ async fn complete_projection_and_malformed_source_preserve_canonical_admission()
         Err(StoreError::InvalidTransition(message)) if message.contains(&format!("history source {through}:"))
     ));
 
-    assert!(rows(&db, "b").is_empty());
+    assert!(
+        crate::test_store::inspect(&log, |db| rows(db, "b"))
+            .await
+            .is_empty()
+    );
     log.close().await.unwrap();
 }
 
@@ -669,8 +704,7 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
     crate::transcript_cache::materialize_all_rows(&log, "fanout", through)
         .await
         .unwrap();
-    let db = Connection::open(&path).unwrap();
-    let original = rows(&db, "fanout");
+    let original = crate::test_store::inspect(&log, |db| rows(db, "fanout")).await;
     let completed: Vec<_> = original
         .iter()
         .filter(|row| row.0.source_sequence == completion)
@@ -958,15 +992,21 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
     assert_eq!(search.matches.len(), 1);
     assert_eq!(search.matches[0].position, result_position);
     let canonical = log.prefix(1024, 8 * 1024 * 1024).await.unwrap().digest;
+    crate::test_store::inspect(&log, |db| {
+        for table in ["transcript_cache.text", "transcript_cache.rows"] {
+            db.execute(&format!("DELETE FROM {table}"), []).unwrap();
+        }
+    })
+    .await;
     log.close().await.unwrap();
-    for table in ["transcript_text", "transcript_rows"] {
-        db.execute(&format!("DELETE FROM {table}"), []).unwrap();
-    }
     let reopened = EventLog::open(&path).await.unwrap();
     crate::transcript_cache::materialize_all_rows(&reopened, "fanout", through)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "fanout"), original);
+    assert_eq!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "fanout")).await,
+        original
+    );
     assert_eq!(
         reopened.prefix(1024, 8 * 1024 * 1024).await.unwrap().digest,
         canonical

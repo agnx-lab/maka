@@ -183,8 +183,16 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
             crate::transcript_cache::materialize_all_rows(&log, "a", unaccepted)
                 .await
                 .unwrap();
-            assert_eq!(rows(&db, "a"), expected(&events, unaccepted));
-            assert_eq!(rows(&db, "a").len(), 2);
+            assert_eq!(
+                crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+                expected(&events, unaccepted)
+            );
+            assert_eq!(
+                crate::test_store::inspect(&log, |db| rows(db, "a"))
+                    .await
+                    .len(),
+                2
+            );
             let unaccepted_page = page(&log, unaccepted).await;
             let mut cold = Vec::new();
             for (index, &cut) in cuts.iter().enumerate() {
@@ -192,7 +200,7 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
                     .await
                     .unwrap();
 
-                let actual = rows(&db, "a");
+                let actual = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
                 assert_eq!(actual, expected(&events, cut));
                 assert_eq!(actual.len(), if accepted { 3 + index } else { 2 });
                 if accepted {
@@ -220,7 +228,10 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
             crate::transcript_cache::materialize_all_rows(&log, "a", later)
                 .await
                 .unwrap();
-            assert_eq!(rows(&db, "a"), expected(&events, later));
+            assert_eq!(
+                crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+                expected(&events, later)
+            );
             for (&cut, original) in cuts.iter().zip(&cold) {
                 assert_eq!(page(&log, cut).await, *original);
             }
@@ -233,7 +244,13 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
                 assert_eq!(page(&reopened, cut).await, *original);
             }
             let db = Connection::open(&path).unwrap();
-            assert_eq!(rows(&db, "a"), expected(&events, later));
+            crate::transcript_cache::materialize_all_rows(&reopened, "a", later)
+                .await
+                .unwrap();
+            assert_eq!(
+                crate::test_store::inspect(&reopened, |db| rows(db, "a")).await,
+                expected(&events, later)
+            );
 
             assert_eq!(page(&reopened, unaccepted).await, unaccepted_page);
             assert_eq!(canonical_bytes(&db), canonical);
@@ -283,6 +300,11 @@ async fn accepted_observation_directory_survives_missing_optional_bodies_and_reo
     let (cuts, _, events) = seed(&log, true, false).await;
     let old = cuts[0];
     let original = page(&log, old).await;
+    crate::test_store::inspect(&log, move |db| {
+        db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+            .unwrap()
+    })
+    .await;
     log.close().await.unwrap();
     let db = Connection::open(&path).unwrap();
     let canonical = canonical_bytes(&db);
@@ -293,15 +315,21 @@ async fn accepted_observation_directory_survives_missing_optional_bodies_and_reo
             |r| r.get(0),
         )
         .unwrap();
-    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-        .unwrap();
+
     let reopened = EventLog::open(&path).await.unwrap();
-    assert!(rows(&db, "a").is_empty());
+    assert!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "a"))
+            .await
+            .is_empty()
+    );
     assert_eq!(page(&reopened, old).await, original);
     crate::transcript_cache::materialize_all_rows(&reopened, "a", old)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), expected(&events, old));
+    assert_eq!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "a")).await,
+        expected(&events, old)
+    );
     assert_eq!(
         db.query_row(
             "SELECT count(*) FROM transcript_directory WHERE session_id='a'",

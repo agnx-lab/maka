@@ -258,8 +258,8 @@ impl EventLog {
                     for statement in [
                         "DELETE FROM session_history_artifacts WHERE session_id=?",
                         "DELETE FROM session_revision_sources WHERE session_id=?",
-                        "DELETE FROM transcript_rows WHERE session_id=?",
-                        "DELETE FROM transcript_text WHERE session_id=?",
+                        "DELETE FROM transcript_cache.rows WHERE session_id=?",
+                        "DELETE FROM transcript_cache.text WHERE session_id=?",
                         "DELETE FROM transcript_directory WHERE session_id=?",
                         "DELETE FROM transcript_failures WHERE session_id=?",
                         "DELETE FROM catalog_messages WHERE session_id=?",

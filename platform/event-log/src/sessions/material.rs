@@ -99,7 +99,7 @@ impl EventLog {
             }
             // No live owner remains. Retained facts/membership, not UI metadata,
             // remain the material-collection authority; descendants were checked above.
-            for table in ["transcript_directory", "transcript_failures", "transcript_rows", "transcript_text"] {
+            for table in ["transcript_directory", "transcript_failures", "transcript_cache.rows", "transcript_cache.text"] {
                 let sql = format!("DELETE FROM {table} WHERE session_id=?");
                 sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(&session).execute(&mut *tx).await?;
             }

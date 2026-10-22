@@ -248,6 +248,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
             .bytes,
         bytes[..8192]
     );
+    let copied_id: String = crate::test_store::inspect(&log, move |db| { db.query_row("SELECT json_extract(payload,'$.content.ref.relativePath') FROM transcript_cache.rows WHERE session_id='copy' AND source_sequence=? AND item_index=?",[copied_sequence.source_sequence as i64, copied_sequence.item_index as i64],|row|row.get(0)).unwrap() }).await;
     assert!(!dir.path().join(&artifact.id).exists());
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
@@ -294,7 +295,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
             .is_err()
     );
     db.execute("UPDATE artifacts SET record_json=json_set(record_json,'$.mimeType','image/gif','$.source','user_upload') WHERE session_id='images' AND id=?",[&artifact.id]).unwrap();
-    let copied_id: String = db.query_row("SELECT json_extract(payload,'$.content.ref.relativePath') FROM transcript_rows WHERE session_id='copy' AND source_sequence=? AND item_index=?",[copied_sequence.source_sequence as i64, copied_sequence.item_index as i64],|row|row.get(0)).unwrap();
+
     db.execute("UPDATE artifacts SET record_json=json_set(record_json,'$.source','user_upload') WHERE session_id='copy' AND id=?",[&copied_id]).unwrap();
     assert!(
         log.tool_image("copy", copy_fence, copied_sequence, 0, 8192)

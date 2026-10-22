@@ -380,3 +380,31 @@ fn sequence_number(value: i64) -> Result<u64, StoreError> {
     u64::try_from(value)
         .map_err(|_| StoreError::InvalidTransition("negative ledger sequence".into()))
 }
+
+// Cache fault injection must run on the original private-cache owner.
+#[cfg(test)]
+extern crate self as maka_event_log;
+#[cfg(test)]
+#[path = "../tests/compact_presentation/mod.rs"]
+mod compact_presentation_tests;
+#[cfg(test)]
+#[path = "../tests/executor_identity/mod.rs"]
+mod executor_identity_tests;
+#[cfg(test)]
+#[path = "../tests/row_directory/mod.rs"]
+mod row_directory_tests;
+#[cfg(test)]
+#[path = "../tests/session_copy/mod.rs"]
+mod session_copy_tests;
+#[cfg(test)]
+#[path = "../tests/support/owner.rs"]
+mod test_store;
+#[cfg(test)]
+#[path = "../tests/support/transcript.rs"]
+mod transcript_cache;
+#[cfg(test)]
+#[path = "../tests/transcript_index/mod.rs"]
+mod transcript_index_tests;
+#[cfg(test)]
+#[path = "../tests/transcript_tools/mod.rs"]
+mod transcript_tools_tests;

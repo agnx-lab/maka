@@ -29,7 +29,7 @@ use maka_agent_ports::session::history::Page;
 use maka_agent_ports::session::history::Position;
 use maka_agent_ports::session::history::Role;
 use maka_agent_ports::session::history::{HistoryField, HistoryView};
-use sqlx::{Connection, Row, SqliteConnection};
+use sqlx::{Row, SqliteConnection};
 
 // Text windows and exact source reads retain material labels in their body.
 pub(super) const BODY: &str = "COALESCE(CASE json_extract(payload, '$.type')
@@ -125,10 +125,9 @@ impl EventLog {
         // therefore bounds rows even when a caller needs no item-count limit.
         let max_chunks = max_chunks.unwrap_or(max_json_bytes).min(max_json_bytes);
         let session = session.to_owned();
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
+        self.connection.run(move |connection| super::bodycache::run(connection, move |tx| Box::pin(async move {
             let mut final_outputs = std::collections::HashMap::new();
-            super::directory::check_read(&mut tx, &session, fence).await?;
+            super::directory::check_read(tx, &session, fence).await?;
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)"
             ).bind(&session).fetch_one(&mut *tx).await?;
@@ -138,10 +137,10 @@ impl EventLog {
                     || (!include_thinking && field == HistoryField::Thinking) {
                     return Err(invalid("history row exceeds its fence"));
                 }
-                materialize(&mut tx, &session, position, view, through_sql).await?;
+                materialize(tx, &session, position, view, through_sql).await?;
                 // Header lookup requires the actual field; a tool Body cannot
                 // impersonate a Thinking field that was never recorded.
-                header(&mut tx, &session, position, field, view, through_sql).await?;
+                header(tx, &session, position, field, view, through_sql).await?;
                 Some((position, field))
             } else { None };
             let anchor = match position {
@@ -150,13 +149,13 @@ impl EventLog {
                         return Err(invalid("history cursor exceeds its fence"));
                     }
                     sql_number(cursor.offset)?;
-                    materialize(&mut tx, &session, cursor.position, view, through_sql).await?;
-                    let row = header(&mut tx, &session, cursor.position, cursor.field, view, through_sql).await?;
+                    materialize(tx, &session, cursor.position, view, through_sql).await?;
+                    let row = header(tx, &session, cursor.position, cursor.field, view, through_sql).await?;
                     if cursor.offset > row.total {
                         return Err(invalid("history offset exceeds message"));
                     }
                     let byte = if cursor.offset == row.total { Vec::new() } else {
-                        fragment(&mut tx, &session, cursor, 1,
+                        fragment(tx, &session, cursor, 1,
                             view == HistoryView::Conversation && row.role == "user").await?
                     };
                     if byte.first().is_some_and(|byte| byte & 0xc0 == 0x80) {
@@ -205,7 +204,7 @@ impl EventLog {
                 let locator = row_position(locator.0, locator.1)?;
                 // Materialize only actually visited rows, never a long message's
                 // following rows. One oversized first row still progresses.
-                projected += materialize(&mut tx, &session, locator, view, through_sql).await?;
+                projected += materialize(tx, &session, locator, view, through_sql).await?;
                 let has_thinking: bool = include_thinking && sqlx::query_scalar(
                     "SELECT has_thinking FROM transcript_directory WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
                 ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
@@ -217,7 +216,7 @@ impl EventLog {
                     if target == Some((locator, HistoryField::Body)) && field == HistoryField::Thinking {
                         continue;
                     }
-                    let row = header(&mut tx, &session, locator, field, view, through_sql).await?;
+                    let row = header(tx, &session, locator, field, view, through_sql).await?;
                     let exact_target = target == Some((locator, field));
                     if let Some((cursor, _)) = &anchor && cursor.position == locator {
                         let before = field == HistoryField::Thinking && cursor.field == HistoryField::Body;
@@ -235,7 +234,7 @@ impl EventLog {
                         (start, row.total.min(start + (max_bytes - bytes) as u64))
                     };
                     let fragment = if row.total == 0 { Vec::new() } else {
-                        fragment(&mut tx, &session, Cursor { field, position: locator, offset: start }, end - start,
+                        fragment(tx, &session, Cursor { field, position: locator, offset: start }, end - start,
                             view == HistoryView::Conversation && row.role == "user").await?
                     };
                     let text = if reverse {
@@ -258,7 +257,7 @@ impl EventLog {
                     let candidate_right = if reverse { right.or(Some(ending)) } else { Some(ending) };
                     let attachments: Vec<maka_agent_facts::attachment::AttachmentRef> = if start == 0 && row.role == "user" {
                         let encoded: Option<String> = sqlx::query_scalar(
-                            "SELECT json_extract(payload, '$.attachments') FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+                            "SELECT json_extract(payload, '$.attachments') FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
                         ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         encoded.map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default()
                     } else { Vec::new() };
@@ -275,12 +274,12 @@ impl EventLog {
                         _ => return Err(invalid("invalid history text role")),
                     };
                     let tool = if matches!(role, Role::ToolCall | Role::ToolResult) {
-                        Some(tool_metadata(&mut tx, &session, locator, through_sql).await?)
+                        Some(tool_metadata(tx, &session, locator, through_sql).await?)
                     } else { None };
-                    let timing = super::timing::read(&mut tx, &session, &row.turn, through_sql).await?;
+                    let timing = super::timing::read(tx, &session, &row.turn, through_sql).await?;
                     let compaction = if role == Role::Compaction {
                         let duration: i64 = sqlx::query_scalar(
-                            "SELECT json_extract(payload, '$.durationMs') FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+                            "SELECT json_extract(payload, '$.durationMs') FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
                         ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         Some(maka_agent_ports::session::history::Compaction { duration_ms: sequence_number(duration)? })
                     } else { None };
@@ -288,9 +287,9 @@ impl EventLog {
                         let output = match final_outputs.entry(row.turn.clone()) {
                             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
                             std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
-                                super::final_output::resolve(&mut tx, &session, &row.turn, through_sql).await?),
+                                super::final_output::resolve(tx, &session, &row.turn, through_sql).await?),
                         };
-                        let metadata = super::model::resolve(&mut tx, &session, locator, through_sql).await?;
+                        let metadata = super::model::resolve(tx, &session, locator, through_sql).await?;
                         let final_output = field == HistoryField::Body && row.total > 0 && metadata.producer.as_ref().is_some_and(|producer|
                             output.as_ref() == Some(producer));
                         (metadata.model, final_output)
@@ -305,7 +304,7 @@ impl EventLog {
                     // Bound the complete canonical delivery, including attachment
                     // descriptors and JSON escaping. A rejected candidate does not
                     // advance the source boundary or silently discard any metadata.
-                    let (before, after) = boundaries(&mut tx, &session, through_sql, include_thinking, candidate_left, candidate_right).await?;
+                    let (before, after) = boundaries(tx, &session, through_sql, include_thinking, candidate_left, candidate_right).await?;
                     // The empty envelope includes []; each chunk adds its exact
                     // encoded bytes, plus commas between elements. Cursor changes
                     // still count even when this boundary emits no chunk.
@@ -332,17 +331,17 @@ impl EventLog {
                     ).bind(&session).bind(through_sql).fetch_optional(&mut *tx).await?;
                     if let Some(locator) = last {
                         let locator = row_position(locator.0, locator.1)?;
-                        materialize(&mut tx, &session, locator, view, through_sql).await?;
-                        let row = header(&mut tx, &session, locator, HistoryField::Body, view, through_sql).await?;
+                        materialize(tx, &session, locator, view, through_sql).await?;
+                        let row = header(tx, &session, locator, HistoryField::Body, view, through_sql).await?;
                         let cursor = Cursor { field: HistoryField::Body, position: locator, offset: row.total };
                         left = Some(cursor); right = Some((cursor, row.total));
                     }
                 }
             }
-            let (before, after) = boundaries(&mut tx, &session, through_sql, include_thinking, left, right).await?;
-            tx.commit().await?;
+            let (before, after) = boundaries(tx, &session, through_sql, include_thinking, left, right).await?;
+
             Ok(Page::Ready { through, chunks, before, after })
-        })).await
+        }))).await
     }
 }
 
@@ -401,7 +400,7 @@ async fn header(
     let row = sqlx::query(
         "SELECT source.message_id, source.turn_id, source.timestamp, source.role, length(cached.body),
             CASE WHEN source.role = 'user' THEN source.user_origin END
-            FROM transcript_directory source JOIN transcript_text cached USING(session_id, source_sequence, item_index)
+            FROM transcript_directory source JOIN transcript_cache.text cached USING(session_id, source_sequence, item_index)
             WHERE source.session_id = ?1 AND source.source_sequence = ?2 AND item_index = ?3 AND cached.field = ?4"
     ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(field_name(field)).fetch_one(&mut *tx).await?;
     let mut header = Header {
@@ -418,7 +417,7 @@ async fn header(
     };
     if view == HistoryView::Conversation && field == HistoryField::Body && header.role == "user" {
         let query = format!(
-            "SELECT length(CAST({CONVERSATION_USER} AS BLOB)) FROM transcript_rows
+            "SELECT length(CAST({CONVERSATION_USER} AS BLOB)) FROM transcript_cache.rows
             WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
         );
         header.total = sequence_number(
@@ -442,11 +441,11 @@ async fn fragment(
 ) -> Result<Vec<u8>, StoreError> {
     let query = if conversation_user {
         format!(
-            "SELECT substr(CAST({CONVERSATION_USER} AS BLOB), ?4, ?5) FROM transcript_rows
+            "SELECT substr(CAST({CONVERSATION_USER} AS BLOB), ?4, ?5) FROM transcript_cache.rows
             WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
         )
     } else {
-        "SELECT substr(body, ?4, ?5) FROM transcript_text
+        "SELECT substr(body, ?4, ?5) FROM transcript_cache.text
             WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = ?6"
             .into()
     };
@@ -557,8 +556,8 @@ async fn materialize(
     }
     super::bodycache::ensure(tx, session, locator).await?;
     let source: Option<(i64, bool)> = sqlx::query_as(
-        "SELECT total_bytes, EXISTS(SELECT 1 FROM transcript_text cached WHERE cached.session_id = source.session_id AND cached.source_sequence = source.source_sequence AND cached.item_index = source.item_index AND cached.field = 'body')
-            FROM transcript_rows source WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+        "SELECT total_bytes, EXISTS(SELECT 1 FROM transcript_cache.text cached WHERE cached.session_id = source.session_id AND cached.source_sequence = source.source_sequence AND cached.item_index = source.item_index AND cached.field = 'body')
+            FROM transcript_cache.rows source WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
     ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_optional(&mut *tx).await?;
     let Some((bytes, cached)) = source else {
         return Err(invalid("history row was not found"));
@@ -567,14 +566,14 @@ async fn materialize(
         return Ok(0);
     }
     let query = format!(
-        "INSERT INTO transcript_text
+        "INSERT INTO transcript_cache.text
             SELECT session_id, source_sequence, item_index, 'body', json_extract(payload, '$.ts'), json_extract(payload, '$.type'),
                 CAST({BODY} AS BLOB)
-            FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
+            FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
             UNION ALL
             SELECT session_id, source_sequence, item_index, 'thinking', json_extract(payload, '$.ts'), 'assistant',
                 CAST(json_extract(payload, '$.thinking.text') AS BLOB)
-            FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
+            FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
                 AND json_extract(payload, '$.type') = 'assistant' AND json_type(payload, '$.thinking.text') = 'text'"
     );
     sqlx::query(sqlx::AssertSqlSafe(query.as_str()))
@@ -601,6 +600,7 @@ fn field_name(field: HistoryField) -> &'static str {
 mod tests {
     use super::*;
     use serde_json::json;
+    use sqlx::Connection;
 
     #[tokio::test]
     async fn conversation_retains_trace_parents_and_hides_transport_helpers() {

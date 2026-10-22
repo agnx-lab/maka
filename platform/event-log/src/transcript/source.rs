@@ -55,7 +55,7 @@ fn source_sql() -> String {
     json_type(payload, '$.failureMessage') IS 'text' AS failure_message,
     json_type(payload, '$.errorClass') IS 'text' AS error_class,
     json_extract(payload, '$.content.kind') IS 'operation' AS operation
-    FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3),
+    FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3),
     source AS (SELECT
         CASE WHEN ?5 IS NULL THEN body WHEN format = 'json' THEN
             CASE json_type(body, ?5) WHEN 'text' THEN json_extract(body, ?5) ELSE body -> ?5 END END AS body,
@@ -137,9 +137,8 @@ impl EventLog {
         };
         self.connection
             .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin().await?;
-                    super::directory::check_read(&mut tx, &session, fence).await?;
+                super::bodycache::run(connection, move |tx| Box::pin(async move {
+                    super::directory::check_read(tx, &session, fence).await?;
                     let exists: bool = sqlx::query_scalar(
                         "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)",
                     )
@@ -149,7 +148,7 @@ impl EventLog {
                     if !exists {
                         return Err(invalid("Session no longer exists"));
                     }
-                    super::bodycache::ensure(&mut tx, &session, locator).await?;
+                    super::bodycache::ensure(tx, &session, locator).await?;
                     let sql = source_sql();
                     let header = format!(
                         "{sql} SELECT format, length(CAST(body AS BLOB)), role, thinking, failure_message, error_class, timestamp, operation, message_origin FROM source"
@@ -261,12 +260,12 @@ impl EventLog {
                         return Err(invalid("history source made no progress"));
                     }
                     let tool = if matches!(role, SourceRole::ToolCall | SourceRole::ToolResult) {
-                        Some(tool_metadata(&mut tx, &session, locator, fence_sql).await?)
+                        Some(tool_metadata(tx, &session, locator, fence_sql).await?)
                     } else {
                         None
                     };
                     let model = if role == SourceRole::Assistant {
-                        super::model::resolve(&mut tx, &session, locator, sql_number(through)?).await?.model
+                        super::model::resolve(tx, &session, locator, sql_number(through)?).await?.model
                     } else { None };
                     let source = HistorySource {
                         model,
@@ -283,9 +282,9 @@ impl EventLog {
                         text: text.to_owned(),
                         tool,
                     };
-                    tx.commit().await?;
+
                     Ok(source)
-                })
+                }))
             })
             .await
     }

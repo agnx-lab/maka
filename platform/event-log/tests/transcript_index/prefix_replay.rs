@@ -154,22 +154,39 @@ async fn sibling_sources_match_full_canonical_replay_with_empty_cache_after_reop
     let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     let (through, expected) = seed(&log).await;
-    let db = Connection::open(&path).unwrap();
-    assert!(rows(&db, "a").is_empty());
+    assert!(
+        crate::test_store::inspect(&log, |db| rows(db, "a"))
+            .await
+            .is_empty()
+    );
     crate::transcript_cache::materialize_all_rows(&log, "a", through)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), expected);
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+        expected
+    );
     let canonical = log.prefix(32, 65536).await.unwrap().digest;
+    crate::test_store::inspect(&log, move |db| {
+        db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+            .unwrap()
+    })
+    .await;
     log.close().await.unwrap();
-    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-        .unwrap();
+
     let reopened = EventLog::open(&path).await.unwrap();
-    assert!(rows(&db, "a").is_empty());
+    assert!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "a"))
+            .await
+            .is_empty()
+    );
     crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), expected);
+    assert_eq!(
+        crate::test_store::inspect(&reopened, |db| rows(db, "a")).await,
+        expected
+    );
     assert_eq!(reopened.prefix(32, 65536).await.unwrap().digest, canonical);
     reopened.close().await.unwrap();
 }
@@ -193,14 +210,17 @@ async fn selected_raw_damage_and_cached_identity_conflict_are_not_repaired() {
     crate::transcript_cache::materialize_all_rows(&log, "a", 6)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), expected[..5]);
-    let before = rows(&db, "a");
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+        expected[..5]
+    );
+    let before = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert!(
         matches!(crate::transcript_cache::materialize_all_rows(&log,"a",through).await,
         Err(StoreError::InvalidTransition(message)) if message=="missing or inconsistent durable tool payload")
     );
     assert_eq!(
-        rows(&db, "a"),
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
         before,
         "failed full header batch must roll back its new rows"
     );
@@ -212,17 +232,26 @@ async fn selected_raw_damage_and_cached_identity_conflict_are_not_repaired() {
     crate::transcript_cache::materialize_all_rows(&log, "a", through)
         .await
         .unwrap();
-    assert_eq!(rows(&db, "a"), expected);
-    db.execute(
-        "UPDATE transcript_rows SET turn_id='wrong-turn' WHERE source_sequence=9",
-        [],
-    )
-    .unwrap();
-    let damaged = rows(&db, "a");
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+        expected
+    );
+    crate::test_store::inspect(&log, move |db| {
+        db.execute(
+            "UPDATE transcript_cache.rows SET turn_id='wrong-turn' WHERE source_sequence=9",
+            [],
+        )
+        .unwrap()
+    })
+    .await;
+    let damaged = crate::test_store::inspect(&log, |db| rows(db, "a")).await;
     assert!(matches!(
         crate::transcript_cache::materialize_all_rows(&log, "a", through).await,
         Err(StoreError::TranscriptConflict)
     ));
-    assert_eq!(rows(&db, "a"), damaged);
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, "a")).await,
+        damaged
+    );
     log.close().await.unwrap();
 }

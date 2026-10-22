@@ -479,7 +479,7 @@ async fn migration_37_preserves_interaction_receipts_and_relations_without_json_
             0
         ))
         .unwrap(),
-        37
+        38
     );
     for ((table, columns), original) in tables.iter().zip(original) {
         assert_eq!(rows(&db, table, columns), original);
@@ -718,7 +718,7 @@ async fn migration_37_preserves_artifact_metadata_and_copied_image_provenance() 
             0
         ))
         .unwrap(),
-        37
+        38
     );
     assert_eq!(artifacts(&db), prior);
     assert_eq!(mappings(&db), provenance);

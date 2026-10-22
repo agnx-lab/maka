@@ -132,8 +132,12 @@ async fn more_than_ten_thousand_actual_observations_remain_readable() {
     crate::transcript_cache::materialize_all_rows(&log, session, through)
         .await
         .unwrap();
-    let db = Connection::open(&path).unwrap();
 
-    assert_eq!(rows(&db, session).len(), 4);
+    assert_eq!(
+        crate::test_store::inspect(&log, |db| rows(db, session))
+            .await
+            .len(),
+        4
+    );
     log.close().await.unwrap();
 }

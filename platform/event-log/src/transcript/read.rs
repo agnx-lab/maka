@@ -19,7 +19,7 @@
 
 use crate::{EventLog, StoreError, sequence_number, sessions};
 use maka_agent_facts::history::RowPosition;
-use sqlx::{Connection, Row};
+use sqlx::Row;
 
 #[derive(Clone, Copy, Debug)]
 pub enum TranscriptDirection {
@@ -107,9 +107,8 @@ impl EventLog {
         let fence = read.through;
         let direction = read.direction;
         let limit = read.limit as i64;
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
-            super::directory::check_read(&mut tx, &session, fence).await?;
+        self.connection.run(move |connection| super::bodycache::run(connection, move |tx| Box::pin(async move {
+            super::directory::check_read(tx, &session, fence).await?;
             let query = match (direction, position.is_some()) {
                 (TranscriptDirection::Older, true) => "SELECT source_sequence,item_index,turn_id FROM transcript_directory WHERE session_id=?1 AND (source_sequence,item_index)<=(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
                 (TranscriptDirection::Newer, true) => "SELECT source_sequence,item_index,turn_id FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>=(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
@@ -126,14 +125,14 @@ impl EventLog {
             let mut result = Vec::with_capacity(selected.len());
             for row in selected {
                 let position = row_position(row.try_get(0)?, row.try_get(1)?)?;
-                super::bodycache::ensure(&mut tx, &session, position).await?;
-                let (bytes, digest): (i64, String) = sqlx::query_as("SELECT total_bytes,digest FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+                super::bodycache::ensure(tx, &session, position).await?;
+                let (bytes, digest): (i64, String) = sqlx::query_as("SELECT total_bytes,digest FROM transcript_cache.rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
                     .bind(&session).bind(sql_position(position)?.0).bind(sql_position(position)?.1).fetch_one(&mut *tx).await?;
                 result.push(TranscriptRowHeader { position, turn_id: row.try_get(2)?, total_bytes: sequence_number(bytes)?, digest });
             }
-            tx.commit().await?;
+
             Ok(result)
-        })).await
+        }))).await
     }
     /// Slice immutable UTF-8 JSON bytes; assembly may cross code points.
     pub async fn transcript_fragment(
@@ -155,20 +154,19 @@ impl EventLog {
                 .ok_or_else(|| invalid("invalid transcript byte offset"))?,
         )?;
         let session = session.to_owned();
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
-            super::directory::check_read(&mut tx, &session, position.source_sequence).await?;
-            super::bodycache::ensure(&mut tx, &session, position).await?;
-            let total:i64=sqlx::query_scalar("SELECT total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+        self.connection.run(move |connection| super::bodycache::run(connection, move |tx| Box::pin(async move {
+            super::directory::check_read(tx, &session, position.source_sequence).await?;
+            super::bodycache::ensure(tx, &session, position).await?;
+            let total:i64=sqlx::query_scalar("SELECT total_bytes FROM transcript_cache.rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
                 .bind(&session).bind(source).bind(item).fetch_optional(&mut *tx).await?.ok_or_else(||invalid("transcript message was not found"))?;
             let total = sequence_number(total)?;
             if offset.checked_add(length).is_none_or(|end|end>total) { return Err(invalid("transcript fragment exceeds message")); }
-            let bytes:Vec<u8>=sqlx::query_scalar("SELECT substr(payload,?4,?5) FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+            let bytes:Vec<u8>=sqlx::query_scalar("SELECT substr(payload,?4,?5) FROM transcript_cache.rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
                 .bind(&session).bind(source).bind(item).bind(start).bind(length as i64).fetch_one(&mut *tx).await?;
             if bytes.len() as u64 != length { return Err(invalid("transcript payload length changed")); }
-            tx.commit().await?;
+
             Ok(bytes)
-        })).await
+        }))).await
     }
     pub async fn transcript_turn_bounds(
         &self,
@@ -182,12 +180,11 @@ impl EventLog {
         let fence = sql_number(through)?;
         let session = session.to_owned();
         let turn = turn.to_owned();
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
-            super::directory::check_read(&mut tx,&session,through).await?;
+        self.connection.run(move |connection| super::bodycache::run(connection, move |tx| Box::pin(async move {
+            super::directory::check_read(tx,&session,through).await?;
             let first:Option<(i64,i64)>=sqlx::query_as("SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND turn_id=?2 AND source_sequence<=?3 ORDER BY source_sequence,item_index LIMIT 1")
                 .bind(&session).bind(&turn).bind(fence).fetch_optional(&mut *tx).await?;
-            let Some((source,item))=first else { tx.commit().await?; return Ok(None) };
+            let Some((source,item))=first else {  return Ok(None) };
             let (last_source,last_item):(i64,i64)=sqlx::query_as("SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND turn_id=?2 AND source_sequence<=?3 ORDER BY source_sequence DESC,item_index DESC LIMIT 1")
                 .bind(&session).bind(&turn).bind(fence).fetch_one(&mut *tx).await?;
             // Exact serialized bytes intentionally visit the whole requested Turn.
@@ -203,17 +200,17 @@ impl EventLog {
                     .bind(&session).bind(&turn).bind(fence).bind(cursor.0).bind(cursor.1).fetch_all(&mut *tx).await?;
                 if selected.is_empty() { break; }
                 for (source,item) in selected {
-                    super::bodycache::ensure(&mut tx,&session,row_position(source,item)?).await?;
-                    let size: i64=sqlx::query_scalar("SELECT total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+                    super::bodycache::ensure(tx,&session,row_position(source,item)?).await?;
+                    let size: i64=sqlx::query_scalar("SELECT total_bytes FROM transcript_cache.rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
                         .bind(&session).bind(source).bind(item).fetch_one(&mut *tx).await?;
                     bytes=bytes.checked_add(sequence_number(size)?).ok_or(StoreError::PrefixTooLarge)?;
                     cursor=(source,item);
                 }
             }
             let bounds = TranscriptTurnBounds { first:row_position(source,item)?,last:row_position(last_source,last_item)?,rows,bytes };
-            tx.commit().await?;
+
             Ok(Some(bounds))
-        })).await
+        }))).await
     }
 }
 pub(super) fn sql_number(value: u64) -> Result<i64, StoreError> {
