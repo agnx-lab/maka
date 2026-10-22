@@ -123,7 +123,7 @@ pub fn contract() -> Contract {
             Method {
                 progress: None,
                 mode,
-                input,
+                input: input.into(),
                 output: schemars::schema_for!(ProcessResult).into(),
                 resources: BTreeMap::new(),
             },

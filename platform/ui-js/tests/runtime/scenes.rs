@@ -257,7 +257,7 @@ fn value_only_guest_needs_no_scene_compiler_and_cannot_publish_components() {
     entry.imports.clear();
     entry.scene = None;
     entry.exports.get_mut("App").unwrap().contract.interface = Interface::Value {
-        schema: json!({"type":"integer"}),
+        schema: json!({"type":"integer"}).into(),
     };
     let contract = entry.exports["App"].contract.clone();
     for undeclared in [false, true] {

@@ -37,7 +37,7 @@ fn contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Value {
-            schema: json!({"type":"string"}),
+            schema: json!({"type":"string"}).into(),
         },
     }
 }
@@ -48,7 +48,7 @@ fn entry(provider: bool) -> EntryDeclaration {
         implementation: Implementation::Native {
             implementation: "example.native".into(),
         },
-        configuration: json!({"type":"object"}),
+        configuration: json!({"type":"object"}).into(),
         imports: if provider {
             BTreeMap::new()
         } else {
@@ -692,7 +692,7 @@ fn component_contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: json!({"type":"object"}),
+            props: json!({"type":"object"}).into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },

@@ -162,7 +162,7 @@ async fn public_ipc_pulls_large_subscription_original_and_confirms_cleanup() {
         let mut contract = support::business();
         let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface else { unreachable!() };
         methods.get_mut("read").unwrap().mode = maka_plugin_core::contract::MethodMode::Subscription;
-        methods.get_mut("read").unwrap().output = serde_json::json!({"type":["object","null"], "properties":{"text":{"type":"string"},"tail":{"type":"string"}},"required":["text","tail"],"additionalProperties":false});
+        methods.get_mut("read").unwrap().output = serde_json::json!({"type":["object","null"], "properties":{"text":{"type":"string"},"tail":{"type":"string"}},"required":["text","tail"],"additionalProperties":false}).into();
         for package in &mut packages {
             let name = package.manifest().id.clone();
             if name != "local.business" && name != "local.gateway" { continue; }
@@ -1217,7 +1217,7 @@ async fn public_ipc_preserves_large_query_progress_and_original_mutation_receipt
         let (mut input, mut packages) = support::native_host("public.large");
         let mut contract = support::business();
         let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface else { unreachable!() };
-        methods.get_mut("write").unwrap().progress = Some(serde_json::json!({"type":"object"}));
+        methods.get_mut("write").unwrap().progress = Some(serde_json::json!({"type":"object"}).into());
         for package in &mut packages {
             let name = package.manifest().id.clone();
             if name != "local.business" && name != "local.gateway" { continue; }

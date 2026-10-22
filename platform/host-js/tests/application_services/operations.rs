@@ -1231,7 +1231,7 @@ async fn javascript_receipts_preserve_child_reference_unknown_and_oversized_reco
         let recovery = Arc::new(AtomicBool::new(true));
         let mut leaf_contract = contract(MethodMode::Mutation);
         let Interface::Service {methods} = &mut leaf_contract.interface else { unreachable!() };
-        methods.get_mut("echo").unwrap().output = json!({"type":["string","integer"]});
+        methods.get_mut("echo").unwrap().output = json!({"type":["string","integer"]}).into();
         let mut sink_entry = entry(true,Implementation::Native {implementation:"native.echo".into()},MethodMode::Mutation);
         sink_entry.exports.get_mut("echo").unwrap().contract = leaf_contract.clone();
         let sink = package("sink",sink_entry,None);
@@ -1339,7 +1339,7 @@ async fn original_contract_metadata_stays_native_while_compact_receipts_are_deli
         unreachable!()
     };
     methods.get_mut("echo").unwrap().output =
-        json!({"type":"string","minimum":9007199254740993_u64});
+        json!({"type":"string","minimum":9007199254740993_u64}).into();
     let mut provider_entry = entry(
         true,
         Implementation::Native {
@@ -1823,7 +1823,7 @@ async fn ui_caller_source(
                 implementation: Implementation::Native {
                     implementation: "test.caller".into(),
                 },
-                configuration: json!({"type":"object"}),
+                configuration: json!({"type":"object"}).into(),
                 imports: BTreeMap::from([(
                     "echo".into(),
                     Import {

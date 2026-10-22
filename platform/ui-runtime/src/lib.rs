@@ -1003,7 +1003,7 @@ fn service_export<V: ?Sized>(
                 progress: method
                     .progress
                     .as_ref()
-                    .map(maka_plugin_core::validator)
+                    .map(|schema| maka_plugin_core::validator(schema))
                     .transpose()
                     .map_err(|e| Error::Invalid(e.to_string()))?,
                 resources: method.resources.clone(),
@@ -1017,7 +1017,7 @@ fn service_export<V: ?Sized>(
 }
 
 fn event_schemas(
-    events: &BTreeMap<String, Value>,
+    events: &BTreeMap<String, maka_plugin_core::Schema>,
 ) -> Result<BTreeMap<String, Arc<jsonschema::Validator>>> {
     events
         .iter()
@@ -1039,7 +1039,7 @@ pub fn surface_contract(target: PresentationTarget) -> Contract {
         transport: Transport::Local,
         interface: Interface::Resource {
             resource: resource.into(),
-            schema: json!({"type":"object","additionalProperties":false}),
+            schema: json!({"type":"object","additionalProperties":false}).into(),
         },
     }
 }
@@ -1071,13 +1071,13 @@ mod export_schema_tests {
 
     #[test]
     fn event_schema_changes_and_invalid_replacements_remain_checked() {
-        let events = BTreeMap::from([("submitted".into(), json!({"type":"string"}))]);
+        let events = BTreeMap::from([("submitted".into(), json!({"type":"string"}).into())]);
         let original = event_schemas(&events).unwrap();
         assert!(original["submitted"].validate(&json!("value")).is_ok());
         assert!(original["submitted"].validate(&json!(true)).is_err());
         let changed = event_schemas(&BTreeMap::from([(
             "submitted".into(),
-            json!({"type":"boolean"}),
+            json!({"type":"boolean"}).into(),
         )]))
         .unwrap();
         assert!(changed["submitted"].validate(&json!(true)).is_ok());
@@ -1085,7 +1085,7 @@ mod export_schema_tests {
         assert!(matches!(
             event_schemas(&BTreeMap::from([(
                 "submitted".into(),
-                json!({"type":"invalid"})
+                json!({"type":"invalid"}).into()
             ),])),
             Err(Error::Invalid(_))
         ));
@@ -1098,7 +1098,7 @@ mod export_schema_tests {
             version: 1,
             transport: Transport::Local,
             interface: Interface::Value {
-                schema: json!({"type":"string"}),
+                schema: json!({"type":"string"}).into(),
             },
         };
         assert!(matches!(
@@ -1107,7 +1107,7 @@ mod export_schema_tests {
         ));
         assert!(values::export::<()>(json!(true), &contract).is_err());
         contract.interface = Interface::Value {
-            schema: json!({"type":"boolean"}),
+            schema: json!({"type":"boolean"}).into(),
         };
         assert!(matches!(
             values::export::<()>(json!(true), &contract),
@@ -1115,7 +1115,7 @@ mod export_schema_tests {
         ));
         assert!(values::export::<()>(json!("value"), &contract).is_err());
         contract.interface = Interface::Value {
-            schema: json!({"type":"invalid"}),
+            schema: json!({"type":"invalid"}).into(),
         };
         assert!(values::export::<()>(json!(true), &contract).is_err());
     }

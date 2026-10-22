@@ -133,13 +133,15 @@ pub fn file_picker_contract() -> Contract {
         transport: Transport::Local,
         interface: Interface::Component {
             props: serde_json::to_value(schemars::schema_for!(FilePickerProps))
-                .expect("file props"),
-            events: BTreeMap::from([("changed".into(), observation_schema())]),
+                .expect("file props")
+                .into(),
+            events: BTreeMap::from([("changed".into(), observation_schema().into())]),
             captures: BTreeMap::from([(
                 "snapshot".into(),
                 Capture {
                     input: serde_json::to_value(schemars::schema_for!(FileCapture))
-                        .expect("file capture"),
+                        .expect("file capture")
+                        .into(),
                     output: CaptureOutput::Resource {
                         resource: binary_resource_type(),
                     },

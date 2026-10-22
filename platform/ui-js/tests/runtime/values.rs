@@ -35,7 +35,7 @@ fn contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Value {
-            schema: json!({"type":["string","integer"]}),
+            schema: json!({"type":["string","integer"]}).into(),
         },
     }
 }
@@ -120,7 +120,7 @@ fn fixture(
                 EntryDeclaration {
                     scene: None,
                     implementation,
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([("Palette".into(), export)]),
                 },

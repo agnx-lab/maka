@@ -112,14 +112,14 @@ pub fn contract() -> Contract {
                 (
                     "snapshot".into(),
                     Method {
-                        input: json!({"type":"object","additionalProperties":false}),
+                        input: json!({"type":"object","additionalProperties":false}).into(),
                         ..method::<Value, crate::settings::Snapshot>(MethodMode::Query)
                     },
                 ),
                 (
                     "capture".into(),
                     Method {
-                        input: json!({"type":"object","additionalProperties":false}),
+                        input: json!({"type":"object","additionalProperties":false}).into(),
                         ..method::<Value, Capture>(MethodMode::Query)
                     },
                 ),

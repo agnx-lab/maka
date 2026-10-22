@@ -95,7 +95,9 @@ pub fn diff_contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: serde_json::to_value(schemars::schema_for!(DiffProps)).expect("Diff props"),
+            props: serde_json::to_value(schemars::schema_for!(DiffProps))
+                .expect("Diff props")
+                .into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },

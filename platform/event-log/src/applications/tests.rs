@@ -170,7 +170,7 @@ fn package(marker: &str) -> Package {
                     module: "host.mjs".into(),
                     realm: Realm::Shared,
                 },
-                configuration: serde_json::json!({"type":"object"}),
+                configuration: serde_json::json!({"type":"object"}).into(),
                 imports: BTreeMap::new(),
                 exports: BTreeMap::new(),
             },

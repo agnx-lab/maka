@@ -44,8 +44,8 @@ async fn request(store: &EventLog) -> OperationRequest {
                     Method {
                         progress: None,
                         mode: MethodMode::Mutation,
-                        input: serde_json::json!({}),
-                        output: serde_json::json!({}),
+                        input: serde_json::json!({}).into(),
+                        output: serde_json::json!({}).into(),
                         resources: BTreeMap::new(),
                     },
                 )]),
@@ -67,7 +67,7 @@ async fn compact_receipts_preserve_original_identity_and_reject_inline_contracts
         unreachable!()
     };
     methods.get_mut("change").unwrap().input =
-        serde_json::json!({"description": "x".repeat(250_000)});
+        serde_json::json!({"description": "x".repeat(250_000)}).into();
     let compact = request.reference().unwrap();
     assert!(serde_json::to_vec(&compact).unwrap().len() < 1024);
     let mut inline = serde_json::to_value(&compact).unwrap();
@@ -149,7 +149,7 @@ async fn compact_receipts_preserve_original_identity_and_reject_inline_contracts
     let Interface::Service { methods } = &mut request.contract.interface else {
         unreachable!()
     };
-    methods.get_mut("change").unwrap().output = serde_json::json!({"type": "string"});
+    methods.get_mut("change").unwrap().output = serde_json::json!({"type": "string"}).into();
     assert!(
         !compact
             .contract
@@ -676,7 +676,7 @@ async fn compiled_operation_preserves_reference_capture_and_complete_original_di
         unreachable!()
     };
     methods.get_mut("change").unwrap().input =
-        serde_json::json!({"description": "x".repeat(100_000)});
+        serde_json::json!({"description": "x".repeat(100_000)}).into();
     let templates = OperationTemplate::for_contract(&original.contract).unwrap();
     let template = &templates["change"];
     original.input = serde_json::json!({

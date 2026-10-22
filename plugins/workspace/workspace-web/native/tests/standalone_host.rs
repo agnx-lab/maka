@@ -79,7 +79,7 @@ fn package(provider: bool) -> Package {
         configuration: if provider {
             definition.configuration
         } else {
-            json!({"type":"object", "additionalProperties":false})
+            json!({"type":"object", "additionalProperties":false}).into()
         },
         imports: if provider {
             BTreeMap::new()

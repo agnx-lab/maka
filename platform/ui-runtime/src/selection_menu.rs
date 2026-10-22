@@ -48,7 +48,8 @@ pub fn selection_menu_contract() -> Contract {
         transport: Transport::Local,
         interface: Interface::Component {
             props: serde_json::to_value(schemars::schema_for!(SelectionMenuProps))
-                .expect("selection menu props"),
+                .expect("selection menu props")
+                .into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },

@@ -493,7 +493,9 @@ pub fn label_contract() -> Contract {
         version: 1,
         transport: maka_plugin_core::contract::Transport::Local,
         interface: Interface::Component {
-            props: serde_json::to_value(schemars::schema_for!(LabelProps)).expect("label schema"),
+            props: serde_json::to_value(schemars::schema_for!(LabelProps))
+                .expect("label schema")
+                .into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },

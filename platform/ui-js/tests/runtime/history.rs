@@ -102,7 +102,8 @@ fn fixture() -> (Input, Vec<Package>) {
                             implementation: Implementation::Native {
                                 implementation: CALLER_HISTORY.into(),
                             },
-                            configuration: json!({"type":"object","additionalProperties":false}),
+                            configuration: json!({"type":"object","additionalProperties":false})
+                                .into(),
                             imports: BTreeMap::new(),
                             exports: ["History", "DeploymentHistory"]
                                 .into_iter()
@@ -165,8 +166,8 @@ fn reference() -> RecoveryRef {
                         Method {
                             progress: None,
                             mode: MethodMode::Mutation,
-                            input: json!({}),
-                            output: json!({}),
+                            input: json!({}).into(),
+                            output: json!({}).into(),
                             resources: BTreeMap::new(),
                         },
                     )]),
@@ -462,7 +463,7 @@ fn history_requires_persisted_source_and_rejects_configuration_selecting_another
         .entries
         .get_mut(&EntryTarget::Tui)
         .unwrap()
-        .configuration = json!({"type":"object"});
+        .configuration = json!({"type":"object"}).into();
     let package = support::package("native.history", declaration, None);
     let node = input.instances.get_mut("history").unwrap();
     node.package = package.application_ref().into();

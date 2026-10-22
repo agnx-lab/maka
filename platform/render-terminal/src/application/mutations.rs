@@ -122,8 +122,8 @@ fn terminal_restoration_during_preparation_runs_close_successor_before_root_rele
                 Method {
                     progress: None,
                     mode: MethodMode::Mutation,
-                    input: json!({}),
-                    output: json!({}),
+                    input: json!({}).into(),
+                    output: json!({}).into(),
                     resources: BTreeMap::new(),
                 },
             )]),

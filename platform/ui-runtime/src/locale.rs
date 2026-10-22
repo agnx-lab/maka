@@ -27,7 +27,7 @@ pub fn contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Value {
-            schema: json!({"type": "string", "minLength": 1}),
+            schema: json!({"type": "string", "minLength": 1}).into(),
         },
     }
 }

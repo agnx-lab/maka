@@ -99,7 +99,7 @@ pub fn terminal_view_contract() -> Contract {
         transport: Transport::Local,
         interface: Interface::Component {
             props: schemars::schema_for!(TerminalViewProps).into(),
-            events: BTreeMap::from([("observed".into(), observation_schema())]),
+            events: BTreeMap::from([("observed".into(), observation_schema().into())]),
             captures: BTreeMap::new(),
         },
     }

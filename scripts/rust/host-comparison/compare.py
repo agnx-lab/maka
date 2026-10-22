@@ -464,7 +464,12 @@ def manifest(options):
         return h.hexdigest()
 
     source = RUST if options.kind == "rust" else TS
-    files = [Path(__file__), BASE / "telemetry.py", BASE / "ts-adapter.mjs"]
+    files = [
+        Path(__file__),
+        BASE / "telemetry.py",
+        BASE / "ts-adapter.mjs",
+        BASE / "diagnostics.mjs",
+    ]
     if options.kind == "ts":
         files += [
             TS / "package-lock.json",
@@ -1200,11 +1205,9 @@ class RustHost:
         self.process = None
 
     async def initialize(self):
-        # Current finite-command observer discards stdin. Invoke the same CLI init
-        # worker directly during untimed setup; retain the failed public-init receipt.
+        # Exercise the public initializer, including its input and observation boundary.
         proc = await asyncio.create_subprocess_exec(
             str(RUST / "target/release/maka"),
-            "--operation-worker",
             "host",
             "init",
             "--root",

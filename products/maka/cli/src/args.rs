@@ -183,7 +183,8 @@ impl Cli {
             };
             let timeout = std::time::Duration::from_millis(self.timeout_ms.unwrap_or(default));
             if !self.operation_worker {
-                return crate::operation::observe(timeout)
+                let settings_stdin = matches!(&self.command, Some(Command::Host(HostCommand::Init(args))) if args.settings_stdin);
+                return crate::operation::observe(timeout, settings_stdin)
                     .await
                     .map(|()| std::process::ExitCode::SUCCESS);
             }

@@ -580,7 +580,7 @@ impl Source {
                         } else {
                             MethodMode::Query
                         },
-                        input: json!({"type":"object","additionalProperties":false}),
+                        input: json!({"type":"object","additionalProperties":false}).into(),
                         output: schemars::schema_for!(contract::ImageFrame).into(),
                         resources: BTreeMap::new(),
                     },

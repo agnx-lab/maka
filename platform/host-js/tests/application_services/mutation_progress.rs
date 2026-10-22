@@ -33,7 +33,7 @@ fn progress_contract() -> Contract {
     let Interface::Service { methods } = &mut result.interface else {
         unreachable!()
     };
-    methods.get_mut("echo").unwrap().progress = Some(json!({"type":"integer","minimum":0}));
+    methods.get_mut("echo").unwrap().progress = Some(json!({"type":"integer","minimum":0}).into());
     result
 }
 fn progress_entry(provider: bool, implementation: Implementation) -> EntryDeclaration {

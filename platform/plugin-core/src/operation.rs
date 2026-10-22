@@ -178,9 +178,11 @@ pub fn receipt_reader_contract() -> Contract {
                     progress: None,
                     mode: MethodMode::Query,
                     input: serde_json::to_value(schemars::schema_for!(RecoveryRef))
-                        .expect("original receipt request schema"),
+                        .expect("original receipt request schema")
+                        .into(),
                     output: serde_json::to_value(schemars::schema_for!(OperationReply))
-                        .expect("original receipt reply schema"),
+                        .expect("original receipt reply schema")
+                        .into(),
                     resources: std::collections::BTreeMap::new(),
                 },
             )]),

@@ -423,20 +423,25 @@ pub fn textarea_contract() -> Contract {
         transport: Transport::Local,
         interface: Interface::Component {
             props: serde_json::to_value(schemars::schema_for!(TextareaProps))
-                .expect("editor props schema"),
+                .expect("editor props schema")
+                .into(),
             events: BTreeMap::from([
-                ("changed".into(), observation_schema()),
-                ("submitted".into(), observation_schema()),
-                ("navigated".into(), navigation_schema()),
-                ("files".into(), file_paste_schema()),
-                ("checkpoint".into(), crate::checkpoint::observation_schema()),
+                ("changed".into(), observation_schema().into()),
+                ("submitted".into(), observation_schema().into()),
+                ("navigated".into(), navigation_schema().into()),
+                ("files".into(), file_paste_schema().into()),
+                (
+                    "checkpoint".into(),
+                    crate::checkpoint::observation_schema().into(),
+                ),
             ]),
             captures: BTreeMap::from([
                 (
                     "snapshot".into(),
                     Capture {
                         input: serde_json::to_value(schemars::schema_for!(EditorCapture))
-                            .expect("capture schema"),
+                            .expect("capture schema")
+                            .into(),
                         output: maka_plugin_core::contract::CaptureOutput::Resource {
                             resource: text_resource_type(),
                         },
@@ -446,7 +451,8 @@ pub fn textarea_contract() -> Contract {
                     "file".into(),
                     Capture {
                         input: serde_json::to_value(schemars::schema_for!(FileCapture))
-                            .expect("file paste capture"),
+                            .expect("file paste capture")
+                            .into(),
                         output: maka_plugin_core::contract::CaptureOutput::Resource {
                             resource: maka_plugin_core::contract::binary_resource_type(),
                         },

@@ -30,6 +30,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createInterface } from 'node:readline';
 import { readFile } from 'node:fs/promises';
+import { diagnosticError } from './diagnostics.mjs';
 const options = {};
 for (let i = 2; i < process.argv.length; i += 2) {
   const key = process.argv[i];
@@ -566,19 +567,20 @@ try {
     try {
       input = JSON.parse(line);
     } catch (error) {
-      output({ id: null, error: { message: error.message, code: null } });
+      output({ id: null, error: diagnosticError(error) });
       continue;
     }
     // Dispatch without awaiting: each session owns its own subscription and completion promise.
     const task = dispatch(input).then(
       (result) => output({ id: input.id, result }),
-      (error) =>
-        output({ id: input.id, error: { message: error.message, code: error.code ?? null } }),
+      (error) => output({ id: input.id, error: diagnosticError(error) }),
     );
     pending.add(task);
     task.finally(() => pending.delete(task));
   }
   await Promise.all(pending);
 } finally {
-  await close().catch((error) => process.stderr.write(`Host cleanup: ${error.message}\n`));
+  await close().catch((error) =>
+    process.stderr.write(`Host cleanup: ${JSON.stringify(diagnosticError(error))}\n`),
+  );
 }

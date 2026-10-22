@@ -82,7 +82,9 @@ pub fn contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: serde_json::to_value(schemars::schema_for!(MorphMarkProps)).unwrap(),
+            props: serde_json::to_value(schemars::schema_for!(MorphMarkProps))
+                .unwrap()
+                .into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },

@@ -41,8 +41,10 @@ pub(super) struct Init {
     root: Root,
     /// Read initial privacy/proxy settings from stdin. Requires a new, empty root.
     #[arg(long)]
-    settings_stdin: bool,
+    pub(super) settings_stdin: bool,
 }
+
+pub(crate) const SETTINGS_LIMIT: u64 = 65536;
 
 /// Bootstrap secrets travel through stdin, never command arguments or diagnostics.
 #[derive(Deserialize)]
@@ -57,19 +59,7 @@ impl Init {
     pub async fn run(self) -> Result<(), HostError> {
         let namespaces = RootNamespaces::for_current_account()?;
         let id = if self.settings_stdin {
-            let settings = tokio::task::spawn_blocking(|| {
-                let mut bytes = Vec::new();
-                std::io::stdin()
-                    .lock()
-                    .take(65537)
-                    .read_to_end(&mut bytes)?;
-                if bytes.len() > 65536 {
-                    return Err(std::io::Error::other("initial settings exceed 64 KiB"));
-                }
-                serde_json::from_slice::<Settings>(&bytes)
-                    .map_err(|_| std::io::Error::other("invalid initial settings"))
-            })
-            .await??;
+            let settings = Settings::parse(&settings_input().await?)?;
             let update = settings.proxy_update()?;
             // Never reconfigure an existing root or race its running Host.
             let owner = Arc::new(RootOwner::create(&self.root.root, &namespaces)?);
@@ -100,7 +90,32 @@ impl Init {
     }
 }
 
+pub(crate) async fn settings_input() -> Result<Vec<u8>, HostError> {
+    Ok(tokio::task::spawn_blocking(|| {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .lock()
+            .take(SETTINGS_LIMIT + 1)
+            .read_to_end(&mut bytes)?;
+        Ok::<_, std::io::Error>(bytes)
+    })
+    .await??)
+}
+
+// Validate the entire input before handing it to a detached worker. If replay
+// is cut short, only trailing whitespace may be lost from an accepted JSON value.
+pub(crate) fn validate_settings_input(bytes: &[u8]) -> std::io::Result<()> {
+    Settings::parse(bytes).map(|_| ())
+}
+
 impl Settings {
+    fn parse(bytes: &[u8]) -> std::io::Result<Self> {
+        if bytes.len() as u64 > SETTINGS_LIMIT {
+            return Err(std::io::Error::other("initial settings exceed 64 KiB"));
+        }
+        serde_json::from_slice(bytes).map_err(|_| std::io::Error::other("invalid initial settings"))
+    }
+
     fn proxy_update(&self) -> Result<Option<Update>, HostError> {
         let Some(proxy) = &self.network_proxy else {
             return if self.proxy_password.is_some() {

@@ -393,8 +393,8 @@ fn held_input_gets_an_idle_gap_before_ready_service_feedback() {
                 Method {
                     progress: None,
                     mode: MethodMode::Query,
-                    input: json!({"type":"object"}),
-                    output: json!({}),
+                    input: json!({"type":"object"}).into(),
+                    output: json!({}).into(),
                     resources: BTreeMap::new(),
                 },
             )]),

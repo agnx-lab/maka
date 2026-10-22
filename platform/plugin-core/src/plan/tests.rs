@@ -39,7 +39,7 @@ fn contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: json!({"type":"object"}),
+            props: json!({"type":"object"}).into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },
@@ -56,7 +56,7 @@ fn entry() -> EntryDeclaration {
             module: "index.mjs".into(),
             realm: Realm::Dedicated,
         },
-        configuration: json!({"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}),
+        configuration: json!({"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}).into(),
         imports: BTreeMap::new(),
         exports: BTreeMap::from([(
             "Content".into(),
@@ -98,7 +98,7 @@ fn template(default: &str) -> Template {
         parameters: BTreeMap::from([(
             "title".into(),
             Parameter {
-                schema: json!({"type":"string"}),
+                schema: json!({"type":"string"}).into(),
                 default: Some(json!(default)),
             },
         )]),
@@ -400,7 +400,7 @@ fn actual_export_checks_use_the_full_public_contract() {
     let mut actual = BTreeMap::from([("Content".into(), contract())]);
     entry.check_exports(&actual, |contract| contract).unwrap();
     actual.get_mut("Content").unwrap().interface = Interface::Value {
-        schema: json!({"type":"object"}),
+        schema: json!({"type":"object"}).into(),
     };
     assert!(entry.check_exports(&actual, |contract| contract).is_err());
     actual.insert("undeclared".into(), contract());
@@ -466,7 +466,7 @@ fn scene_declarations_are_required_only_for_javascript_component_entries() {
     native.validate().unwrap();
     let mut value = valid.clone();
     value.exports.get_mut("Content").unwrap().contract.interface = Interface::Value {
-        schema: json!(true),
+        schema: json!(true).into(),
     };
     assert!(value.validate().is_err());
     value.scene = None;
@@ -749,13 +749,15 @@ fn explicit_null_parameter_default_survives_package_metadata_roundtrip() {
     let (mut input, mut packages) = fixture();
     let mut declaration = template("unused");
     let parameter = declaration.parameters.get_mut("title").unwrap();
-    parameter.schema = json!({"type":["string","null"]});
+    parameter.schema = json!({"type":["string","null"]}).into();
     parameter.default = Some(Value::Null);
     declaration.children.get_mut("content").unwrap().package = package("nullable", 1).into();
     let recovered: Template =
         serde_json::from_value(serde_json::to_value(declaration).unwrap()).unwrap();
     let mut nullable = entry();
-    nullable.configuration["properties"]["title"] = json!({"type":["string","null"]});
+    let mut configuration = nullable.configuration.as_ref().clone();
+    configuration["properties"]["title"] = json!({"type":["string","null"]});
+    nullable.configuration = configuration.into();
     packages
         .insert(
             package("nullable", 1),
@@ -784,7 +786,7 @@ fn k64_finite_current_compositions_keep_shortening_overrides_and_sibling_identit
     let (mut input, mut packages) = fixture();
     let reference = package("finite-current", 1);
     let mut executable = entry();
-    executable.configuration = json!({"type":"object","additionalProperties":false});
+    executable.configuration = json!({"type":"object","additionalProperties":false}).into();
     executable.exports = BTreeMap::from([(
         "App".into(),
         Export {
@@ -889,7 +891,7 @@ fn k64_finite_current_compositions_keep_shortening_overrides_and_sibling_identit
 fn k64_large_declared_bindings_expand_from_overrides_without_platform_cardinality() {
     let (mut input, mut packages) = fixture();
     let mut consumer = entry();
-    consumer.configuration = json!({"type":"object","additionalProperties":false});
+    consumer.configuration = json!({"type":"object","additionalProperties":false}).into();
     consumer.imports.insert(
         "all".into(),
         Import {

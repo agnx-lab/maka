@@ -82,8 +82,9 @@ pub fn markdown_contract() -> Contract {
         transport: Transport::Local,
         interface: Interface::Component {
             props: serde_json::to_value(schemars::schema_for!(MarkdownProps))
-                .expect("Markdown props"),
-            events: BTreeMap::from([("link".into(), link_schema())]),
+                .expect("Markdown props")
+                .into(),
+            events: BTreeMap::from([("link".into(), link_schema().into())]),
             captures: BTreeMap::new(),
         },
     }
@@ -113,9 +114,11 @@ pub fn text_contract() -> Contract {
                     progress: None,
                     mode: MethodMode::Query,
                     input: serde_json::to_value(schemars::schema_for!(MarkdownTextInput))
-                        .expect("Markdown text input"),
+                        .expect("Markdown text input")
+                        .into(),
                     output: serde_json::to_value(schemars::schema_for!(MarkdownTextResult))
-                        .expect("Markdown text output"),
+                        .expect("Markdown text output")
+                        .into(),
                     resources: BTreeMap::new(),
                 },
             )]),

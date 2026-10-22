@@ -243,7 +243,7 @@ pub fn contract() -> Contract {
                     Method {
                         progress: None,
                         mode: MethodMode::Query,
-                        input: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+                        input: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}).into(),
                         output: schemars::schema_for!(super::presets::Presets).into(),
                         resources: BTreeMap::new(),
                     },
@@ -323,7 +323,7 @@ pub fn contract() -> Contract {
                     Method {
                         progress: None,
                         mode: MethodMode::Query,
-                        input: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+                        input: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}).into(),
                         output: schemars::schema_for!(Coordinator).into(),
                         resources: BTreeMap::new(),
                     },

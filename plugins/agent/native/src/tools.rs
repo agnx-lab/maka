@@ -192,7 +192,7 @@ pub(crate) fn catalog(
                     {
                         return Err("agent_shell_tool_contract_invalid".into());
                     }
-                    shell::schema(method.input.clone(), true)
+                    shell::schema(method.input.as_ref().clone(), true)
                 }
                 ToolInput::Json => {
                     if binding.contract() == &maka_web_api::contract()
@@ -205,7 +205,7 @@ pub(crate) fn catalog(
                     {
                         return Err("agent_skill_tool_projection_required".into());
                     }
-                    method.input.clone()
+                    method.input.as_ref().clone()
                 }
                 ToolInput::Web => {
                     if binding.contract() != &maka_web_api::contract()
@@ -266,7 +266,7 @@ pub(crate) fn catalog(
                     Arc::new(shell::Binding {
                         service: service.clone(),
                         configuration: configuration.clone(),
-                        input: method.input.clone(),
+                        input: method.input.as_ref().clone(),
                     }),
                 ));
             }
@@ -290,7 +290,7 @@ pub(crate) fn catalog(
                     description,
                     input_schema,
                     output_schema: match selection.result {
-                        ToolResult::Json => Some(method.output.clone()),
+                        ToolResult::Json => Some(method.output.as_ref().clone()),
                         ToolResult::Image | ToolResult::Computer => None,
                     },
                     freeform: None,

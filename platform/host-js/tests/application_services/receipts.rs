@@ -337,7 +337,7 @@ async fn composed_portable_receipts_preserve_exact_journal_values_and_original_r
         // These output schemas permit actual wide integers and large native values.
         let mut declared = contract(MethodMode::Mutation);
         if let Interface::Service { methods } = &mut declared.interface {
-            methods.get_mut("echo").unwrap().output = json!({});
+            methods.get_mut("echo").unwrap().output = json!({}).into();
         }
         let mut provider_entry = entry(
             true,

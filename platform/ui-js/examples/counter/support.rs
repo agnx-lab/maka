@@ -69,7 +69,7 @@ pub fn fixture(handler: &str) -> (Input, Vec<Package>) {
                     implementation: Implementation::Native {
                         implementation: "maka.ui.surface.tui".into(),
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([(
                         "Surface".into(),
@@ -89,7 +89,7 @@ pub fn fixture(handler: &str) -> (Input, Vec<Package>) {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: json!({"type":"object"}),
+            props: json!({"type":"object"}).into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },
@@ -115,7 +115,7 @@ pub fn fixture(handler: &str) -> (Input, Vec<Package>) {
                         module: "index.mjs".into(),
                         realm: Realm::Dedicated,
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::from([(
                         "surface".into(),
                         Import {
@@ -182,7 +182,7 @@ pub(crate) fn composed_fixture(child_update: &str, parent_event: &str) -> (Input
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: json!({"type":"object","properties":{"label":{"type":"string"},"initial":{"type":"integer"}},"required":["label","initial"],"additionalProperties":false}),
+            props: json!({"type":"object","properties":{"label":{"type":"string"},"initial":{"type":"integer"}},"required":["label","initial"],"additionalProperties":false}).into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },
@@ -233,7 +233,7 @@ pub(crate) fn composed_fixture(child_update: &str, parent_event: &str) -> (Input
                         module: "index.mjs".into(),
                         realm: Realm::Dedicated,
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([(
                         "Counter".into(),
@@ -301,7 +301,7 @@ fn bind_brand(input: &mut Input, packages: &mut Vec<Package>, declaration: &mut 
         version: 1,
         transport: Transport::Local,
         interface: Interface::Value {
-            schema: schema.clone(),
+            schema: schema.clone().into(),
         },
     };
     let brand = package(
@@ -315,7 +315,7 @@ fn bind_brand(input: &mut Input, packages: &mut Vec<Package>, declaration: &mut 
                         module: "index.mjs".into(),
                         realm: Realm::Shared,
                     },
-                    configuration: schema,
+                    configuration: schema.into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([(
                         "Appearance".into(),
@@ -404,7 +404,7 @@ pub(crate) fn native_fixture() -> (Input, Vec<Package>) {
                     implementation: Implementation::Native {
                         implementation: "maka.ui.label".into(),
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([(
                         "Label".into(),
@@ -478,7 +478,7 @@ pub(crate) fn editor_fixture() -> (Input, Vec<Package>) {
                     implementation: Implementation::Native {
                         implementation: "maka.ui.textarea".into(),
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([(
                         "Textarea".into(),
@@ -594,7 +594,7 @@ pub(crate) fn resource_fixture() -> (Input, Vec<Package>) {
                         module: "index.mjs".into(),
                         realm: Realm::Shared,
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::from([(
                         "editor".into(),
                         Import {
@@ -632,7 +632,7 @@ pub(crate) fn resource_fixture() -> (Input, Vec<Package>) {
                     implementation: Implementation::Native {
                         implementation: "maka.text.reader".into(),
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([(
                         "Reader".into(),
@@ -696,7 +696,7 @@ pub(crate) fn continuation_fixture() -> (Input, Vec<Package>, maka_plugin_core::
     captures.insert(
         "reading".into(),
         maka_plugin_core::contract::Capture {
-            input: json!({"type":"null"}),
+            input: json!({"type":"null"}).into(),
             output: maka_plugin_core::contract::CaptureOutput::Continuation,
         },
     );
