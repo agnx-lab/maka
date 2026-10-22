@@ -60,10 +60,13 @@ fn wide_progress_contract() -> maka_plugin_core::contract::Contract {
     let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface else {
         unreachable!()
     };
-    methods.get_mut("write").unwrap().progress = Some(serde_json::json!({
-        "type":"object","properties":{"step":{"type":"string"}},
-        "required":["step"],"additionalProperties":false
-    }));
+    methods.get_mut("write").unwrap().progress = Some(
+        serde_json::json!({
+            "type":"object","properties":{"step":{"type":"string"}},
+            "required":["step"],"additionalProperties":false
+        })
+        .into(),
+    );
     contract
 }
 fn wide_progress() -> serde_json::Value {

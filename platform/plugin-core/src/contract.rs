@@ -21,9 +21,8 @@ use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use crate::Error;
+use crate::{Error, Schema};
 
 /// Shared immutable UTF-8 resource contract. Content schemas are checked by
 /// consumers; a resource name never confers access to its bytes.
@@ -66,16 +65,16 @@ pub enum Interface {
         methods: BTreeMap<String, Method>,
     },
     Component {
-        props: Value,
-        events: BTreeMap<String, Value>,
+        props: Schema,
+        events: BTreeMap<String, Schema>,
         captures: BTreeMap<String, Capture>,
     },
     Value {
-        schema: Value,
+        schema: Schema,
     },
     Resource {
         resource: String,
-        schema: Value,
+        schema: Schema,
     },
 }
 
@@ -109,13 +108,13 @@ impl<'de> Deserialize<'de> for Interface {
             #[serde(default, deserialize_with = "present")]
             methods: Option<BTreeMap<String, Method>>,
             #[serde(default, deserialize_with = "present")]
-            props: Option<Value>,
+            props: Option<Schema>,
             #[serde(default, deserialize_with = "present")]
-            events: Option<BTreeMap<String, Value>>,
+            events: Option<BTreeMap<String, Schema>>,
             #[serde(default, deserialize_with = "present")]
             captures: Option<BTreeMap<String, Capture>>,
             #[serde(default, deserialize_with = "present")]
-            schema: Option<Value>,
+            schema: Option<Schema>,
             #[serde(default, deserialize_with = "present")]
             resource: Option<String>,
         }
@@ -178,12 +177,12 @@ impl<'de> Deserialize<'de> for Interface {
 #[serde(deny_unknown_fields)]
 pub struct Method {
     pub mode: MethodMode,
-    pub input: Value,
-    pub output: Value,
+    pub input: Schema,
+    pub output: Schema,
     /// Bounded transient observations from this mutation, separate from its
     /// original final receipt. Only mutation methods may declare progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub progress: Option<Value>,
+    pub progress: Option<Schema>,
     pub resources: BTreeMap<String, ResourceSlot>,
 }
 
@@ -220,7 +219,7 @@ pub struct ResourceType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Capture {
-    pub input: Value,
+    pub input: Schema,
     pub output: CaptureOutput,
 }
 /// Resource captures enter checked service slots; continuations remain in the
@@ -363,8 +362,41 @@ impl Cardinality {
 
 #[cfg(test)]
 mod interface_deserialization_tests {
-    use super::Interface;
+    use super::{Contract, Interface};
     use serde_json::{Value, json};
+
+    #[test]
+    fn contract_clones_share_schema_storage_without_changing_wire_or_compatibility() {
+        let wire = json!({"name":"example.shared", "version":1, "transport":"local",
+            "interface":{"kind":"service", "methods":{"read":{"mode":"query",
+                "input":{"type":"object", "properties":{"name":{"type":"string"}}},
+                "output":{"type":"array", "items":{"type":"string"}}, "resources":{}}}}});
+        let original: Contract = serde_json::from_value(wire.clone()).unwrap();
+        original.validate().unwrap();
+        let cloned = original.clone();
+        assert_eq!(serde_json::to_value(&cloned).unwrap(), wire);
+        let independent: Contract = serde_json::from_value(wire.clone()).unwrap();
+        assert!(original.accepts(&independent));
+        let mut changed_wire = wire;
+        changed_wire["interface"]["methods"]["read"]["input"]["properties"]["name"]["type"] =
+            json!("number");
+        let changed: Contract = serde_json::from_value(changed_wire).unwrap();
+        assert!(!original.accepts(&changed));
+        let Interface::Service { methods: original } = &original.interface else {
+            panic!()
+        };
+        let Interface::Service { methods: cloned } = &cloned.interface else {
+            panic!()
+        };
+        assert!(std::ptr::eq(
+            original["read"].input.as_object().unwrap(),
+            cloned["read"].input.as_object().unwrap()
+        ));
+        assert!(std::ptr::eq(
+            original["read"].output.as_object().unwrap(),
+            cloned["read"].output.as_object().unwrap()
+        ));
+    }
 
     #[test]
     fn interfaces_round_trip_with_the_tag_before_or_after_fields() {

@@ -145,7 +145,7 @@ async fn activate_worker_mode(
                 .get_mut(&EntryTarget::Host)
                 .unwrap();
             if manifest.id == "agent" {
-                entry.configuration = hub::configuration_schema();
+                entry.configuration = hub::configuration_schema().into();
                 entry.implementation = Implementation::Native {
                     implementation: hub::IMPLEMENTATION.into(),
                 };

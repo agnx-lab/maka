@@ -49,9 +49,11 @@ pub fn reader_contract() -> Contract {
                     progress: None,
                     mode: MethodMode::Query,
                     input: serde_json::to_value(schemars::schema_for!(ReadText))
-                        .expect("read input schema"),
+                        .expect("read input schema")
+                        .into(),
                     output: serde_json::to_value(schemars::schema_for!(TextChunk))
-                        .expect("chunk schema"),
+                        .expect("chunk schema")
+                        .into(),
                     resources: BTreeMap::from([("text".into(), text_resource_type().required())]),
                 },
             )]),

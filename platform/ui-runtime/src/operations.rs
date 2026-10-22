@@ -59,9 +59,11 @@ pub fn caller_history_contract() -> Contract {
                     progress: None,
                     mode: MethodMode::Query,
                     input: serde_json::to_value(schemars::schema_for!(CallerHistoryPage))
-                        .expect("caller history request schema"),
+                        .expect("caller history request schema")
+                        .into(),
                     output: serde_json::to_value(schemars::schema_for!(Vec<CallerIntent>))
-                        .expect("caller history page schema"),
+                        .expect("caller history page schema")
+                        .into(),
                     resources: BTreeMap::new(),
                 },
             )]),

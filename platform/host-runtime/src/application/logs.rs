@@ -128,8 +128,8 @@ pub fn contract() -> Contract {
                     name.into(),
                     Method {
                         mode,
-                        input: input.clone(),
-                        output: output.clone(),
+                        input: input.clone().into(),
+                        output: output.clone().into(),
                         progress: None,
                         resources: BTreeMap::new(),
                     },

@@ -83,10 +83,14 @@ pub fn contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: serde_json::to_value(schemars::schema_for!(ValueCheckpointProps)).unwrap(),
+            props: serde_json::to_value(schemars::schema_for!(ValueCheckpointProps))
+                .unwrap()
+                .into(),
             events: BTreeMap::from([(
                 "changed".into(),
-                serde_json::to_value(schemars::schema_for!(ValueCheckpointObservation)).unwrap(),
+                serde_json::to_value(schemars::schema_for!(ValueCheckpointObservation))
+                    .unwrap()
+                    .into(),
             )]),
             captures: BTreeMap::new(),
         },

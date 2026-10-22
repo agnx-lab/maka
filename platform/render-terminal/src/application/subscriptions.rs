@@ -82,8 +82,8 @@ fn terminal_task_owner_delivers_each_item_then_drains_real_close_after_restorati
                 Method {
                     progress: None,
                     mode: MethodMode::Subscription,
-                    input: json!({}),
-                    output: json!({"type":"integer"}),
+                    input: json!({}).into(),
+                    output: json!({"type":"integer"}).into(),
                     resources: BTreeMap::new(),
                 },
             )]),

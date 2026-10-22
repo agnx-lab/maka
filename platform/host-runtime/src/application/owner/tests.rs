@@ -107,7 +107,7 @@ fn service_plan(contract: &Contract) -> (Input, Plan) {
                                     realm: Realm::Shared,
                                 }
                             },
-                            configuration: json!({}),
+                            configuration: json!({}).into(),
                             imports: if provider {
                                 BTreeMap::new()
                             } else {
@@ -185,8 +185,8 @@ async fn final_admission_rejects_failed_consumer_before_terminal_notification_is
                     Method {
                         progress: None,
                         mode: MethodMode::Query,
-                        input: json!({}),
-                        output: json!({}),
+                        input: json!({}).into(),
+                        output: json!({}).into(),
                         resources: BTreeMap::new(),
                     },
                 )]),
@@ -571,8 +571,8 @@ async fn retirement_preserves_execution_cleanup(
                     } else {
                         MethodMode::Query
                     },
-                    input: json!({}),
-                    output: json!({}),
+                    input: json!({}).into(),
+                    output: json!({}).into(),
                     resources: BTreeMap::new(),
                 },
             )]),

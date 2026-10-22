@@ -235,9 +235,9 @@ fn package(provider: bool) -> Package {
             }
         },
         configuration: if provider {
-            configuration_schema()
+            configuration_schema().into()
         } else {
-            json!({"type":"object","additionalProperties":false})
+            json!({"type":"object","additionalProperties":false}).into()
         },
         imports: if provider {
             BTreeMap::new()
@@ -398,7 +398,8 @@ fn input(settings: &Configuration) -> (Input, Vec<Package>) {
         entry.implementation = Implementation::Native {
             implementation: maka_settings_native::IMPLEMENTATION.into(),
         };
-        entry.configuration = json!({"type":"object","properties":{},"additionalProperties":false});
+        entry.configuration =
+            json!({"type":"object","properties":{},"additionalProperties":false}).into();
         entry.exports = BTreeMap::from([(
             maka_settings_native::EXPORT.into(),
             Export {

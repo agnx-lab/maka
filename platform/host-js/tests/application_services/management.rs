@@ -41,7 +41,7 @@ fn sources_for(implementation: &str) -> (Input, Vec<Package>) {
             implementation: Implementation::Native {
                 implementation: implementation.into(),
             },
-            configuration: json!({"type":"object","additionalProperties":false}),
+            configuration: json!({"type":"object","additionalProperties":false}).into(),
             imports: BTreeMap::new(),
             exports: BTreeMap::from([(
                 "Management".into(),
@@ -61,7 +61,7 @@ fn sources_for(implementation: &str) -> (Input, Vec<Package>) {
                 module: "host.mjs".into(),
                 realm: Realm::Dedicated,
             },
-            configuration: json!({"type":"object"}),
+            configuration: json!({"type":"object"}).into(),
             exports: BTreeMap::new(),
             imports: BTreeMap::from([(
                 "management".into(),
@@ -965,7 +965,7 @@ async fn instance_pages_freeze_source_and_nested_enabled_intents_preserve_origin
         "schemaVersion":1,"id":"nested.leaf","application":Declaration {
             entries: BTreeMap::from([(EntryTarget::Tui, EntryDeclaration {
                 scene: None, implementation: Implementation::Native { implementation:"unused.ui.availability".into() },
-                configuration: json!({"type":"object"}), imports: BTreeMap::new(), exports: BTreeMap::new(),
+                configuration: json!({"type":"object"}).into(), imports: BTreeMap::new(), exports: BTreeMap::new(),
             })]), composition: None,
         }
     })).unwrap())])).unwrap();
@@ -982,7 +982,7 @@ async fn instance_pages_freeze_source_and_nested_enabled_intents_preserve_origin
     let product = Package::new(BTreeMap::from([(MANIFEST_FILE.into(), serde_json::to_vec(&json!({
         "schemaVersion":1,"id":"nested.product","application":Declaration {
             entries:BTreeMap::new(), composition:Some(Template {
-                parameters:BTreeMap::from([("label".into(), Parameter { schema:json!({"type":"string"}), default:None })]),
+                parameters:BTreeMap::from([("label".into(), Parameter { schema:json!({"type":"string"}).into(), default:None })]),
                 imports:BTreeMap::new(), exports:BTreeMap::new(), children,
             }),
         }
@@ -1288,7 +1288,7 @@ async fn settings_forms_preserve_exact_numbers_unedited_sources_and_original_cas
         "schemaVersion":1,"id":"form.leaf","application":Declaration {
             entries:BTreeMap::from([(EntryTarget::Tui, EntryDeclaration {
                 scene:None, implementation:Implementation::Native { implementation:"unused.form.availability".into() },
-                configuration:schema, imports:BTreeMap::new(), exports:BTreeMap::new(),
+                configuration:schema.into(), imports:BTreeMap::new(), exports:BTreeMap::new(),
             })]),composition:None,
         }
     })).unwrap())])).unwrap();
@@ -1310,7 +1310,7 @@ async fn settings_forms_preserve_exact_numbers_unedited_sources_and_original_cas
     let template = Package::new(BTreeMap::from([(MANIFEST_FILE.into(), serde_json::to_vec(&json!({
         "schemaVersion":1,"id":"form.product","application":Declaration {
             entries:BTreeMap::new(),composition:Some(Template {
-                parameters:BTreeMap::from([("name".into(),Parameter { schema:json!({"type":"string"}),default:None })]),
+                parameters:BTreeMap::from([("name".into(),Parameter { schema:json!({"type":"string"}).into(),default:None })]),
                 imports:BTreeMap::new(),exports:BTreeMap::new(),children:BTreeMap::from([("child".into(),child)]),
             }),
         }
@@ -1482,7 +1482,7 @@ async fn composition_choices_and_atomic_edits_preserve_source_bindings_and_origi
             "schemaVersion":1,"id":name,"application":Declaration {
                 entries:BTreeMap::from([(EntryTarget::Tui, EntryDeclaration {
                     scene:None, implementation:Implementation::Native { implementation:"test.form".into() },
-                    configuration, imports, exports,
+                    configuration: configuration.into(), imports, exports,
                 })]),composition:None,
             }
         })).unwrap())])).unwrap()

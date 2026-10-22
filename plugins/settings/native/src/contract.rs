@@ -355,8 +355,8 @@ fn method<I: JsonSchema, O: JsonSchema>(mode: MethodMode) -> Method {
     Method {
         progress: None,
         mode,
-        input: schema::<I>(schemars::generate::Contract::Deserialize),
-        output: schema::<O>(schemars::generate::Contract::Serialize),
+        input: schema::<I>(schemars::generate::Contract::Deserialize).into(),
+        output: schema::<O>(schemars::generate::Contract::Serialize).into(),
         resources: BTreeMap::new(),
     }
 }
@@ -374,9 +374,9 @@ pub fn authentication_contract() -> Contract {
                 (
                     "loginCredential".into(),
                     Method {
-                        progress: Some(schema::<LoginPrompt>(
-                            schemars::generate::Contract::Serialize,
-                        )),
+                        progress: Some(
+                            schema::<LoginPrompt>(schemars::generate::Contract::Serialize).into(),
+                        ),
                         ..method::<LoginCredential, CredentialLoginResult>(MethodMode::Mutation)
                     },
                 ),

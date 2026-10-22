@@ -105,8 +105,8 @@ fn contract(mode: MethodMode) -> Contract {
                 Method {
                     progress: None,
                     mode,
-                    input: json!({"type":"string"}),
-                    output: json!({"type":"string"}),
+                    input: json!({"type":"string"}).into(),
+                    output: json!({"type":"string"}).into(),
                     resources: BTreeMap::new(),
                 },
             )]),
@@ -117,7 +117,7 @@ fn entry(provider: bool, implementation: Implementation, mode: MethodMode) -> En
     EntryDeclaration {
         scene: None,
         implementation,
-        configuration: json!({"type":"object"}),
+        configuration: json!({"type":"object"}).into(),
         imports: if provider {
             BTreeMap::new()
         } else {

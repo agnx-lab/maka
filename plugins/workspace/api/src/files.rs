@@ -73,7 +73,7 @@ pub fn contract() -> Contract {
                 } else {
                     MethodMode::Query
                 },
-                input,
+                input: input.into(),
                 output: if name == "readImage" {
                     schemars::schema_for!(maka_agent_api::contract::ImageFrame).into()
                 } else {

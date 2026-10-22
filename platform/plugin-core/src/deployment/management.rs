@@ -229,9 +229,12 @@ pub fn deployment_manager_contract() -> Contract {
         Method {
             progress: None,
             mode,
-            input: serde_json::to_value(schemars::schema_for!(I)).expect("management input schema"),
+            input: serde_json::to_value(schemars::schema_for!(I))
+                .expect("management input schema")
+                .into(),
             output: serde_json::to_value(schemars::schema_for!(O))
-                .expect("management output schema"),
+                .expect("management output schema")
+                .into(),
             resources: BTreeMap::new(),
         }
     }

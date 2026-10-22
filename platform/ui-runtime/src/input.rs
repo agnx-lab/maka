@@ -146,16 +146,19 @@ fn contract(name: &str) -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: serde_json::to_value(schemars::schema_for!(InputProps)).expect("input props"),
+            props: serde_json::to_value(schemars::schema_for!(InputProps))
+                .expect("input props")
+                .into(),
             events: BTreeMap::from([
-                ("changed".into(), observation_schema()),
-                ("submitted".into(), submitted_schema()),
+                ("changed".into(), observation_schema().into()),
+                ("submitted".into(), submitted_schema().into()),
             ]),
             captures: BTreeMap::from([(
                 "snapshot".into(),
                 Capture {
                     input: serde_json::to_value(schemars::schema_for!(EditorCapture))
-                        .expect("input capture"),
+                        .expect("input capture")
+                        .into(),
                     output: maka_plugin_core::contract::CaptureOutput::Resource {
                         resource: text_resource_type(),
                     },

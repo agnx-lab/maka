@@ -1490,8 +1490,12 @@ pub fn contract() -> Contract {
         Method {
             progress: None,
             mode,
-            input: serde_json::to_value(schemars::schema_for!(I)).expect("input schema"),
-            output: serde_json::to_value(schemars::schema_for!(O)).expect("output schema"),
+            input: serde_json::to_value(schemars::schema_for!(I))
+                .expect("input schema")
+                .into(),
+            output: serde_json::to_value(schemars::schema_for!(O))
+                .expect("output schema")
+                .into(),
             resources: BTreeMap::new(),
         }
     }
@@ -1520,7 +1524,7 @@ pub fn contract() -> Contract {
                     Method {
                         progress: None,
                         mode: MethodMode::Query,
-                        input: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+                        input: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}).into(),
                         output: schemars::schema_for!(ToolNames).into(),
                         resources: BTreeMap::new(),
                     },

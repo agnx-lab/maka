@@ -166,7 +166,7 @@ mod tests {
             .entries
             .get_mut(&EntryTarget::Host)
             .unwrap()
-            .configuration = json!({"type":"string"});
+            .configuration = json!({"type":"string"}).into();
         assert!(
             packages
                 .insert_checked(reference.clone(), CheckedDeclaration::new(changed).unwrap())
@@ -178,7 +178,7 @@ mod tests {
             .entries
             .get_mut(&EntryTarget::Host)
             .unwrap()
-            .configuration = json!({"type":42});
+            .configuration = json!({"type":42}).into();
         assert!(packages.insert(reference.clone(), edited.clone()).is_err());
         assert!(CheckedDeclaration::new(edited).is_err());
         assert_eq!(packages.get(&reference).unwrap(), declaration.declaration());

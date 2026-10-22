@@ -48,7 +48,8 @@ pub fn source_contract() -> Contract {
         transport: Transport::Local,
         interface: Interface::Component {
             props: serde_json::to_value(schemars::schema_for!(SourceTextProps))
-                .expect("source props"),
+                .expect("source props")
+                .into(),
             events: BTreeMap::new(),
             captures: BTreeMap::new(),
         },

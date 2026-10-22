@@ -437,7 +437,7 @@ fn service_fixture(
     let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface else {
         unreachable!()
     };
-    methods.get_mut("read").unwrap().output = json!({"type":"string"});
+    methods.get_mut("read").unwrap().output = json!({"type":"string"}).into();
     for name in ["dynamic.app", "native.reader"] {
         let i = packages
             .iter()
@@ -644,8 +644,8 @@ fn actual_native_query_preserves_exact_integer_while_javascript_fails_without_re
                     Method {
                         progress: None,
                         mode: MethodMode::Query,
-                        input: json!({"type":"null"}),
-                        output: json!({"type":"integer"}),
+                        input: json!({"type":"null"}).into(),
+                        output: json!({"type":"integer"}).into(),
                         resources: BTreeMap::new(),
                     },
                 )]),

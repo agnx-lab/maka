@@ -89,8 +89,12 @@ pub struct Empty {}
 fn method<I: JsonSchema, O: JsonSchema>(mode: MethodMode) -> Method {
     Method {
         mode,
-        input: serde_json::to_value(schemars::schema_for!(I)).unwrap(),
-        output: serde_json::to_value(schemars::schema_for!(O)).unwrap(),
+        input: serde_json::to_value(schemars::schema_for!(I))
+            .unwrap()
+            .into(),
+        output: serde_json::to_value(schemars::schema_for!(O))
+            .unwrap()
+            .into(),
         resources: BTreeMap::new(),
         progress: None,
     }
@@ -126,7 +130,7 @@ pub fn contract() -> Contract {
 pub fn native() -> NativeDefinition {
     NativeDefinition {
         implementation: IMPLEMENTATION.into(),
-        configuration: serde_json::json!({"type":"object","properties":{},"required":[],"additionalProperties":false}),
+        configuration: serde_json::json!({"type":"object","properties":{},"required":[],"additionalProperties":false}).into(),
         exports: BTreeMap::from([(EXPORT.into(), contract())]),
     }
 }

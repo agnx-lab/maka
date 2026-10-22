@@ -56,11 +56,11 @@ fn service_contract(mode: Mode) -> Contract {
                     Method {
                         progress: None,
                         mode: MethodMode::Subscription,
-                        input: json!({}),
+                        input: json!({}).into(),
                         output: if matches!(mode, Mode::WideItem | Mode::WideJavaScript) {
-                            json!({"type":"string"})
+                            json!({"type":"string"}).into()
                         } else {
-                            json!({"type":"integer"})
+                            json!({"type":"integer"}).into()
                         },
                         resources: BTreeMap::new(),
                     },
@@ -70,8 +70,8 @@ fn service_contract(mode: Mode) -> Contract {
                     Method {
                         progress: None,
                         mode: MethodMode::Mutation,
-                        input: json!({}),
-                        output: json!({}),
+                        input: json!({}).into(),
+                        output: json!({}).into(),
                         resources: BTreeMap::new(),
                     },
                 ),
@@ -80,8 +80,8 @@ fn service_contract(mode: Mode) -> Contract {
                     Method {
                         progress: None,
                         mode: MethodMode::Query,
-                        input: json!({}),
-                        output: json!({"type":"integer"}),
+                        input: json!({}).into(),
+                        output: json!({"type":"integer"}).into(),
                         resources: BTreeMap::new(),
                     },
                 ),
@@ -350,8 +350,11 @@ fn component_contract(name: &str, events: BTreeMap<String, Value>) -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: json!({"type":"object"}),
-            events,
+            props: json!({"type":"object"}).into(),
+            events: events
+                .into_iter()
+                .map(|(name, schema)| (name, schema.into()))
+                .collect(),
             captures: BTreeMap::new(),
         },
     }
@@ -367,7 +370,7 @@ fn native_package(name: &str, implementation: &str, contract: Contract) -> maka_
                     implementation: Implementation::Native {
                         implementation: implementation.into(),
                     },
-                    configuration: json!({"type":"object"}),
+                    configuration: json!({"type":"object"}).into(),
                     imports: BTreeMap::new(),
                     exports: BTreeMap::from([(
                         "Export".into(),

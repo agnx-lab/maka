@@ -107,7 +107,7 @@ pub struct EntryDeclaration {
     /// are checked through their compiled implementation availability instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scene: Option<SceneLanguage>,
-    pub configuration: Value,
+    pub configuration: crate::Schema,
     #[serde(default)]
     pub imports: BTreeMap<String, Import>,
     #[serde(default)]
@@ -331,7 +331,7 @@ impl Packages {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeDefinition {
     pub implementation: String,
-    pub configuration: Value,
+    pub configuration: crate::Schema,
     pub exports: BTreeMap<String, Contract>,
 }
 impl NativeDefinition {
@@ -342,7 +342,7 @@ impl NativeDefinition {
     ) -> Self {
         Self {
             implementation: implementation.into(),
-            configuration,
+            configuration: configuration.into(),
             exports: exports
                 .into_iter()
                 .map(|(name, contract)| (name.into(), contract))

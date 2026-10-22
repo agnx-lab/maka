@@ -67,7 +67,7 @@ pub(super) fn fixture(
     };
     *events = ["changed", "a", "b", "c"]
         .into_iter()
-        .map(|name| (name.into(), json!({"type":"integer"})))
+        .map(|name| (name.into(), json!({"type":"integer"}).into()))
         .collect();
     let contract = contract.clone();
     let source = std::str::from_utf8(old_counter.file("index.mjs").unwrap()).unwrap()

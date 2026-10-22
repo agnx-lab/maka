@@ -27,6 +27,8 @@ pub mod operation;
 pub mod package;
 pub mod plan;
 pub mod runtime;
+mod schema;
+pub use schema::Schema;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

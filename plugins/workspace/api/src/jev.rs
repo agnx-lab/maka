@@ -113,7 +113,7 @@ pub fn contract() -> Contract {
                 (
                     "snapshot".into(),
                     Method {
-                        input: json!({"type":"object","additionalProperties":false}),
+                        input: json!({"type":"object","additionalProperties":false}).into(),
                         ..method::<Value, Snapshot>(MethodMode::Query)
                     },
                 ),

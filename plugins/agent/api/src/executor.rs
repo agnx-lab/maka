@@ -80,9 +80,11 @@ pub fn contract() -> Contract {
                     ),
                     mode: MethodMode::Mutation,
                     input: serde_json::to_value(schemars::schema_for!(Execute))
-                        .expect("executor input"),
+                        .expect("executor input")
+                        .into(),
                     output: serde_json::to_value(schemars::schema_for!(Outcome))
-                        .expect("executor output"),
+                        .expect("executor output")
+                        .into(),
                     resources: BTreeMap::from([(
                         "attachments".into(),
                         maka_plugin_core::contract::binary_resource_type().optional(),

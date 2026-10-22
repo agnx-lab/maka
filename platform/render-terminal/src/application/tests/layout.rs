@@ -319,7 +319,7 @@ pub(super) fn native(view: View, accept: Rc<Cell<bool>>) -> (tokio::runtime::Run
                             implementation: Implementation::Native {
                                 implementation: implementation.into(),
                             },
-                            configuration: json!({"type":"object"}),
+                            configuration: json!({"type":"object"}).into(),
                             imports: BTreeMap::new(),
                             exports: BTreeMap::from([(
                                 export.into(),
@@ -378,7 +378,7 @@ pub(super) fn native(view: View, accept: Rc<Cell<bool>>) -> (tokio::runtime::Run
                                 }
                                 .into(),
                             },
-                            configuration: json!({"type":"object"}),
+                            configuration: json!({"type":"object"}).into(),
                             imports: BTreeMap::from([
                                 (
                                     "source".into(),
@@ -505,7 +505,7 @@ pub(super) fn native(view: View, accept: Rc<Cell<bool>>) -> (tokio::runtime::Run
                             implementation: Implementation::Native {
                                 implementation: implementation.into(),
                             },
-                            configuration: json!({"type":"object"}),
+                            configuration: json!({"type":"object"}).into(),
                             imports: BTreeMap::new(),
                             exports: BTreeMap::from([(
                                 export.into(),

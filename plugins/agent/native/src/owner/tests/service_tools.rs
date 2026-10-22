@@ -43,8 +43,8 @@ fn counter_contract() -> Contract {
     let write = Method {
         progress: None,
         mode: MethodMode::Mutation,
-        input: json!({"type":"object","properties":{"amount":{"type":"integer","minimum":1},"note":{"type":"string"}},"required":["amount"],"additionalProperties":false}),
-        output: json!({"type":"object","properties":{"effects":{"type":"integer"},"payload":{"type":"string"}},"required":["effects"],"additionalProperties":false}),
+        input: json!({"type":"object","properties":{"amount":{"type":"integer","minimum":1},"note":{"type":"string"}},"required":["amount"],"additionalProperties":false}).into(),
+        output: json!({"type":"object","properties":{"effects":{"type":"integer"},"payload":{"type":"string"}},"required":["effects"],"additionalProperties":false}).into(),
         resources: BTreeMap::new(),
     };
     let read = Method {

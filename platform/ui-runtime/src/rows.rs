@@ -138,8 +138,10 @@ pub fn rows_contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Component {
-            props: serde_json::to_value(schemars::schema_for!(RowsProps)).expect("row props"),
-            events: BTreeMap::from([("activated".into(), activated_schema())]),
+            props: serde_json::to_value(schemars::schema_for!(RowsProps))
+                .expect("row props")
+                .into(),
+            events: BTreeMap::from([("activated".into(), activated_schema().into())]),
             captures: BTreeMap::new(),
         },
     }

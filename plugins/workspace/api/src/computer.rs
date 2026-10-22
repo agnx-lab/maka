@@ -133,7 +133,7 @@ pub fn contract() -> Contract {
                     "reset".into(),
                     Method {
                         mode: MethodMode::Mutation,
-                        input: empty.clone(),
+                        input: empty.clone().into(),
                         output: schemars::schema_for!(ResultValue).into(),
                         progress: None,
                         resources: BTreeMap::new(),
@@ -143,7 +143,7 @@ pub fn contract() -> Contract {
                     "state".into(),
                     Method {
                         mode: MethodMode::Query,
-                        input: empty,
+                        input: empty.into(),
                         output: schemars::schema_for!(ReplState).into(),
                         progress: None,
                         resources: BTreeMap::new(),

@@ -51,8 +51,8 @@ pub fn business() -> Contract {
                     Method {
                         progress: None,
                         mode: MethodMode::Query,
-                        input: json!({}),
-                        output: json!({}),
+                        input: json!({}).into(),
+                        output: json!({}).into(),
                         resources: BTreeMap::new(),
                     },
                 ),
@@ -60,11 +60,11 @@ pub fn business() -> Contract {
                     "write".into(),
                     Method {
                         progress: Some(
-                            json!({"type":"object","properties":{"step":{"type":"integer"}},"required":["step"],"additionalProperties":false}),
+                            json!({"type":"object","properties":{"step":{"type":"integer"}},"required":["step"],"additionalProperties":false}).into(),
                         ),
                         mode: MethodMode::Mutation,
-                        input: json!({}),
-                        output: json!({}),
+                        input: json!({}).into(),
+                        output: json!({}).into(),
                         resources: BTreeMap::new(),
                     },
                 ),
@@ -143,7 +143,7 @@ pub fn host_with_unavailable_business() -> (Input, Vec<Package>) {
             implementation: Implementation::Native {
                 implementation: maka_transport::GATEWAY.into(),
             },
-            configuration: json!({"type":"object","additionalProperties":false}),
+            configuration: json!({"type":"object","additionalProperties":false}).into(),
             imports: BTreeMap::from([("receipts".into(), import(receipt_reader_contract()))]),
             exports: BTreeMap::new(),
         },
@@ -170,7 +170,7 @@ pub fn host() -> (Input, Vec<Package>) {
                 module: "index.mjs".into(),
                 realm: Realm::Dedicated,
             },
-            configuration: json!({"type":"object","additionalProperties":false}),
+            configuration: json!({"type":"object","additionalProperties":false}).into(),
             imports: BTreeMap::new(),
             exports: BTreeMap::from([("Counter".into(), export(business()))]),
         },
@@ -186,7 +186,7 @@ pub fn host() -> (Input, Vec<Package>) {
             implementation: Implementation::Native {
                 implementation: maka_host_runtime::application::operations::RECEIPT_READER.into(),
             },
-            configuration: json!({"type":"object","additionalProperties":false}),
+            configuration: json!({"type":"object","additionalProperties":false}).into(),
             imports: BTreeMap::new(),
             exports: BTreeMap::from([("Receipts".into(), export(receipt_reader_contract()))]),
         },
@@ -199,7 +199,7 @@ pub fn host() -> (Input, Vec<Package>) {
             implementation: Implementation::Native {
                 implementation: maka_transport::GATEWAY.into(),
             },
-            configuration: json!({"type":"object","additionalProperties":false}),
+            configuration: json!({"type":"object","additionalProperties":false}).into(),
             imports: BTreeMap::from([
                 ("business".into(), import(business())),
                 ("receipts".into(), import(receipt_reader_contract())),

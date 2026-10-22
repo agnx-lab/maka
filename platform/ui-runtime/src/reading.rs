@@ -182,19 +182,21 @@ pub fn reading_contract() -> Contract {
         transport: Transport::Local,
         interface: Interface::Component {
             props: serde_json::to_value(schemars::schema_for!(ReadingProps))
-                .expect("reading props"),
+                .expect("reading props")
+                .into(),
             events: BTreeMap::from([
-                ("observed".into(), observation_schema()),
+                ("observed".into(), observation_schema().into()),
                 (
                     "input".into(),
                     serde_json::to_value(schemars::schema_for!(crate::abi::ComponentInput))
-                        .expect("reading input"),
+                        .expect("reading input")
+                        .into(),
                 ),
             ]),
             captures: BTreeMap::from([(
                 "tail".into(),
                 Capture {
-                    input: serde_json::json!({"type":"null"}),
+                    input: serde_json::json!({"type":"null"}).into(),
                     output: CaptureOutput::Continuation,
                 },
             )]),

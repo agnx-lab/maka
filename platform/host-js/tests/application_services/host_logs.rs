@@ -40,7 +40,7 @@ fn sources() -> (Input, Vec<Package>) {
             implementation: Implementation::Native {
                 implementation: "maka.host.logs".into(),
             },
-            configuration: json!({"type":"object","additionalProperties":false}),
+            configuration: json!({"type":"object","additionalProperties":false}).into(),
             imports: BTreeMap::new(),
             exports: BTreeMap::from([(
                 "HostLogs".into(),
@@ -60,7 +60,7 @@ fn sources() -> (Input, Vec<Package>) {
                 module: "host.mjs".into(),
                 realm: Realm::Dedicated,
             },
-            configuration: json!({"type":"object"}),
+            configuration: json!({"type":"object"}).into(),
             exports: BTreeMap::new(),
             imports: BTreeMap::from([(
                 "logs".into(),
@@ -80,7 +80,7 @@ fn sources() -> (Input, Vec<Package>) {
                 module: "host.mjs".into(),
                 realm: Realm::Dedicated,
             },
-            configuration: json!({"type":"object"}),
+            configuration: json!({"type":"object"}).into(),
             imports: BTreeMap::new(),
             exports: BTreeMap::new(),
         },
