@@ -71,12 +71,8 @@ impl Args {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err("the terminal shell requires a terminal on stdin and stdout".into());
         }
-        if self
-            .session
-            .as_ref()
-            .is_some_and(|session| session.is_empty() || session.len() > 128)
-        {
-            return Err("session must contain between 1 and 128 bytes".into());
+        if self.session.as_ref().is_some_and(String::is_empty) {
+            return Err("session must not be empty".into());
         }
         let stop = Arc::new(AtomicBool::new(false));
         // Install before opening any Host session or entering terminal modes.

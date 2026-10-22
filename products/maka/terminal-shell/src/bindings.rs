@@ -216,8 +216,8 @@ impl ApplicationHost {
 
     /// Capture a session without rebinding another view's editor or sends.
     pub fn session(&self, session_id: String) -> Result<Instance<ScopedHost>, String> {
-        if session_id.is_empty() || session_id.len() > 128 {
-            return Err("session must contain between 1 and 128 bytes".into());
+        if session_id.is_empty() {
+            return Err("session must not be empty".into());
         }
         Ok(Instance::new(ScopedHost {
             scope: Arc::new(Scope {
