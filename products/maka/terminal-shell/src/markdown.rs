@@ -743,6 +743,21 @@ mod tests {
             "  let 你好 = \"👩🏽‍💻 e\u{301}\";  \n\tprintln!(\"完成\");\n".as_bytes()
         );
         assert!(blocks[0].table.is_none());
+        let indented = parse_source("    ```\n    x\n    ```").unwrap();
+        assert_eq!(indented[0].text, "```\nx\n```");
+        assert_eq!(
+            indented[0]
+                .source
+                .iter()
+                .map(|segment| (
+                    segment.start,
+                    segment.end,
+                    segment.source_start,
+                    segment.source_end,
+                ))
+                .collect::<Vec<_>>(),
+            [(0, 4, 4, 8), (4, 6, 12, 14), (6, 9, 18, 21)]
+        );
     }
 
     #[test]

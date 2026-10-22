@@ -324,7 +324,17 @@ pub(super) fn code(
     let mut source_offset = 0;
     let first_line = &input[..line_end(input)];
     let fence = first_line.trim_start_matches([' ', '\t']);
-    let fenced = fence.starts_with("```") || fence.starts_with("~~~");
+    // CommonMark permits at most three columns before a fence. Four columns
+    // (including a tab stop) instead introduce literal indented code.
+    let columns = first_line[..first_line.len() - fence.len()]
+        .chars()
+        .fold(
+            0,
+            |at, ch| {
+                if ch == '\t' { at + 4 - at % 4 } else { at + 1 }
+            },
+        );
+    let fenced = columns < 4 && (fence.starts_with("```") || fence.starts_with("~~~"));
     if fenced {
         source_offset += first_line.len();
     }
