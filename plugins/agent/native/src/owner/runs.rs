@@ -34,7 +34,7 @@ use tokio::sync::{
 pub(super) struct Registry {
     activity: Arc<RwLock<()>>,
     state: Arc<Mutex<Runs>>,
-    sessions: MapMutex<BTreeMap<String, Weak<Mutex<()>>>>,
+    sessions: MapMutex<BTreeMap<String, Weak<Gate>>>,
 }
 
 impl Registry {
@@ -62,18 +62,17 @@ impl Registry {
         let activity = self.activity.clone().read_owned().await;
         let gate = {
             let mut sessions = self.sessions.lock().unwrap();
-            let gate = sessions
-                .get(id)
-                .and_then(Weak::upgrade)
-                .unwrap_or_else(|| Arc::new(Mutex::new(())));
+            let gate = sessions.get(id).and_then(Weak::upgrade).unwrap_or_else(|| {
+                Arc::new(Gate {
+                    registry: self.clone(),
+                    id: id.to_owned(),
+                    session: Arc::new(Mutex::new(())),
+                })
+            });
             sessions.insert(id.to_owned(), Arc::downgrade(&gate));
-            Lease {
-                registry: self.clone(),
-                id: id.to_owned(),
-                gate,
-            }
+            gate
         };
-        let session = gate.gate.clone().lock_owned().await;
+        let session = gate.session.clone().lock_owned().await;
         Session {
             _session: session,
             _activity: activity,
@@ -99,10 +98,10 @@ impl DerefMut for Exclusive {
 }
 
 pub(super) struct Session {
-    // Field drop order releases the gate before its lease checks strong_count.
+    // Release the ordering mutex before dropping the last shared gate owner.
     _session: OwnedMutexGuard<()>,
     _activity: OwnedRwLockReadGuard<()>,
-    gate: Lease,
+    gate: Arc<Gate>,
 }
 impl Session {
     pub(super) async fn state(&self) -> MutexGuard<'_, Runs> {
@@ -110,18 +109,17 @@ impl Session {
     }
 }
 
-struct Lease {
+struct Gate {
     registry: Arc<Registry>,
     id: String,
-    gate: Arc<Mutex<()>>,
+    session: Arc<Mutex<()>>,
 }
-impl Drop for Lease {
+impl Drop for Gate {
     fn drop(&mut self) {
         let mut sessions = self.registry.sessions.lock().unwrap();
-        if Arc::strong_count(&self.gate) == 1
-            && sessions
-                .get(&self.id)
-                .is_some_and(|gate| gate.as_ptr() == Arc::as_ptr(&self.gate))
+        if sessions
+            .get(&self.id)
+            .is_some_and(|gate| std::ptr::eq(gate.as_ptr(), self))
         {
             sessions.remove(&self.id);
         }
