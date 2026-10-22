@@ -75,6 +75,11 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
         support::click_node(&mut view, unsafe_link);
         wait_view(&mut view, |screen| screen.contains("Only HTTP(S) links") && screen.contains("Could not open link")).await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview"));
+        // Inline images can put the earlier Link above the reader's clip while
+        // loading. Read upward through the painted source before clicking it.
+        let reading = view.snapshot();
+        support::scroll_snapshot_text(&mut view, &reading, "UNSAFE_LINK", MouseEventKind::ScrollUp);
+        wait_view(&mut view, |screen| screen.contains("OPEN REPORT")).await;
         let report = link_node(&view, "OPEN REPORT");
         let report_id = report.id;
         support::click_node(&mut view, report);
