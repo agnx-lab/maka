@@ -245,6 +245,7 @@ impl Normalizer {
                 #[derive(serde::Deserialize)]
                 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
                 enum Failure {
+                    TimedOut,
                     Http {
                         status: u16,
                     },
@@ -257,6 +258,7 @@ impl Normalizer {
                 let failure = serde_json::from_value(value["error"].clone())
                     .map_err(|_| invalid("invalid provider error envelope"))?;
                 return Err(match failure {
+                    Failure::TimedOut => ModelError::TimedOut,
                     Failure::Http { status } => {
                         maka_agent_facts::model::error::ModelFailureCause::Http { status }
                             .validate()?;
