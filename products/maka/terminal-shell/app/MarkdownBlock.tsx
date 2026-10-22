@@ -156,7 +156,7 @@ function InlineRuns(props: {
               ref={(value) => {
                 node = value;
               }}
-              accessibilityRole="link"
+              role="link"
               accessibilityLabel={group()
                 .runs.map((run) => run.text)
                 .join('')}
