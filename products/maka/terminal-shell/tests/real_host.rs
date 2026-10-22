@@ -779,7 +779,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&session));
             terminal.wait_for("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
             terminal.wait_for("发送消息，或开始一项任务…").await;
-            let restored = terminal.wait_for("Manual UI Agent · 默认 · high").await;
+            let restored = terminal.wait_for("Manual UI Agent · high").await;
             assert!(!restored.contains(support::PROVIDER_KEY));
             assert!(!restored.contains(proxy_secret));
             let restarted = fixture.client().await;
