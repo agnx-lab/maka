@@ -74,10 +74,21 @@ pub(super) fn run<'c, T: Send + 'c>(
 ) -> crate::connection::BoxFuture<'c, Result<T, StoreError>> {
     Box::pin(async move {
         let mut tx = db.begin().await?;
+        let before: i64 = sqlx::query_scalar("SELECT total_changes()")
+            .fetch_one(&mut *tx)
+            .await?;
         match read(&mut tx).await {
             Ok(value) => {
+                let after: i64 = sqlx::query_scalar("SELECT total_changes()")
+                    .fetch_one(&mut *tx)
+                    .await?;
                 tx.commit().await?;
-                trim(db).await?;
+                // Cache fills and retained-source changes require maintenance.
+                // An unchanged fragment cannot add reclaimable bodies, even
+                // when its retained producer alone exceeds the page target.
+                if after != before {
+                    trim(db).await?;
+                }
                 Ok(value)
             }
             Err(error) => {

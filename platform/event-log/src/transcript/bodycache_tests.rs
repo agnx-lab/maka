@@ -25,6 +25,19 @@ use maka_agent_facts::{
 use maka_agent_ports::session::history::{HistoryField, Page, Position};
 
 async fn user(log: &EventLog, turn: &str, text: String) -> u64 {
+    user_input(
+        log,
+        turn,
+        InvocationInput::Message {
+            source_messages: vec![],
+            content: text.into(),
+            request_fingerprint: None,
+        },
+    )
+    .await
+}
+
+async fn user_input(log: &EventLog, turn: &str, input: InvocationInput) -> u64 {
     let write = EventWrite::plain(RuntimeEvent::new(
         Invocation {
             session_id: "cache".into(),
@@ -34,11 +47,7 @@ async fn user(log: &EventLog, turn: &str, text: String) -> u64 {
         },
         Fact::InvocationOpened {
             configuration: None,
-            input: InvocationInput::Message {
-                source_messages: vec![],
-                content: text.into(),
-                request_fingerprint: None,
-            },
+            input,
         },
     ))
     .unwrap();
@@ -180,13 +189,52 @@ fn backing_bytes(db: &rusqlite::Connection) -> Option<i64> {
 
 #[tokio::test]
 async fn oversized_source_reuses_fragments_then_reclaims_backing_file_on_replacement() {
+    use maka_agent_facts::{
+        input::{DeliveredMessage, MessageInput},
+        message::{MessageDisposition, MessageOrigin, Placement, RootSourceMessage, aggregate},
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("oversized.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     log.create_session("cache", "create", &serde_json::json!({}), 1)
         .await
         .unwrap();
-    let through = user(&log, "large", "α".repeat(17 * 1024 * 1024)).await;
+    // One canonical producer owns 34 MiB across enough siblings to distinguish
+    // an indexed continuation from a repeated cache-wide maintenance scan.
+    let text: MessageInput = "α".repeat(17 * 1024).into();
+    let digest = text.content_digest().unwrap();
+    const SIBLINGS: usize = 1024;
+    let sources: Vec<_> = (0..SIBLINGS)
+        .map(|index| RootSourceMessage {
+            message: DeliveredMessage {
+                origin: Some(MessageOrigin::WorkhubTask {
+                    task_id: format!("task-{index}"),
+                }),
+                message_id: format!("large-{index}"),
+                content: text.clone(),
+                submitted_content_digest: digest.clone(),
+            },
+            unprepared_content: text.clone(),
+            submitted_placement: Placement::CurrentTurn,
+            disposition: MessageDisposition::TurnStarted,
+            submitted_intent: None,
+        })
+        .collect();
+    let through = user_input(
+        &log,
+        "large",
+        InvocationInput::Message {
+            content: aggregate(sources.iter().map(|source| &source.message.content)),
+            source_messages: sources,
+            request_fingerprint: None,
+        },
+    )
+    .await;
     let position = RowPosition {
         source_sequence: through,
         item_index: 0,
@@ -202,7 +250,17 @@ async fn oversized_source_reuses_fragments_then_reclaims_backing_file_on_replace
     .await;
     let Page::Ready { chunks, after, .. } = page;
     assert_eq!(chunks[0].text, "α".repeat(4096));
-    let before = inspect(&log, |db| {
+    let before = inspect(&log, move |db| {
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM transcript_cache.rows WHERE session_id='cache' AND source_sequence=?",
+                [through as i64],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            SIBLINGS as i64 + 1,
+            "the opening must project each attributed message and its running state"
+        );
         assert!(
             db.query_row("PRAGMA transcript_cache.page_count", [], |row| row
                 .get::<_, i64>(0))
@@ -215,6 +273,20 @@ async fn oversized_source_reuses_fragments_then_reclaims_backing_file_on_replace
         )
     })
     .await;
+    let steps = Arc::new(AtomicUsize::new(0));
+    let observed = steps.clone();
+    log.connection
+        .run(move |db| {
+            Box::pin(async move {
+                db.lock_handle().await?.set_progress_handler(1, move || {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    true
+                });
+                Ok(())
+            })
+        })
+        .await
+        .unwrap();
     let Page::Ready { chunks, .. } = read(
         &log,
         through,
@@ -223,6 +295,23 @@ async fn oversized_source_reuses_fragments_then_reclaims_backing_file_on_replace
         },
     )
     .await;
+    log.connection
+        .run(|db| {
+            Box::pin(async move {
+                db.lock_handle().await?.remove_progress_handler();
+                Ok(())
+            })
+        })
+        .await
+        .unwrap();
+    let steps = steps.load(Ordering::Relaxed);
+    // Even one correlated sweep of all siblings must read/compare both source
+    // key columns and advance each row (>8 VM ops/row). Stay below that sweep
+    // lower bound, rather than imposing a machine-dependent elapsed-time cap.
+    assert!(
+        steps > 0 && steps < SIBLINGS * 8,
+        "cached continuation must not scan all {SIBLINGS} siblings: {steps} VM steps"
+    );
     assert_eq!(chunks[0].text, "α".repeat(4096));
     inspect(&log, move |db| {
         assert_eq!(
