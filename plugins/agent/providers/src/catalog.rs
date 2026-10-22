@@ -160,12 +160,42 @@ impl Snapshot {
                 )
             })
             .collect();
-        let descriptions = merge::shared_descriptions(&entries, &router);
+        let bridges: BTreeMap<_, _> = entries
+            .iter()
+            .filter(|entry| entry.provider == "openrouter")
+            .filter_map(|entry| {
+                entry
+                    .canonical
+                    .as_ref()
+                    .map(|canonical| (entry.model.id.clone(), canonical.clone()))
+            })
+            .collect();
+        let descriptions = merge::shared_descriptions(&bridges, &router);
+        for model in snapshot
+            .models
+            .values_mut()
+            .flat_map(|models| models.values_mut())
+        {
+            if let Some(description) = snapshot.descriptions.get(&model.id) {
+                merge::fill_description(model, description);
+            }
+        }
         for mut entry in entries {
             if entry.provider != "openrouter"
                 && let Some(common) = entry.canonical.as_ref().and_then(|id| descriptions.get(id))
             {
-                common.fill(&mut entry.model);
+                merge::fill_description(&mut entry.model, common);
+            }
+            // Exact IDs may fill omissions unless both sources explicitly bind
+            // that spelling to different canonical models.
+            if entry
+                .canonical
+                .as_ref()
+                .zip(bridges.get(&entry.model.id))
+                .is_none_or(|(route, gateway)| route == gateway)
+                && let Some(description) = snapshot.descriptions.get(&entry.model.id)
+            {
+                merge::fill_description(&mut entry.model, description);
             }
             snapshot
                 .models

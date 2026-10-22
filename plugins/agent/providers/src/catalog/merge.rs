@@ -17,47 +17,30 @@
  * under the License.
  */
 
-use super::{ModelInfo, models_dev::Entry};
+use super::ModelInfo;
 use std::collections::BTreeMap;
 
-pub(super) struct Description {
-    display_name: Option<String>,
-    description: Option<String>,
-    knowledge_cutoff: Option<String>,
-}
-impl Description {
-    pub(super) fn fill(&self, model: &mut ModelInfo) {
-        model.display_name = model
-            .display_name
-            .take()
-            .or_else(|| self.display_name.clone());
-        model.description = model
-            .description
-            .take()
-            .or_else(|| self.description.clone());
-        model.knowledge_cutoff = model
-            .knowledge_cutoff
-            .take()
-            .or_else(|| self.knowledge_cutoff.clone());
-    }
+pub(super) fn fill_description(model: &mut ModelInfo, description: &ModelInfo) {
+    model.display_name = model
+        .display_name
+        .take()
+        .or_else(|| description.display_name.clone());
+    model.description = model
+        .description
+        .take()
+        .or_else(|| description.description.clone());
+    model.knowledge_cutoff = model
+        .knowledge_cutoff
+        .take()
+        .or_else(|| description.knowledge_cutoff.clone());
 }
 
 /// Only an exact models.dev OpenRouter entry may connect a live OpenRouter ID
 /// to the canonical ID shared by another models.dev route. Slugs are not IDs.
 pub(super) fn shared_descriptions(
-    entries: &[Entry],
+    bridges: &BTreeMap<String, String>,
     router: &[ModelInfo],
-) -> BTreeMap<String, Description> {
-    let bridges: BTreeMap<_, _> = entries
-        .iter()
-        .filter(|entry| entry.provider == "openrouter")
-        .filter_map(|entry| {
-            entry
-                .canonical
-                .as_ref()
-                .map(|canonical| (entry.model.id.as_str(), canonical.as_str()))
-        })
-        .collect();
+) -> BTreeMap<String, ModelInfo> {
     let mut groups: BTreeMap<&str, Vec<&ModelInfo>> = BTreeMap::new();
     for model in router {
         if let Some(canonical) = bridges.get(model.id.as_str()) {
@@ -69,10 +52,12 @@ pub(super) fn shared_descriptions(
         .map(|(id, models)| {
             (
                 id.to_owned(),
-                Description {
+                ModelInfo {
+                    id: id.to_owned(),
                     display_name: unanimous(&models, |model| model.display_name.as_ref()),
                     description: unanimous(&models, |model| model.description.as_ref()),
                     knowledge_cutoff: unanimous(&models, |model| model.knowledge_cutoff.as_ref()),
+                    ..Default::default()
                 },
             )
         })
