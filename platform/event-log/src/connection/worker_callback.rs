@@ -525,3 +525,225 @@ async fn writer_panic_rejects_accepted_reader_writer_work_before_join() {
     reopened.shutdown().await.unwrap();
     drop(sender);
 }
+
+#[tokio::test]
+async fn worker_queries_reuse_async_statement_and_preserve_owned_rows_and_bindings() {
+    use futures_util::TryStreamExt;
+    use sqlx::Row;
+    const SQL: &str = "SELECT ?1 AS number, ?2 AS text, ?3 AS bytes, ?4 AS nullable";
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path()).await;
+    let row = owner
+        .run(|connection| {
+            Box::pin(async move {
+                let warm = sqlx::query(SQL)
+                    .bind(7i64)
+                    .bind("warm")
+                    .bind(vec![1u8])
+                    .bind(Some("present"))
+                    .fetch_one(&mut *connection)
+                    .await?;
+                assert_eq!(warm.try_get::<i64, _>(0)?, 7);
+                worker_query(connection, |worker| {
+                    Box::pin(async move {
+                        // Observe an existing prepared statement only while the callback
+                        // owns its original connection; no handle or pointer escapes.
+                        fn statement(
+                            worker: &mut sqlx::sqlite::SqliteWorkerConnection<'_>,
+                        ) -> usize {
+                            let db = worker.as_raw_handle();
+                            let mut found = None;
+                            let mut current = std::ptr::null_mut();
+                            // SAFETY: no SQLx stream is alive, connection remains exclusively
+                            // held, and SQLite-owned SQL bytes are used before advancing.
+                            unsafe {
+                                loop {
+                                    current =
+                                        rusqlite::ffi::sqlite3_next_stmt(db.as_ptr(), current);
+                                    if current.is_null() {
+                                        break;
+                                    }
+                                    let sql = rusqlite::ffi::sqlite3_sql(current);
+                                    if !sql.is_null()
+                                        && std::ffi::CStr::from_ptr(sql).to_bytes()
+                                            == SQL.as_bytes()
+                                    {
+                                        assert!(found.replace(current as usize).is_none());
+                                    }
+                                }
+                            }
+                            found.expect("ordinary SQLx query populated the original cache")
+                        }
+                        let before = statement(worker);
+                        let row = sqlx::query(SQL)
+                            .bind(-13i64)
+                            .bind("中🙂")
+                            .bind(vec![0u8, 255, 9])
+                            .bind(None::<String>)
+                            .fetch_one(&mut *worker)
+                            .await?;
+                        assert_eq!(
+                            statement(worker),
+                            before,
+                            "worker query reused the existing native statement"
+                        );
+                        let mut stream = sqlx::query(
+                            "SELECT value FROM facts UNION ALL SELECT 2 UNION ALL SELECT 3",
+                        )
+                        .fetch(&mut *worker);
+                        assert_eq!(stream.try_next().await?.unwrap().try_get::<i64, _>(0)?, 1);
+                        drop(stream); // partially consumed cursor must reset before reuse
+                        let values: Vec<i64> = sqlx::query_scalar(
+                            "SELECT value FROM facts UNION ALL SELECT 2 UNION ALL SELECT 3",
+                        )
+                        .fetch_all(&mut *worker)
+                        .await?;
+                        assert_eq!(values, [1, 2, 3]);
+                        assert_eq!(
+                            sqlx::query_scalar::<_, i64>("SELECT value FROM facts WHERE value=99")
+                                .fetch_optional(&mut *worker)
+                                .await?,
+                            None
+                        );
+                        assert!(matches!(
+                            sqlx::query_scalar::<_, i64>("SELECT value FROM facts WHERE value=99")
+                                .fetch_one(&mut *worker)
+                                .await,
+                            Err(sqlx::Error::RowNotFound)
+                        ));
+                        Ok(row)
+                    })
+                })
+                .await
+            })
+        })
+        .await
+        .unwrap();
+    owner.shutdown().await.unwrap();
+    // Returned values remain owned even after the original connection closes.
+    assert_eq!(row.get::<i64, _>("number"), -13);
+    assert_eq!(row.get::<String, _>("text"), "中🙂");
+    assert_eq!(row.get::<Vec<u8>, _>("bytes"), [0, 255, 9]);
+    assert_eq!(row.get::<Option<String>, _>("nullable"), None);
+}
+
+#[tokio::test]
+async fn worker_query_error_ends_stream_and_original_transaction_rolls_back() {
+    use futures_util::StreamExt;
+    use sqlx::Executor;
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path()).await;
+    let result = owner.run::<()>(|connection| Box::pin(async move {
+        let mut tx = connection.begin().await?;
+        let result = worker_query(&mut tx, |worker| Box::pin(async move {
+            let mut stream = (&mut *worker).fetch_many(sqlx::raw_sql(
+                "INSERT INTO facts VALUES(2); SELECT missing FROM facts; INSERT INTO facts VALUES(3);"));
+            assert_eq!(stream.next().await.unwrap()?.left().unwrap().rows_affected(), 1);
+            let error = stream.next().await.unwrap().unwrap_err();
+            assert!(matches!(error, sqlx::Error::Database(_)));
+            assert!(stream.next().await.is_none(), "error must terminate the original batch");
+            drop(stream);
+            assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM facts")
+                .fetch_one(&mut *worker).await?, 2, "no statement after the error may execute");
+            Err(StoreError::from(error))
+        })).await;
+        tx.rollback().await?;
+        result
+    })).await;
+    assert!(result.is_err());
+    assert_eq!(count(&owner).await, 1);
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn accepted_worker_queries_commit_after_waiter_cancellation_without_blocking_readers() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path()).await;
+    let (entered, reached) = oneshot::channel();
+    let (release, gate) = blocking::channel();
+    let writer = owner.clone();
+    let waiter = tokio::spawn(async move {
+        writer
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    worker_query(&mut tx, move |worker| {
+                        Box::pin(async move {
+                            sqlx::query("INSERT INTO facts VALUES(2)")
+                                .execute(&mut *worker)
+                                .await?;
+                            assert_ne!(std::thread::current().name(), Some("runtime-store-owner"));
+                            entered.send(()).unwrap();
+                            gate.recv_timeout(Duration::from_secs(10)).unwrap();
+                            Ok(())
+                        })
+                    })
+                    .await?;
+                    tx.commit().await?;
+                    Ok(())
+                })
+            })
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), reached)
+        .await
+        .unwrap()
+        .unwrap();
+    let visible = tokio::time::timeout(
+        Duration::from_secs(5),
+        owner.read(|connection| {
+            Box::pin(async move {
+                Ok(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM facts")
+                    .fetch_one(connection)
+                    .await?)
+            })
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(visible, 1);
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    release.send(()).unwrap();
+    assert_eq!(count(&owner).await, 2);
+    owner.shutdown().await.unwrap();
+    drop(crate::root::FileLease::acquire(&directory.path().join("writer.lock")).unwrap());
+}
+
+#[tokio::test]
+async fn accidental_async_wait_in_worker_queries_closes_and_rolls_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(directory.path()).await;
+    let result = owner
+        .run::<()>(|connection| {
+            Box::pin(async move {
+                let mut tx = connection.begin().await?;
+                worker_query(&mut tx, |worker| {
+                    Box::pin(async move {
+                        sqlx::query("INSERT INTO facts VALUES(2)")
+                            .execute(worker)
+                            .await?;
+                        futures_util::future::pending::<()>().await;
+                        Ok(())
+                    })
+                })
+                .await?;
+                tx.commit().await?;
+                Ok(())
+            })
+        })
+        .await;
+    assert!(matches!(result, Err(StoreError::OperationUnknown)));
+    owner.close_receipt().await.unwrap();
+    assert!(owner.run(|_| Box::pin(async { Ok(()) })).await.is_err());
+    let db = rusqlite::Connection::open(directory.path().join("callback.sqlite")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM facts", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(db);
+    drop(crate::root::FileLease::acquire(&directory.path().join("writer.lock")).unwrap());
+    owner.shutdown().await.unwrap();
+}

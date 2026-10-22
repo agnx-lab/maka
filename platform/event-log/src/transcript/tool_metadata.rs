@@ -22,6 +22,7 @@ use crate::StoreError;
 use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::Tool;
 use sqlx::SqliteConnection;
+use sqlx::sqlite::SqliteWorkerConnection;
 
 // Materialize the one-row owner and keep it before each indexed lookup.
 // Reordering these joins can scan the Session's payloads or entire tool indexes.
@@ -125,6 +126,19 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS MATERIALIZED (
 /// Pairing is evaluated at the supplied fence, never against future outcomes.
 pub(super) async fn read(
     tx: &mut SqliteConnection,
+    session: &str,
+    position: RowPosition,
+    through: i64,
+) -> Result<Tool, StoreError> {
+    let session = session.to_owned();
+    crate::connection::worker_query(tx, move |worker| {
+        Box::pin(async move { read_on_worker(worker, &session, position, through).await })
+    })
+    .await
+}
+
+pub(super) async fn read_on_worker(
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     position: RowPosition,
     through: i64,

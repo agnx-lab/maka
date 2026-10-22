@@ -20,7 +20,7 @@
 //! Final output membership from a logical Turn's original successful terminal.
 use super::model::Producer;
 use crate::StoreError;
-use sqlx::SqliteConnection;
+use sqlx::sqlite::SqliteWorkerConnection;
 
 // Choose the latest logical state first, including a later running/failed state.
 // A copied Session's directory and membership retain the same original evidence.
@@ -53,8 +53,8 @@ WHERE e.invocation_id = ?2 AND e.kind = 'executor_completed' AND e.sequence <= ?
 ORDER BY e.sequence DESC LIMIT 1";
 
 /// One lookup per Turn in a history page; never hydrate model output bodies.
-pub(super) async fn resolve(
-    tx: &mut SqliteConnection,
+pub(super) async fn resolve_on_worker(
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     turn: &str,
     through: i64,

@@ -21,7 +21,9 @@ use crate::StoreError;
 use maka_agent_ports::session::history::TurnFinished;
 use maka_agent_ports::session::history::TurnOutcome;
 use maka_agent_ports::session::history::TurnTiming;
+#[cfg(test)]
 use sqlx::SqliteConnection;
+use sqlx::sqlite::SqliteWorkerConnection;
 
 // Two scalar index seeks, regardless of the size of a Turn's transcript. Start
 // follows original sequence order, not the wall clock (which can move backward).
@@ -39,8 +41,23 @@ const SQL: &str = "WITH first AS (
     ORDER BY source_sequence DESC, item_index DESC LIMIT 1
 ) SELECT first.at, last.at, last.status FROM first, last";
 
+#[cfg(test)]
 pub(super) async fn read(
     tx: &mut SqliteConnection,
+    session: &str,
+    turn: &str,
+    through: i64,
+) -> Result<Option<TurnTiming>, StoreError> {
+    let session = session.to_owned();
+    let turn = turn.to_owned();
+    crate::connection::worker_query(tx, move |worker| {
+        Box::pin(async move { read_on_worker(worker, &session, &turn, through).await })
+    })
+    .await
+}
+
+pub(super) async fn read_on_worker(
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     turn: &str,
     through: i64,
