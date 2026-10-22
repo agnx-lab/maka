@@ -87,6 +87,7 @@ pub(crate) async fn initialize_connection(
         .await?;
     crate::message_sources::initialize(connection).await?;
     crate::sessions::initialize_execution(connection).await?;
+    crate::transcript::initialize_cache(connection).await?;
     Ok(())
 }
 

@@ -86,7 +86,8 @@ const PENDING: &str = r#"SELECT operation_id FROM runtime_events AS request
          ORDER BY sequence DESC LIMIT 1"#;
 
 /// Live readers retain their original transaction and reducer boundaries.
-/// Only evidence selection is delegated to the one synchronous policy core.
+/// Selection policy stays in one worker-local core; its final query uses the
+/// existing bounded SQLx statement cache across callbacks.
 pub(super) async fn selected(
     tx: &mut SqliteConnection,
     invocation: &str,
@@ -96,14 +97,16 @@ pub(super) async fn selected(
 ) -> Result<Vec<i64>, StoreError> {
     let invocation = invocation.to_owned();
     let step = step.map(str::to_owned);
-    tx.run_on_worker(move |handle| {
-        // SAFETY: the worker exclusively borrows its handle for this callback.
-        // This non-owning wrapper/statements are destroyed before returning IDs.
-        let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
-        db.set_prepared_statement_cache_capacity(100);
-        selected_on_handle(&db, &invocation, step.as_deref(), through, boundary)
-    })
-    .await?
+    let selection = tx
+        .run_on_worker(move |handle| {
+            // SAFETY: the worker exclusively borrows its handle for this callback.
+            // This wrapper and its statements are destroyed before returning the plan.
+            let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
+            db.set_prepared_statement_cache_capacity(100);
+            plan(&db, &invocation, step.as_deref(), through, boundary)
+        })
+        .await??;
+    selection.read(tx).await
 }
 
 pub(super) async fn fence(tx: &mut SqliteConnection, through: u64) -> Result<i64, StoreError> {
@@ -188,6 +191,16 @@ pub(super) fn selected_on_handle(
     through: i64,
     boundary: bool,
 ) -> Result<Vec<i64>, StoreError> {
+    plan(db, invocation, step, through, boundary)?.read_on_handle(db)
+}
+
+fn plan(
+    db: &RawConnection,
+    invocation: &str,
+    step: Option<&str>,
+    through: i64,
+    boundary: bool,
+) -> Result<Selection, StoreError> {
     let mut executor_boundary = false;
     if boundary {
         let kind: String = db
@@ -198,22 +211,26 @@ pub(super) fn selected_on_handle(
             kind.as_str(),
             "tool_dispatched" | "tool_rejected" | "tool_settled"
         ) {
-            return super::tools::selected(db, invocation, through);
+            return super::tools::selection(db, invocation, through);
         }
     }
     let external: bool = db
         .prepare_cached(EXTERNAL)?
         .query_row(params![invocation, through], |row| row.get(0))?;
     if external {
-        return ids(
-            db,
-            if executor_boundary {
-                EXEC_BOUNDARY
-            } else {
-                EXEC_REST
-            },
-            params![invocation, through, boundary],
-        );
+        return Ok(if executor_boundary {
+            Selection::ExecutorBoundary {
+                invocation: invocation.to_owned(),
+                through,
+                boundary,
+            }
+        } else {
+            Selection::ExecutorRest {
+                invocation: invocation.to_owned(),
+                through,
+                boundary,
+            }
+        });
     }
     let unresolved: Option<String> = if step.is_none() {
         pending_step_on_handle(db, invocation, through)?
@@ -226,21 +243,163 @@ pub(super) fn selected_on_handle(
     } else {
         &[]
     })?;
-    read_step(db, invocation, step, through, &boundaries, false)
+    Ok(Selection::Step {
+        invocation: invocation.to_owned(),
+        step: step.map(str::to_owned),
+        through,
+        boundaries,
+        completed: false,
+    })
 }
-/// UNION removes overlaps; CAST uses the index while original JSON equality
-/// preserves malformed non-string step-ID selection semantics.
-pub(super) fn read_step(
-    db: &RawConnection,
-    invocation: &str,
-    step: Option<&str>,
-    through: i64,
-    boundaries: &str,
-    completed: bool,
-) -> Result<Vec<i64>, StoreError> {
-    ids(
-        db,
-        STEP,
-        params![invocation, step, through, boundaries, completed],
-    )
+
+/// Owned query inputs selected under the current transaction. No evidence
+/// results or borrowed connection state survive the worker callback.
+pub(super) enum Selection {
+    Step {
+        invocation: String,
+        step: Option<String>,
+        through: i64,
+        boundaries: String,
+        completed: bool,
+    },
+    ExecutorBoundary {
+        invocation: String,
+        through: i64,
+        boundary: bool,
+    },
+    ExecutorRest {
+        invocation: String,
+        through: i64,
+        boundary: bool,
+    },
+}
+
+impl Selection {
+    fn sql(&self) -> &'static str {
+        match self {
+            Self::Step { .. } => STEP,
+            Self::ExecutorBoundary { .. } => EXEC_BOUNDARY,
+            Self::ExecutorRest { .. } => EXEC_REST,
+        }
+    }
+
+    fn read_on_handle(&self, db: &RawConnection) -> Result<Vec<i64>, StoreError> {
+        match self {
+            Self::Step {
+                invocation,
+                step,
+                through,
+                boundaries,
+                completed,
+            } => ids(
+                db,
+                self.sql(),
+                params![invocation, step, through, boundaries, completed],
+            ),
+            Self::ExecutorBoundary {
+                invocation,
+                through,
+                boundary,
+            }
+            | Self::ExecutorRest {
+                invocation,
+                through,
+                boundary,
+            } => ids(db, self.sql(), params![invocation, through, boundary]),
+        }
+    }
+
+    async fn read(&self, tx: &mut SqliteConnection) -> Result<Vec<i64>, StoreError> {
+        // UNION removes overlaps; CAST uses the index while original JSON
+        // equality preserves malformed non-string step-ID selection semantics.
+        let query = sqlx::query_scalar(self.sql());
+        Ok(match self {
+            Self::Step {
+                invocation,
+                step,
+                through,
+                boundaries,
+                completed,
+            } => {
+                query
+                    .bind(invocation)
+                    .bind(step)
+                    .bind(through)
+                    .bind(boundaries)
+                    .bind(completed)
+                    .fetch_all(tx)
+                    .await?
+            }
+            Self::ExecutorBoundary {
+                invocation,
+                through,
+                boundary,
+            }
+            | Self::ExecutorRest {
+                invocation,
+                through,
+                boundary,
+            } => {
+                query
+                    .bind(invocation)
+                    .bind(through)
+                    .bind(boundary)
+                    .fetch_all(tx)
+                    .await?
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EventLog;
+    use serde_json::json;
+    use sqlx::Connection;
+
+    #[tokio::test]
+    async fn cached_selection_preserves_json_step_types_fences_and_null_rebinding() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = EventLog::open(&temp.path().join("evidence.sqlite"))
+            .await
+            .unwrap();
+        log.connection.run(|db| Box::pin(async move {
+            // Deliberately seed one malformed numeric step ID in the real schema.
+            // Selection must exclude it before canonical fact decoding can occur.
+            for (sequence, kind, operation, fact) in [
+                (1, "invocation_opened", None, json!({"input":{"kind":"message"}})),
+                (2, "model_requested", Some("42"), json!({"purpose":"main","step_id":"42"})),
+                (3, "model_observed", None, json!({"step_id":"42"})),
+                (4, "model_observed", None, json!({"step_id":42})),
+                (5, "model_completed", Some("42"), json!({"step_id":"42"})),
+                (6, "model_observed", None, json!({"step_id":"42"})),
+            ] {
+                let event = json!({"invocation":{"session_id":"session"},"fact":fact});
+                sqlx::query("INSERT INTO event_log(sequence,event_id,invocation_id,kind,operation_id,event_json) VALUES(?,?,'invocation',?,?,?)")
+                    .bind(sequence).bind(format!("event-{sequence}")).bind(kind)
+                    .bind(operation).bind(event.to_string()).execute(&mut *db).await?;
+            }
+            let mut tx = db.begin().await?;
+            for (step, through, boundary, expected) in [
+                (Some("42"), 5, false, vec![1, 2, 3]),
+                (None, 5, false, vec![1]),
+                (Some("42"), 5, true, vec![1, 2, 3, 5]),
+                (Some("42"), 3, false, vec![1, 2, 3]),
+                (Some("missing"), 5, false, vec![1]),
+                (Some("42"), 5, false, vec![1, 2, 3]),
+            ] {
+                assert_eq!(selected(&mut tx, "invocation", step, through, boundary).await?, expected);
+                let synchronous = tx.run_on_worker(move |handle| {
+                    // SAFETY: no borrowed handle or statement escapes this callback.
+                    let raw = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
+                    selected_on_handle(&raw, "invocation", step, through, boundary)
+                }).await??;
+                assert_eq!(synchronous, expected);
+            }
+            tx.rollback().await?;
+            Ok(())
+        })).await.unwrap();
+        log.close().await.unwrap();
+    }
 }

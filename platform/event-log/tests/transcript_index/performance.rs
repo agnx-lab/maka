@@ -97,9 +97,9 @@ async fn one_invocation_transcript() {
                 .unwrap();
             let body_materialize_ms = started.elapsed().as_secs_f64() * 1000.0;
             let db = Connection::open(&path).unwrap();
-            let texts: Vec<String> = db
-                .prepare(
-                    "SELECT json_extract(payload, '$.text') FROM transcript_rows
+            let texts: Vec<String> = crate::test_store::inspect(&log, move |db| {
+                db.prepare(
+                    "SELECT json_extract(payload, '$.text') FROM transcript_cache.rows
                  WHERE session_id='a' AND json_extract(payload, '$.type')='assistant'
                  ORDER BY source_sequence, item_index",
                 )
@@ -107,7 +107,9 @@ async fn one_invocation_transcript() {
                 .query_map([], |row| row.get(0))
                 .unwrap()
                 .collect::<Result<_, _>>()
-                .unwrap();
+                .unwrap()
+            })
+            .await;
             assert_eq!(texts.len(), steps);
             for (step, text) in texts.iter().enumerate() {
                 assert_eq!(text, &format!("one-invocation-step-{step}. ").repeat(13));

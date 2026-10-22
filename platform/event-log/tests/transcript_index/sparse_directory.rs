@@ -60,7 +60,11 @@ async fn cold_windows_use_complete_directory_and_preserve_all_anchor_kinds_after
         }
     );
     let db = Connection::open(&path).unwrap();
-    assert!(rows(&db, "a").is_empty());
+    assert!(
+        crate::test_store::inspect(&log, |db| rows(db, "a"))
+            .await
+            .is_empty()
+    );
     let directory = || {
         db.prepare("SELECT source_sequence,item_index,message_id,role FROM transcript_directory WHERE session_id='a' ORDER BY source_sequence,item_index")
         .unwrap().query_map([],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?))).unwrap().collect::<Result<Vec<_>,_>>().unwrap()
@@ -80,7 +84,9 @@ async fn cold_windows_use_complete_directory_and_preserve_all_anchor_kinds_after
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert!(
-        rows(&db, "a").is_empty(),
+        crate::test_store::inspect(&log, |db| rows(db, "a"))
+            .await
+            .is_empty(),
         "ordinary reopen does not rebuild optional bodies"
     );
     // Each anchor starts independently with complete metadata and no optional bytes.
@@ -103,8 +109,11 @@ async fn cold_windows_use_complete_directory_and_preserve_all_anchor_kinds_after
         (Position::Before { cursor }, vec!["你好", "answ"]),
         (Position::After { cursor }, vec!["er😀"]),
     ] {
-        db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-            .unwrap();
+        crate::test_store::inspect(&log, move |db| {
+            db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+                .unwrap()
+        })
+        .await;
         let Page::Ready { chunks, .. } = log
             .history_text("a", through, position, false, 8192, 32, 65536)
             .await
@@ -134,8 +143,11 @@ async fn cold_windows_use_complete_directory_and_preserve_all_anchor_kinds_after
             "reading cannot rebuild or rewrite metadata"
         );
     }
-    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-        .unwrap();
+    crate::test_store::inspect(&log, move |db| {
+        db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+            .unwrap()
+    })
+    .await;
     let Page::Ready {
         chunks,
         before,
@@ -149,7 +161,8 @@ async fn cold_windows_use_complete_directory_and_preserve_all_anchor_kinds_after
     assert_eq!(chunks[0].message_id, assistant_id);
     assert!(before.is_some() && after.is_none());
     assert!(
-        rows(&db, "a")
+        crate::test_store::inspect(&log, |db| rows(db, "a"))
+            .await
             .iter()
             .all(|row| row.0.source_sequence >= sealed),
         "tail must not hydrate unrelated opening rows"

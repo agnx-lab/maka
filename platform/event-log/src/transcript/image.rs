@@ -76,12 +76,11 @@ impl EventLog {
         let session = session.to_owned();
         self.connection
             .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin().await?;
-                    super::directory::check_read(&mut tx, &session, through).await?;
-                    super::bodycache::ensure(&mut tx, &session, position).await?;
+                super::bodycache::run(connection, move |tx| Box::pin(async move {
+                    super::directory::check_read(tx, &session, through).await?;
+                    super::bodycache::ensure(tx, &session, position).await?;
                     let raw: String = sqlx::query_scalar(
-                        "SELECT a.value FROM transcript_rows r, json_each(r.payload, '$.attachments') a
+                        "SELECT a.value FROM transcript_cache.rows r, json_each(r.payload, '$.attachments') a
                          WHERE r.session_id = ?1 AND r.source_sequence = ?2 AND r.item_index = ?3
                          AND json_extract(r.payload, '$.type') = 'user' AND a.key = ?4",
                     )
@@ -104,7 +103,7 @@ impl EventLog {
                         return Err(invalid("image attachment is outside this Session"));
                     }
                     let chunk = crate::artifacts::read_attachment_image(
-                        &mut tx,
+                        tx,
                         &session,
                         relative_path,
                         Some(&attachment),
@@ -112,9 +111,9 @@ impl EventLog {
                         limit,
                     )
                     .await?;
-                    tx.commit().await?;
+
                     Ok(chunk)
-                })
+                }))
             })
             .await
     }
@@ -139,13 +138,12 @@ impl EventLog {
         let session = session.to_owned();
         self.connection
             .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin().await?;
-                    super::directory::check_read(&mut tx, &session, through).await?;
-                    super::bodycache::ensure(&mut tx, &session, position).await?;
+                super::bodycache::run(connection, move |tx| Box::pin(async move {
+                    super::directory::check_read(tx, &session, through).await?;
+                    super::bodycache::ensure(tx, &session, position).await?;
                     let raw: String = sqlx::query_scalar(
                         "SELECT json_remove(json_extract(payload, '$.content'), '$.kind')
-                 FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
+                 FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
                  AND json_extract(payload, '$.type') = 'tool_result'
                  AND json_extract(payload, '$.content.kind') = 'image'
                  AND length(CAST(json_extract(payload, '$.content') AS BLOB)) <= 16384",
@@ -168,7 +166,7 @@ impl EventLog {
                         return Err(invalid("tool image belongs to another Session"));
                     }
                     let chunk = crate::artifacts::read_image(
-                        &mut tx,
+                        tx,
                         &session,
                         &relative_path,
                         &image.mime_type,
@@ -177,9 +175,9 @@ impl EventLog {
                         position.source_sequence,
                     )
                     .await?;
-                    tx.commit().await?;
+
                     Ok(chunk)
-                })
+                }))
             })
             .await
     }

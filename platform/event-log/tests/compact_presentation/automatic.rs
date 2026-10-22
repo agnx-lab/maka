@@ -126,7 +126,7 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
             .await
             .unwrap();
         let db = Connection::open(&path).unwrap();
-        let before_rows = transcript(&db);
+        let before_rows = crate::test_store::inspect(&log, transcript).await;
         if ending == "success" {
             assert!(
                 finish(&log, &mut view, &inv, "summary", &"secret ".repeat(1024))
@@ -223,7 +223,7 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
         crate::transcript_cache::materialize_all_rows(&log, "session", end.sequence)
             .await
             .unwrap();
-        let projected = transcript(&db);
+        let projected = crate::test_store::inspect(&log, transcript).await;
         assert_eq!(&projected[..before_rows.len()], before_rows.as_slice());
         assert_eq!(projected.len(), expected.len());
         for ((sequence, bytes, _), row) in projected.iter().zip(expected) {
@@ -233,9 +233,15 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
                 serde_json::to_value(row.message).unwrap()
             );
         }
-        db.execute("DELETE FROM transcript_rows", []).unwrap();
-        db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-            .unwrap();
+        crate::test_store::inspect(&log, move |db| {
+            db.execute("DELETE FROM transcript_cache.rows", []).unwrap()
+        })
+        .await;
+        crate::test_store::inspect(&log, move |db| {
+            db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+                .unwrap()
+        })
+        .await;
         db.execute("DELETE FROM catalog_message_watermark", [])
             .unwrap();
         log.close().await.unwrap();
@@ -243,7 +249,10 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
         crate::transcript_cache::materialize_all_rows(&reopened, "session", end.sequence)
             .await
             .unwrap();
-        assert_eq!(transcript(&db), projected);
+        assert_eq!(
+            crate::test_store::inspect(&reopened, transcript).await,
+            projected
+        );
         assert!(
             reopened
                 .observe_session::<Value>("session")

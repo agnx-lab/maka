@@ -109,37 +109,40 @@ async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity()
             |row| row.get(0),
         )
         .unwrap();
-    // Dropping optional bodies preserves committed metadata and accepted work.
-    connection
-        .execute("DELETE FROM transcript_rows", [])
-        .unwrap();
+    // Closing the owner drops optional bodies while preserving accepted work.
+    assert_eq!(connection.query_row("SELECT count(*) FROM sqlite_schema WHERE name IN ('transcript_rows','transcript_text')", [], |row| row.get::<_,i64>(0)).unwrap(), 0);
     drop(connection);
     let log = EventLog::open(&path).await.unwrap();
     let cache = Connection::open(&path).unwrap();
     assert_eq!(
         cache
-            .query_row("SELECT count(*) FROM transcript_rows", [], |row| row
+            .query_row("SELECT count(*) FROM sqlite_schema WHERE name IN ('transcript_rows','transcript_text')", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
         0
     );
-    log.transcript_headers(
-        "session",
-        &maka_event_log::transcript::TranscriptRead {
-            through: 1,
-            position: None,
-            direction: maka_event_log::transcript::TranscriptDirection::Newer,
-            limit: 256,
-        },
-    )
-    .await
-    .unwrap();
+    let headers = log
+        .transcript_headers(
+            "session",
+            &maka_event_log::transcript::TranscriptRead {
+                through: 1,
+                position: None,
+                direction: maka_event_log::transcript::TranscriptDirection::Newer,
+                limit: 256,
+            },
+        )
+        .await
+        .unwrap();
     assert!(
         cache
-            .query_row("SELECT count(*) FROM transcript_rows", [], |row| row
+            .query_row("SELECT count(*) FROM sqlite_schema WHERE name IN ('transcript_rows','transcript_text')", [], |row| row
                 .get::<_, i64>(0))
             .unwrap()
-            > 0
+            == 0
+    );
+    assert!(
+        !headers.is_empty(),
+        "public reads reconstruct rows from canonical facts"
     );
     drop(cache);
     assert_eq!(

@@ -77,7 +77,7 @@ async fn source(
 // Retain only identities/digests, never a second copy of all large row payloads.
 fn fingerprints(db: &Connection) -> Vec<(i64, i64, String, i64)> {
     db.prepare(
-        "SELECT source_sequence, item_index, digest, total_bytes FROM transcript_rows
+        "SELECT source_sequence, item_index, digest, total_bytes FROM transcript_cache.rows
          WHERE session_id = ? ORDER BY source_sequence, item_index",
     )
     .unwrap()
@@ -197,8 +197,7 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
     crate::transcript_cache::materialize_all_rows(&log, SESSION, through)
         .await
         .unwrap();
-    let db = Connection::open(&path).unwrap();
-    let original = fingerprints(&db);
+    let original = crate::test_store::inspect(&log, fingerprints).await;
     assert_eq!(
         original
             .iter()
@@ -409,15 +408,21 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
         );
     };
     check(&log).await;
+    crate::test_store::inspect(&log, |db| {
+        for table in ["transcript_cache.text", "transcript_cache.rows"] {
+            db.execute(&format!("DELETE FROM {table}"), []).unwrap();
+        }
+    })
+    .await;
     log.close().await.unwrap();
-    for table in ["transcript_text", "transcript_rows"] {
-        db.execute(&format!("DELETE FROM {table}"), []).unwrap();
-    }
     let reopened = EventLog::open(&path).await.unwrap();
     crate::transcript_cache::materialize_all_rows(&reopened, SESSION, through)
         .await
         .unwrap();
-    assert_eq!(fingerprints(&db), original);
+    assert_eq!(
+        crate::test_store::inspect(&reopened, fingerprints).await,
+        original
+    );
     check(&reopened).await;
     reopened.close().await.unwrap();
 }

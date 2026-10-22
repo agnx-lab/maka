@@ -23,7 +23,7 @@ use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::SourceField;
 use regex::{Regex, RegexBuilder};
 use serde_json::Value;
-use sqlx::{Connection, Row, SqliteConnection};
+use sqlx::{Row, SqliteConnection};
 
 pub struct TranscriptSearch {
     pub through: u64,
@@ -81,9 +81,8 @@ impl EventLog {
         let session = session.to_owned();
         self.connection
             .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin().await?;
-                    super::directory::check_read(&mut tx, &session, input.through).await?;
+                super::bodycache::run(connection, move |tx| Box::pin(async move {
+                    super::directory::check_read(tx, &session, input.through).await?;
                     let query = if after.is_some() {
                         "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?3,?4) ORDER BY source_sequence,item_index LIMIT 65"
                     } else {
@@ -104,8 +103,8 @@ impl EventLog {
                             break;
                         }
                         let locator = row_position(header.try_get(0)?,header.try_get(1)?)?;
-                        super::bodycache::ensure(&mut tx,&session,locator).await?;
-                        let size: i64 = sqlx::query_scalar("SELECT total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+                        super::bodycache::ensure(tx,&session,locator).await?;
+                        let size: i64 = sqlx::query_scalar("SELECT total_bytes FROM transcript_cache.rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
                             .bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         let size = sequence_number(size)?;
                         if index > 0 && bytes + size > 16 * 1024 * 1024 {
@@ -115,11 +114,11 @@ impl EventLog {
                         bytes += size;
                         position = Some(locator);
                         let payload: Vec<u8> = sqlx::query_scalar(
-                    "SELECT payload FROM transcript_rows WHERE session_id = ? AND source_sequence = ? AND item_index = ?"
+                    "SELECT payload FROM transcript_cache.rows WHERE session_id = ? AND source_sequence = ? AND item_index = ?"
                 ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         let row: Value = serde_json::from_slice(&payload)?;
                         if !input.include_internal
-                            && internal(&mut tx, &session, through, locator, &row).await?
+                            && internal(tx, &session, through, locator, &row).await?
                         {
                             continue;
                         }
@@ -131,9 +130,9 @@ impl EventLog {
                             });
                         }
                     }
-                    tx.commit().await?;
+
                     Ok(result)
-                })
+                }))
             })
             .await
     }

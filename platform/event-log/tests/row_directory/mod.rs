@@ -238,12 +238,15 @@ mod bare_copy {
                 .unwrap();
             assert_eq!(members, 2);
             assert_eq!(
-                db.query_row(
-                    "SELECT count(*) FROM transcript_rows WHERE session_id='target'",
-                    [],
-                    |r| r.get::<_, i64>(0)
-                )
-                .unwrap(),
+                crate::test_store::inspect(&log, |db| {
+                    db.query_row(
+                        "SELECT count(*) FROM transcript_cache.rows WHERE session_id='target'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap()
+                })
+                .await,
                 0
             );
             if collision {

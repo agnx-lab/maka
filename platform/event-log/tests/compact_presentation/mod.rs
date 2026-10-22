@@ -17,9 +17,6 @@
  * under the License.
  */
 
-#[path = "support/transcript.rs"]
-mod transcript_cache;
-
 use maka_agent_facts::context::CheckpointMode;
 use maka_agent_facts::context::CompactOutcome;
 use maka_agent_facts::context::ModelPurpose;
@@ -44,10 +41,10 @@ use maka_presentation::InvocationView;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-#[path = "compact_presentation/fixtures.rs"]
+#[path = "fixtures.rs"]
 mod fixtures;
 use fixtures::*;
-#[path = "compact_presentation/automatic.rs"]
+#[path = "automatic.rs"]
 mod automatic;
 
 #[tokio::test]
@@ -90,7 +87,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
             .await
             .unwrap();
         let db = Connection::open(&path).unwrap();
-        let old_rows = transcript(&db);
+        let old_rows = crate::test_store::inspect(&log, transcript).await;
         let compact = identity(mode);
         let mut view = InvocationView::new();
         hidden(
@@ -190,7 +187,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         crate::transcript_cache::materialize_all_rows(&log, "session", delta.sequence)
             .await
             .unwrap();
-        assert_eq!(transcript(&db), old_rows);
+        assert_eq!(crate::test_store::inspect(&log, transcript).await, old_rows);
         let outcome = match mode {
             "accepted" | "rejected" => {
                 hidden(
@@ -293,7 +290,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         crate::transcript_cache::materialize_all_rows(&log, "session", terminal.sequence)
             .await
             .unwrap();
-        assert_eq!(transcript(&db), old_rows);
+        assert_eq!(crate::test_store::inspect(&log, transcript).await, old_rows);
         let acknowledged = log
             .set_session_read_marker::<Value>("session", &opened.event.id)
             .await
@@ -302,9 +299,15 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         let canonical = log.prefix(100, 1024 * 1024).await.unwrap().digest;
         // Reopening rebuilds the discarded projection, preserving canonical bytes.
         db.execute("DELETE FROM catalog_messages", []).unwrap();
-        db.execute("DELETE FROM transcript_rows", []).unwrap();
-        db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
-            .unwrap();
+        crate::test_store::inspect(&log, move |db| {
+            db.execute("DELETE FROM transcript_cache.rows", []).unwrap()
+        })
+        .await;
+        crate::test_store::inspect(&log, move |db| {
+            db.execute_batch("DELETE FROM transcript_cache.text; DELETE FROM transcript_cache.rows")
+                .unwrap()
+        })
+        .await;
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
         let rebuilt = log.get_session::<Value>("session").await.unwrap().unwrap();
@@ -313,7 +316,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         crate::transcript_cache::materialize_all_rows(&log, "session", terminal.sequence)
             .await
             .unwrap();
-        assert_eq!(transcript(&db), old_rows);
+        assert_eq!(crate::test_store::inspect(&log, transcript).await, old_rows);
         assert_eq!(
             log.prefix(100, 1024 * 1024).await.unwrap().digest,
             canonical

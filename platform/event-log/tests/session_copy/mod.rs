@@ -17,9 +17,6 @@
  * under the License.
  */
 
-#[path = "support/transcript.rs"]
-mod transcript_cache;
-
 use maka_agent_facts::artifact::Artifact;
 use maka_agent_facts::artifact::ArtifactKind;
 use maka_agent_facts::artifact::ArtifactSource;
@@ -698,16 +695,18 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
                 relative_path: files[0].id.clone(),
             }
         );
-        let inspect = rusqlite::Connection::open(&path).unwrap();
-        for table in ["transcript_text", "transcript_rows"] {
-            inspect
-                .execute(
-                    &format!("DELETE FROM {table} WHERE session_id = ?"),
-                    [session],
-                )
-                .unwrap();
-        }
-        drop(inspect);
+        let cache_session = session.to_owned();
+        crate::test_store::inspect(&log, move |inspect| {
+            for table in ["transcript_cache.text", "transcript_cache.rows"] {
+                inspect
+                    .execute(
+                        &format!("DELETE FROM {table} WHERE session_id = ?"),
+                        [&cache_session],
+                    )
+                    .unwrap();
+            }
+        })
+        .await;
         crate::transcript_cache::materialize_all_rows(&log, session, root.high_water)
             .await
             .unwrap();

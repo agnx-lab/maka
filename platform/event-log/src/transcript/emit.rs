@@ -60,15 +60,42 @@ pub(super) async fn source(
     source: u64,
 ) -> Result<Vec<Row>, StoreError> {
     let sequence = read::sql_number(source)?;
+    // Keep this repeated eligibility statement in the connection's bounded
+    // SQLx cache. Worker-local rusqlite wrappers cannot retain statements
+    // between callbacks; projection still uses the same transaction below.
+    let sql = candidate_sql();
+    let candidate: Option<(String, Option<String>, String)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(sequence)
+            .bind(session)
+            .fetch_optional(&mut *connection)
+            .await?;
+    let Some(candidate) = candidate else {
+        return Ok(Vec::new());
+    };
+    let (invocation, step, kind) = candidate;
+    let projection = if kind == "context_checkpoint_recorded" {
+        Projection::Compaction
+    } else {
+        Projection::Evidence(
+            evidence::selected(connection, &invocation, step.as_deref(), sequence, true).await?,
+        )
+    };
     let session = session.to_owned();
     connection
         .run_on_worker(move |handle| {
             // SAFETY: exclusive worker-local borrow; no handle-backed values escape.
             let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
             db.set_prepared_statement_cache_capacity(100);
-            source_on_handle(&db, &session, sequence)
+            project_source(&db, &session, sequence, projection)
         })
         .await?
+}
+
+fn candidate_sql() -> String {
+    format!(
+        "SELECT e.invocation_id, CASE WHEN e.kind = 'model_observed' THEN json_extract(e.event_json, '$.fact.step_id') ELSE e.operation_id END, e.kind FROM runtime_events e WHERE e.sequence = ?1 AND (e.event_session = ?2 OR EXISTS(SELECT 1 FROM session_history_members h WHERE h.session_id = ?2 AND h.sequence = e.sequence)) AND {ELIGIBLE}"
+    )
 }
 
 pub(super) fn source_on_handle(
@@ -76,9 +103,7 @@ pub(super) fn source_on_handle(
     session: &str,
     source: i64,
 ) -> Result<Vec<Row>, StoreError> {
-    let sql = format!(
-        "SELECT e.invocation_id, CASE WHEN e.kind = 'model_observed' THEN json_extract(e.event_json, '$.fact.step_id') ELSE e.operation_id END, e.kind FROM runtime_events e WHERE e.sequence = ?1 AND (e.event_session = ?2 OR EXISTS(SELECT 1 FROM session_history_members h WHERE h.session_id = ?2 AND h.sequence = e.sequence)) AND {ELIGIBLE}"
-    );
+    let sql = candidate_sql();
     let candidate: Option<(String, Option<String>, String)> = db
         .prepare_cached(&sql)?
         .query_row(params![source, session], |row| {
@@ -88,10 +113,35 @@ pub(super) fn source_on_handle(
     let Some((invocation, step, kind)) = candidate else {
         return Ok(Vec::new());
     };
-    if kind == "context_checkpoint_recorded" {
-        return Ok(vec![super::compaction::project(db, source)?]);
-    }
-    let ids = evidence::selected_on_handle(db, &invocation, step.as_deref(), source, true)?;
+    let projection = if kind == "context_checkpoint_recorded" {
+        Projection::Compaction
+    } else {
+        Projection::Evidence(evidence::selected_on_handle(
+            db,
+            &invocation,
+            step.as_deref(),
+            source,
+            true,
+        )?)
+    };
+    project_source(db, session, source, projection)
+}
+
+enum Projection {
+    Compaction,
+    Evidence(Vec<i64>),
+}
+
+fn project_source(
+    db: &RawConnection,
+    session: &str,
+    source: i64,
+    projection: Projection,
+) -> Result<Vec<Row>, StoreError> {
+    let ids = match projection {
+        Projection::Compaction => return Ok(vec![super::compaction::project(db, source)?]),
+        Projection::Evidence(ids) => ids,
+    };
     let mut view = InvocationView::new();
     let mut own = Vec::new();
     for sequence in ids {
