@@ -36,7 +36,6 @@ const glyphs = {
   file: '📄',
   terminal: '⌁',
   copy: '⧉',
-  edit: '✎',
   archive: '▤',
   trash: '⌫',
   wrap: '↵',
