@@ -337,7 +337,7 @@ async fn failed_startup_retirement_waits_for_cleanup_without_blocking_session_ad
                     consumer: id(2),
                     import: "echo".into(),
                     grant: EndpointGrant {
-                        methods: vec!["echo".into()],
+                        methods: ["echo".to_owned()].into_iter().collect(),
                         recovery: false,
                     },
                 },
