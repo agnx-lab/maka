@@ -1305,13 +1305,19 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         support::click_text(&mut view, "Message composer");
         wait_view(&mut view, |screen| screen.contains("Search workspaces…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("Choose a workspace to begin…")).await;
+        wait_view(&mut view, |screen| {
+            screen.contains("Choose a workspace to begin…")
+        })
+        .await;
         for key in [KeyCode::Enter, KeyCode::Char(' ')] {
             tab_to_label(&mut view, "Choose workspace from composer card").await;
             view.handle_event(Event::Key(KeyEvent::new(key, KeyModifiers::NONE)));
             wait_view(&mut view, |screen| screen.contains("Search workspaces…")).await;
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-            wait_view(&mut view, |screen| screen.contains("Choose a workspace to begin…")).await;
+            wait_view(&mut view, |screen| {
+                screen.contains("Choose a workspace to begin…")
+            })
+            .await;
         }
 
         support::click_text(&mut view, "Choose composer workspace");
@@ -1390,7 +1396,10 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         view.handle_event(Event::Paste("你好".into()));
         support::wait_draft(&client, &created_id, "RESIDENT_FIRST_MESSAG你好E").await;
         for _ in 0..2 {
-            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
+            view.handle_event(Event::Key(KeyEvent::new(
+                KeyCode::Backspace,
+                KeyModifiers::NONE,
+            )));
         }
         support::wait_draft(&client, &created_id, "RESIDENT_FIRST_MESSAGE").await;
         assert_eq!(view.surface().focused(), Some(editor));

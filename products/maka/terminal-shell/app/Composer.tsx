@@ -326,7 +326,9 @@ export function Composer(props: {
                       readonly={!owner?.editable()}
                       onChange={owner?.changeDraft}
                       onSubmit={owner?.submit}
-                      placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
+                      placeholder={
+                        owner ? 'Message or run a task…' : 'Choose a workspace to begin…'
+                      }
                       style={{
                         minHeight: hero() && !compact() ? 40 : 24,
                         maxHeight: compact() ? 64 : 144,
@@ -394,7 +396,9 @@ export function Composer(props: {
               {props.session()?.permissions()}
             </Text>
             <If when={props.session() !== null}>
-              <View pointerEvents="box-none" style={{ flex: 1, minWidth: 0 }}>{props.models}</View>
+              <View pointerEvents="box-none" style={{ flex: 1, minWidth: 0 }}>
+                {props.models}
+              </View>
             </If>
             <If when={props.session() === null}>
               <View pointerEvents="none" style={{ flex: 1 }} />
