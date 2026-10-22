@@ -92,7 +92,7 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                     <List
                       each={owner.filtered()}
                       keyExtractor={(instance) => JSON.stringify(instance.instance)}
-                      estimatedItemSize={56}
+                      estimatedItemSize={56 + 12}
                       separator={() => <View style={{ height: 12 }} />}
                       empty={
                         <Text style={{ ...bodyTextStyle, color: C.muted }}>
