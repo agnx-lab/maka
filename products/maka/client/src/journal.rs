@@ -29,9 +29,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{
     Row, SqlitePool,
-    sqlite::{
-        SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteRow, SqliteSynchronous,
-    },
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow, SqliteSynchronous},
 };
 use std::path::Path;
 use uuid::Uuid;
@@ -181,54 +179,112 @@ pub struct DraftReference {
 
 impl Journal {
     pub async fn open(path: &Path) -> Result<Self> {
+        Self::open_inner(
+            path,
+            #[cfg(test)]
+            None,
+        )
+        .await
+    }
+
+    async fn open_inner(
+        path: &Path,
+        #[cfg(test)] contention: Option<&tokio::sync::Notify>,
+    ) -> Result<Self> {
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
             .synchronous(SqliteSynchronous::Full);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map_err(error)?;
-        let mut connection = pool.acquire().await.map_err(error)?;
-        // Serialize schema inspection and ALTER across independent client scopes.
-        let mut transaction = sqlx::Connection::begin_with(&mut *connection, "BEGIN IMMEDIATE")
-            .await
-            .map_err(error)?;
-        sqlx::query("CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, domain TEXT NOT NULL, deployment TEXT NOT NULL, context TEXT NOT NULL, draft_owner TEXT, reference TEXT, receipt TEXT, abandoned INTEGER NOT NULL DEFAULT 0)")
-            .execute(&mut *transaction).await.map_err(error)?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS operations_pending ON operations(domain,deployment,draft_owner) WHERE receipt IS NULL AND abandoned=0")
-            .execute(&mut *transaction).await.map_err(error)?;
-        sqlx::query("CREATE TABLE IF NOT EXISTS drafts (owner TEXT PRIMARY KEY, revision INTEGER NOT NULL, text TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0)")
-            .execute(&mut *transaction).await.map_err(error)?;
-        for (inspect, column, alter) in [
-            (
-                "PRAGMA table_info(drafts)",
-                "attachments",
-                "ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
-            ),
-            (
-                "PRAGMA table_info(operations)",
-                "upload_adopted",
-                "ALTER TABLE operations ADD COLUMN upload_adopted INTEGER NOT NULL DEFAULT 0",
-            ),
-        ] {
-            let columns = sqlx::query(inspect)
-                .fetch_all(&mut *transaction)
-                .await
-                .map_err(error)?;
-            if !columns
-                .iter()
-                .any(|row| row.get::<&str, _>("name") == column)
-            {
-                sqlx::query(alter)
-                    .execute(&mut *transaction)
-                    .await
-                    .map_err(error)?;
+        let pool_options = SqlitePoolOptions::new().max_connections(1);
+        // WAL admission shares the pool's existing startup budget. In-flight
+        // SQLite calls and acknowledged cleanup may finish after that budget.
+        let deadline = tokio::time::Instant::now() + pool_options.get_acquire_timeout();
+        let pool = pool_options.connect_lazy_with(options);
+        let mut connection = match pool.acquire().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                pool.close().await;
+                return Err(format!("client journal opening SQLite connection: {error}"));
             }
+        };
+        let startup: Result<()> = async {
+            // Mode changes precede the schema transaction and use SQLite's file
+            // locks, including between independent client processes.
+            loop {
+                match sqlx::query_scalar::<_, String>("PRAGMA journal_mode=WAL")
+                    .fetch_one(&mut *connection)
+                    .await
+                {
+                    Ok(mode) if mode == "wal" => break,
+                    Ok(mode) => return Err(format!("client journal enabling WAL: SQLite returned {mode}")),
+                    Err(error) => {
+                        let busy = error.as_database_error()
+                            .and_then(|error| error.code())
+                            .and_then(|code| code.parse::<i32>().ok())
+                            .is_some_and(|code| code & 0xff == 5);
+                        #[cfg(test)]
+                        if busy && let Some(contention) = contention {
+                            contention.notify_one();
+                        }
+                        if busy {
+                            tokio::task::yield_now().await;
+                        }
+                        if !busy || tokio::time::Instant::now() >= deadline {
+                            return Err(format!("client journal enabling WAL: {error}"));
+                        }
+                    }
+                }
+            }
+            // Serialize schema inspection and ALTER across independent client scopes.
+            let mut transaction = sqlx::Connection::begin_with(&mut *connection, "BEGIN IMMEDIATE")
+                .await
+                .map_err(|error| format!("client journal beginning schema transaction: {error}"))?;
+            sqlx::query("CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, domain TEXT NOT NULL, deployment TEXT NOT NULL, context TEXT NOT NULL, draft_owner TEXT, reference TEXT, receipt TEXT, abandoned INTEGER NOT NULL DEFAULT 0)")
+                .execute(&mut *transaction).await.map_err(|error| format!("client journal creating operations table: {error}"))?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS operations_pending ON operations(domain,deployment,draft_owner) WHERE receipt IS NULL AND abandoned=0")
+                .execute(&mut *transaction).await.map_err(|error| format!("client journal creating pending operations index: {error}"))?;
+            sqlx::query("CREATE TABLE IF NOT EXISTS drafts (owner TEXT PRIMARY KEY, revision INTEGER NOT NULL, text TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0)")
+                .execute(&mut *transaction).await.map_err(|error| format!("client journal creating drafts table: {error}"))?;
+            for (inspect, column, alter) in [
+                (
+                    "PRAGMA table_info(drafts)",
+                    "attachments",
+                    "ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
+                ),
+                (
+                    "PRAGMA table_info(operations)",
+                    "upload_adopted",
+                    "ALTER TABLE operations ADD COLUMN upload_adopted INTEGER NOT NULL DEFAULT 0",
+                ),
+            ] {
+                let columns = sqlx::query(inspect)
+                    .fetch_all(&mut *transaction)
+                    .await
+                    .map_err(|error| format!("client journal inspecting {column} column: {error}"))?;
+                if !columns
+                    .iter()
+                    .any(|row| row.get::<&str, _>("name") == column)
+                {
+                    sqlx::query(alter)
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(|error| format!("client journal adding {column} column: {error}"))?;
+                }
+            }
+            transaction
+                .commit()
+                .await
+                .map_err(|error| format!("client journal committing schema transaction: {error}"))?;
+            Ok(())
+        }.await;
+        if let Err(cause) = startup {
+            let closed = connection.close().await;
+            pool.close().await;
+            return Err(match closed {
+                Ok(()) => cause,
+                Err(cleanup) => format!("{cause}; closing startup connection: {cleanup}"),
+            });
         }
-        transaction.commit().await.map_err(error)?;
         drop(connection);
         Ok(Self(
             pool,
@@ -671,9 +727,9 @@ pub(crate) fn uploaded_attachment(operation: &Operation) -> Result<Option<DraftA
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::{Connection, SqliteConnection};
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn concurrent_open_migrates_the_original_text_row_without_losing_its_revision() {
+    async fn original_journal() -> (tempfile::TempDir, std::path::PathBuf, DraftKey) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("old-client.db");
         let pool = SqlitePoolOptions::new()
@@ -700,6 +756,12 @@ mod tests {
             .await
             .unwrap();
         pool.close().await;
+        (directory, path, key)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_open_migrates_the_original_text_row_without_losing_its_revision() {
+        let (_directory, path, key) = original_journal().await;
         let (first, second) = tokio::join!(Journal::open(&path), Journal::open(&path));
         let (first, second) = (first.unwrap(), second.unwrap());
         let loaded = first.load_draft(&key).await.unwrap().unwrap();
@@ -724,6 +786,200 @@ mod tests {
                 .save_draft(&key, Some(7), "stale old scope".to_owned().into())
                 .await
                 .is_err()
+        );
+    }
+
+    async fn original_journal_with_reader() -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        DraftKey,
+        SqliteConnection,
+    ) {
+        let (directory, path, key) = original_journal().await;
+        let mut reader =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&path))
+                .await
+                .unwrap();
+        let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&mut reader)
+            .await
+            .unwrap();
+        assert_eq!(mode, "delete");
+        sqlx::query("BEGIN").execute(&mut reader).await.unwrap();
+        let revision: i64 = sqlx::query_scalar("SELECT revision FROM drafts")
+            .fetch_one(&mut reader)
+            .await
+            .unwrap();
+        assert_eq!(revision, 7);
+
+        (directory, path, key, reader)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn open_waits_for_a_real_reader_before_migrating_the_original_draft() {
+        let (_directory, path, key, mut reader) = original_journal_with_reader().await;
+        let contention = tokio::sync::Notify::new();
+        let opening = Journal::open_inner(&path, Some(&contention));
+        tokio::pin!(opening);
+        let observed = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            tokio::select! {
+                biased;
+                () = contention.notified() => None,
+                result = &mut opening => Some(result),
+            }
+        })
+        .await;
+        // Release even when startup returned an unexpected non-contention error.
+        let rollback = sqlx::query("ROLLBACK").execute(&mut reader).await;
+        let closed = reader.close().await;
+        rollback.unwrap();
+        closed.unwrap();
+        let result = match observed.expect("startup did not report contention or finish") {
+            Some(result) => result,
+            None => opening.await,
+        };
+        let first = result.expect("startup must resume after the real reader releases its lock");
+        let second = Journal::open(&path).await.unwrap();
+        let loaded = first.load_draft(&key).await.unwrap().unwrap();
+        assert_eq!(
+            (
+                loaded.revision,
+                loaded.text.as_str(),
+                loaded.attachments.len()
+            ),
+            (7, "original unsent text", 0)
+        );
+        let edited = first
+            .save_draft(&key, Some(7), "edited after migration".into())
+            .await
+            .unwrap();
+        assert_eq!(edited.revision, 8);
+        let stale = second
+            .save_draft(&key, Some(7), "stale old scope".into())
+            .await;
+        let loaded = second.load_draft(&key).await.unwrap().unwrap();
+        for journal in [&first, &second] {
+            let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+                .fetch_one(&journal.0)
+                .await
+                .unwrap();
+            let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+                .fetch_one(&journal.0)
+                .await
+                .unwrap();
+            assert_eq!((mode.as_str(), synchronous), ("wal", 2));
+        }
+        first.0.close().await;
+        second.0.close().await;
+        assert!(stale.is_err());
+        assert_eq!(
+            (
+                loaded.revision,
+                loaded.text.as_str(),
+                loaded.attachments.len()
+            ),
+            (8, "edited after migration", 0)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelling_contended_open_leaves_the_original_draft_reopenable() {
+        let (_directory, path, key, mut reader) = original_journal_with_reader().await;
+        let contention = tokio::sync::Notify::new();
+        let mut opening = Box::pin(Journal::open_inner(&path, Some(&contention)));
+        let observed = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            tokio::select! {
+                biased;
+                () = contention.notified() => Ok(()),
+                result = &mut opening => Err(result.err()),
+            }
+        })
+        .await;
+        drop(opening);
+        let rollback = sqlx::query("ROLLBACK").execute(&mut reader).await;
+        let closed = reader.close().await;
+        rollback.unwrap();
+        closed.unwrap();
+        observed
+            .expect("startup did not report contention")
+            .expect("startup returned before cancellation");
+        let journal = Journal::open(&path).await.unwrap();
+        let draft = journal.load_draft(&key).await.unwrap().unwrap();
+        journal.0.close().await;
+        assert_eq!(
+            (draft.revision, draft.text.as_str(), draft.attachments.len()),
+            (7, "original unsent text", 0)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn contended_open_exhausts_its_budget_without_losing_the_original_draft() {
+        let (_directory, path, key, mut reader) = original_journal_with_reader().await;
+        let started = tokio::time::Instant::now();
+        let result = Journal::open(&path).await;
+        let elapsed = started.elapsed();
+        let rollback = sqlx::query("ROLLBACK").execute(&mut reader).await;
+        let closed = reader.close().await;
+        rollback.unwrap();
+        closed.unwrap();
+        let cause = result
+            .err()
+            .expect("held reader must prevent WAL admission");
+        assert!(
+            cause.contains("client journal enabling WAL:") && cause.contains("(code: 5)"),
+            "{cause}"
+        );
+        assert!(elapsed >= SqlitePoolOptions::new().get_acquire_timeout());
+        let journal = Journal::open(&path).await.unwrap();
+        let draft = journal.load_draft(&key).await.unwrap().unwrap();
+        journal.0.close().await;
+        assert_eq!(
+            (draft.revision, draft.text.as_str(), draft.attachments.len()),
+            (7, "original unsent text", 0)
+        );
+    }
+
+    #[tokio::test]
+    async fn schema_failure_keeps_its_stage_and_releases_the_startup_transaction() {
+        let (_directory, path, _key) = original_journal().await;
+        let mut connection =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&path))
+                .await
+                .unwrap();
+        sqlx::query("CREATE TABLE operations (id TEXT PRIMARY KEY)")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        connection.close().await.unwrap();
+        let cause = Journal::open(&path)
+            .await
+            .err()
+            .expect("invalid schema must fail");
+        assert!(
+            cause.contains("client journal creating pending operations index:")
+                && cause.contains("(code: 1)"),
+            "{cause}"
+        );
+        let mut connection =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&path))
+                .await
+                .unwrap();
+        sqlx::query("BEGIN EXCLUSIVE")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        let row = sqlx::query("SELECT revision,text FROM drafts")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query("ROLLBACK")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        connection.close().await.unwrap();
+        assert_eq!(
+            (row.get::<i64, _>("revision"), row.get::<&str, _>("text")),
+            (7, "original unsent text")
         );
     }
 }
