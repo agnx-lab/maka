@@ -81,6 +81,8 @@ pub(crate) struct Inbox {
     pub(super) encoded: Option<Result<Encoded, String>>,
     /// Last image whose entire upload-and-retirement transaction was flushed.
     pub last_fully_written_image: Option<u32>,
+    /// The terminal geometry of the last whole image transaction's flush.
+    pub last_fully_written_geometry: Option<u64>,
     pub in_flight: Option<FrameToken>,
     pub(super) ready: Option<Offer>,
     pub geometry: u64,
@@ -106,6 +108,7 @@ impl Inbox {
             pending: None,
             encoded: None,
             last_fully_written_image: None,
+            last_fully_written_geometry: None,
             in_flight: None,
             ready: None,
             geometry: 1,
@@ -243,6 +246,7 @@ impl Inbox {
     /// Records a complete writer receipt, independently of whether resize has
     /// revoked this frame's input geometry. Only the native worker can publish.
     pub(super) fn written(&mut self, offer: Offer, image: Option<u32>) {
+        self.last_fully_written_geometry = Some(offer.geometry);
         if let Some(image) = image {
             self.last_fully_written_image = Some(image);
         }
@@ -386,6 +390,7 @@ mod tests {
     #[test]
     fn late_sixel_maxima_resize_the_same_canvas_without_changing_terminal_units() {
         let mut inbox = Inbox::new(capabilities(), false);
+        assert_eq!(inbox.last_fully_written_geometry, None);
         let token = FrameToken::default();
         inbox.published = Some(token.clone());
         inbox.keyboard = Some(token.clone());
@@ -420,6 +425,7 @@ mod tests {
             Some(41),
         );
         assert_eq!(inbox.last_fully_written_image, Some(41));
+        assert_eq!(inbox.last_fully_written_geometry, Some(1));
         assert_eq!(inbox.ready.as_ref().unwrap().geometry, 1);
         assert!(inbox.published.is_none());
         assert!(inbox.capture.is_none());
@@ -458,10 +464,46 @@ mod tests {
         size.pixel_height = Some(600);
         inbox.push(Event::WindowResized(size)).unwrap();
         assert_eq!(inbox.geometry, 4);
+        assert_eq!(inbox.last_fully_written_geometry, Some(1));
         assert_eq!(
             inbox.capabilities.viewport(),
             Some(gpui::size(gpui::DevicePixels(800), gpui::DevicePixels(600)))
         );
+    }
+
+    #[test]
+    fn resizing_back_to_the_same_pixels_does_not_reuse_an_old_write() {
+        let mut inbox = Inbox::new(capabilities(), false);
+        let token = FrameToken::default();
+        inbox.written(
+            Offer {
+                token: token.clone(),
+                geometry: 1,
+            },
+            None,
+        );
+        assert_eq!(inbox.last_fully_written_geometry, Some(1));
+
+        let mut size = capabilities().size;
+        size.cols = 80;
+        size.pixel_width = Some(800);
+        inbox.push(Event::WindowResized(size)).unwrap();
+        inbox
+            .push(Event::WindowResized(capabilities().size))
+            .unwrap();
+        assert_eq!(inbox.geometry, 3);
+        assert_eq!(inbox.last_fully_written_geometry, Some(1));
+        // An old viewport can finish after resize without certifying the new one.
+        inbox.written(
+            Offer {
+                token: token.clone(),
+                geometry: 1,
+            },
+            None,
+        );
+        assert_eq!(inbox.last_fully_written_geometry, Some(1));
+        inbox.written(Offer { token, geometry: 3 }, None);
+        assert_eq!(inbox.last_fully_written_geometry, Some(3));
     }
 
     #[test]

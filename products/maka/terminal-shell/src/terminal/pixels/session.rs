@@ -689,6 +689,7 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
             return false;
         }
         let previous = inbox.last_fully_written_image;
+        let same_viewport_flushed = inbox.last_fully_written_geometry == Some(candidate.geometry);
         let image = if previous == Some(slots.first) {
             slots.second
         } else {
@@ -706,12 +707,19 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
                 at,
             );
         }
-        (candidate, image, previous, capabilities, tracing)
+        (
+            candidate,
+            image,
+            previous,
+            same_viewport_flushed,
+            capabilities,
+            tracing,
+        )
     };
     let presentation = presentation.clone();
     background
         .spawn(async move {
-            let (candidate, image, previous, caps, tracing) = work;
+            let (candidate, image, previous, same_viewport_flushed, caps, tracing) = work;
             let token = candidate.frame.token();
             let geometry = candidate.geometry;
             let size = caps.size;
@@ -779,6 +787,7 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
                             size.cols,
                             size.rows,
                             caps.synchronized,
+                            same_viewport_flushed,
                         )
                         .map(WireFrame::Inline),
                     }
