@@ -32,7 +32,7 @@ pub(super) struct Input {
 }
 
 #[derive(Clone)]
-pub(super) struct Offer {
+pub(in crate::terminal) struct Offer {
     pub token: FrameToken,
     pub geometry: u64,
 }
@@ -110,7 +110,7 @@ pub(crate) struct Inbox {
     /// The terminal geometry of the last whole image transaction's flush.
     pub last_fully_written_geometry: Option<u64>,
     /// Sole writer transaction, retained until the native owner consumes its receipt.
-    pub in_flight: Option<Offer>,
+    pub(super) in_flight: Option<Offer>,
     pub(super) ready: Option<Offer>,
     pub geometry: u64,
     pub resize: Option<WindowSize>,
@@ -331,7 +331,7 @@ impl Inbox {
             .chain(self.in_flight.iter().cloned())
     }
 
-    pub(super) fn completed_frames(&self) -> impl Iterator<Item = Offer> + '_ {
+    pub(in crate::terminal) fn completed_frames(&self) -> impl Iterator<Item = Offer> + '_ {
         self.frames.iter().filter_map(|job| match &job.work {
             FrameWork::Ready(encoded) => Some(Offer {
                 token: encoded.frame.token(),

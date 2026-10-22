@@ -123,11 +123,25 @@ fn run(
                     )
                 });
             let mut state = delivered.state.lock().unwrap();
+            let stopping = state.quit || delivered.stop.load(Ordering::Acquire);
+            let failed = state.error.is_some();
             let pending_frame = timing
                 .as_ref()
                 .and_then(|_| state.pixels.as_ref()?.oldest_frame());
             let mut admitted = false;
+            let mut disposition = None;
             if let Some(inbox) = &mut state.pixels {
+                if inbox.capabilities.protocol == Some(super::probe::Protocol::Sixel) {
+                    disposition = if failed {
+                        Some("error")
+                    } else if stopping {
+                        Some("cancel")
+                    } else if inbox.geometry != drawn_geometry.get() {
+                        Some("resize")
+                    } else {
+                        None
+                    };
+                }
                 admitted = inbox.submitted(super::input::Candidate {
                     frame,
                     geometry: drawn_geometry.get(),
@@ -148,6 +162,12 @@ fn run(
                 sample.pixel_size = Some((size.width.0, size.height.0));
                 sample.outcome = if admitted { "admitted" } else { "discarded" };
                 sample.pending_frame = pending_frame;
+                if let Some(outcome) = disposition {
+                    // An already entered draw may reach this sink after the
+                    // shutdown snapshot. Its ticket still owns the original
+                    // slot, while its eligibility for display has ended.
+                    trace.discard(&token, drawn_geometry.get(), outcome);
+                }
             }
         }),
         Arc::new(move || waker.unpark()),
@@ -275,25 +295,45 @@ fn run(
             if let Some(offer) = ready {
                 // Resize invalidates the receipt immediately, even while GPU
                 // readback or an old output transaction is still finishing.
-                let current = resize.is_none() && offer.geometry == generation;
-                if current {
+                let mut state = presentation.state.lock().unwrap();
+                let inbox = state.pixels.as_ref().unwrap();
+                let disposition = if caps.protocol == Some(super::probe::Protocol::Sixel)
+                    && state.error.is_some()
+                {
+                    Some("error")
+                } else if caps.protocol == Some(super::probe::Protocol::Sixel)
+                    && (state.quit || presentation.stop.load(Ordering::Acquire))
+                {
+                    Some("cancel")
+                } else if resize.is_some()
+                    || offer.geometry != generation
+                    || inbox.resize.is_some()
+                    || inbox.geometry != offer.geometry
+                {
+                    Some("resize")
+                } else {
+                    None
+                };
+                if disposition.is_none() {
+                    // The receipt commit and shutdown snapshot share this
+                    // lock, so a revoked token cannot later be published.
                     platform
                         .mark_presented(offer.token.clone())
                         .map_err(|error| error.to_string())?;
                 }
-                let mut state = presentation.state.lock().unwrap();
                 let inbox = state.pixels.as_mut().unwrap();
-                let current = current && inbox.resize.is_none() && inbox.geometry == offer.geometry;
-                if current {
+                if disposition.is_none() {
                     inbox.published = Some(offer.token.clone());
                 }
                 inbox.presented(&offer.token);
                 if let Some(trace) = &mut state.trace {
-                    if current {
+                    if disposition.is_none() {
                         let at = Instant::now();
                         trace.record(&offer.token, offer.geometry, "published", at, at);
-                    } else if caps.protocol == Some(super::probe::Protocol::Sixel) {
-                        trace.discard(&offer.token, offer.geometry, "resize");
+                    } else if caps.protocol == Some(super::probe::Protocol::Sixel)
+                        && let Some(outcome) = disposition
+                    {
+                        trace.discard(&offer.token, offer.geometry, outcome);
                     }
                 }
                 drop(state);
