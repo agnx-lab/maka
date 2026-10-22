@@ -91,6 +91,103 @@ async fn shell_titles_migrate_existing_policy_and_persist_explicit_disable() {
 }
 
 #[tokio::test]
+async fn text_assistant_tone_migrates_once_without_changing_other_policy_or_revision() {
+    let expected = serde_json::json!({
+        "revision": 8,
+        "policy": {
+            "compactionPrompt": "Keep this exact 中文 prompt.\n",
+            "networkProxy": {
+                "enabled": true,
+                "protocol": "socks5",
+                "host": "proxy.example",
+                "port": 1080,
+                "authEnabled": true,
+                "username": "original-user",
+                "bypassList": ["example.org"],
+                "autoBypassDomains": ["localhost"]
+            },
+            "personalization": {"displayName": "原名 🦀"},
+            "memory": {"enabled": false, "agentReadEnabled": true},
+            "workspaceInstructions": {"enabled": false},
+            "privacy": {"incognitoActive": true},
+            "chatDefaults": {"sandboxMode": "read-only"},
+            "shell": {"preference": "auto", "executable": "/bin/custom-shell", "titles": false},
+            "externalAgents": {"antigravity": {"executable": "/Applications/Antigravity.app"}},
+            "language": "zh-TW"
+        }
+    });
+    let mut legacy = expected.clone();
+    legacy["policy"]["personalization"]["assistantTone"] =
+        serde_json::json!("Unused tone with Unicode 中文 and a newline.\n");
+    let temp = tempfile::tempdir().unwrap();
+    let owner = root(temp.path());
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    store.close().await.unwrap();
+    let db = database(&owner);
+    db.execute(
+        "INSERT INTO runtime_policy(singleton, document) VALUES(1, ?)",
+        [legacy.to_string()],
+    )
+    .unwrap();
+    db.execute("DELETE FROM _sqlx_migrations WHERE version = 4", [])
+        .unwrap();
+
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let snapshot = store.runtime_policy().await.unwrap();
+    assert_eq!(serde_json::to_value(snapshot).unwrap(), expected);
+    let migrated: String = db
+        .query_row("SELECT document FROM runtime_policy", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&migrated).unwrap(),
+        expected
+    );
+    store.close().await.unwrap();
+
+    db.execute_batch("CREATE TRIGGER reject_policy_rewrite BEFORE UPDATE ON runtime_policy BEGIN SELECT RAISE(ABORT, 'migration must not repeat'); END;").unwrap();
+    let store = ConfigurationStore::for_root(owner).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(store.runtime_policy().await.unwrap()).unwrap(),
+        expected
+    );
+    let reopened: String = db
+        .query_row("SELECT document FROM runtime_policy", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(reopened, migrated);
+    store.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn assistant_tone_migration_preserves_invalid_field_types_for_rejection() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = root(temp.path());
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let mut invalid = serde_json::to_value(store.runtime_policy().await.unwrap()).unwrap();
+    invalid["policy"]["personalization"]["assistantTone"] = serde_json::json!(true);
+    let original = invalid.to_string();
+    store.close().await.unwrap();
+    let db = database(&owner);
+    db.execute(
+        "INSERT INTO runtime_policy(singleton, document) VALUES(1, ?)",
+        [&original],
+    )
+    .unwrap();
+    db.execute("DELETE FROM _sqlx_migrations WHERE version = 4", [])
+        .unwrap();
+
+    let store = ConfigurationStore::for_root(owner).await.unwrap();
+    assert!(matches!(
+        store.runtime_policy().await,
+        Err(ConfigError::UnsupportedDatabase)
+    ));
+    let unchanged: String = db
+        .query_row("SELECT document FROM runtime_policy", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(unchanged, original);
+    store.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn proxy_policy_and_password_commit_together_with_cas_noops_and_rollback() {
     use maka_agent_facts::configuration::CredentialState;
     use maka_agent_facts::configuration::CredentialVersionBasis;
@@ -462,7 +559,7 @@ async fn language_preference_cas_and_restart_preserve_explicit_auto_and_english(
 #[tokio::test]
 async fn reading_pre_language_policy_preserves_canonical_document_without_write() {
     // Literal existing format: the expectation is independent of today's serializer.
-    const DOCUMENT: &str = r#"{"revision":8,"policy":{"networkProxy":{"enabled":false,"protocol":"http","host":"127.0.0.1","port":7890,"authEnabled":false,"username":"","bypassList":["metaso.cn","baidu.com"],"autoBypassDomains":["localhost","127.0.0.1","::1","192.168.*","10.*","*.local"]},"personalization":{"displayName":"原名","assistantTone":""},"memory":{"enabled":true,"agentReadEnabled":false},"workspaceInstructions":{"enabled":true},"privacy":{"incognitoActive":false},"chatDefaults":{"sandboxMode":"workspace-write"},"shell":{"preference":"auto","executable":"","titles":true},"externalAgents":{"antigravity":{"executable":""}}}}"#;
+    const DOCUMENT: &str = r#"{"revision":8,"policy":{"networkProxy":{"enabled":false,"protocol":"http","host":"127.0.0.1","port":7890,"authEnabled":false,"username":"","bypassList":["metaso.cn","baidu.com"],"autoBypassDomains":["localhost","127.0.0.1","::1","192.168.*","10.*","*.local"]},"personalization":{"displayName":"原名"},"memory":{"enabled":true,"agentReadEnabled":false},"workspaceInstructions":{"enabled":true},"privacy":{"incognitoActive":false},"chatDefaults":{"sandboxMode":"workspace-write"},"shell":{"preference":"auto","executable":"","titles":true},"externalAgents":{"antigravity":{"executable":""}}}}"#;
     let temp = tempfile::tempdir().unwrap();
     let owner = root(temp.path());
     let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();

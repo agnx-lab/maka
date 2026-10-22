@@ -41,7 +41,6 @@ pub struct Preferences {
     pub default_compaction_prompt: String,
     pub revision: u64,
     pub display_name: String,
-    pub assistant_tone: String,
     pub workspace_instructions: bool,
     pub incognito_active: bool,
     pub shell_titles: bool,
@@ -63,25 +62,12 @@ pub struct Update {
 )]
 #[schemars(rename = "SettingsPreferencesMutation")]
 pub enum Mutation {
-    Language {
-        preference: LanguagePreference,
-    },
-    CompactionPrompt {
-        prompt: Option<String>,
-    },
-    Personalization {
-        display_name: String,
-        assistant_tone: String,
-    },
-    WorkspaceInstructions {
-        enabled: bool,
-    },
-    Privacy {
-        incognito_active: bool,
-    },
-    ShellTitles {
-        enabled: bool,
-    },
+    Language { preference: LanguagePreference },
+    CompactionPrompt { prompt: Option<String> },
+    Personalization { display_name: String },
+    WorkspaceInstructions { enabled: bool },
+    Privacy { incognito_active: bool },
+    ShellTitles { enabled: bool },
 }
 #[derive(Serialize, JsonSchema)]
 #[serde(
@@ -128,7 +114,6 @@ pub(crate) async fn read(
             .into(),
         revision: snapshot.revision,
         display_name: snapshot.policy.personalization.display_name,
-        assistant_tone: snapshot.policy.personalization.assistant_tone,
         workspace_instructions: snapshot.policy.workspace_instructions.enabled,
         incognito_active: snapshot.policy.privacy.incognito_active,
         shell_titles: snapshot.policy.shell.titles,
@@ -162,18 +147,9 @@ pub(crate) async fn update(
                 .set_privacy(input.expected_revision, PrivacyPolicy { incognito_active })
                 .await
         }
-        Mutation::Personalization {
-            display_name,
-            assistant_tone,
-        } => {
+        Mutation::Personalization { display_name } => {
             store
-                .set_personalization(
-                    input.expected_revision,
-                    Personalization {
-                        display_name,
-                        assistant_tone,
-                    },
-                )
+                .set_personalization(input.expected_revision, Personalization { display_name })
                 .await
         }
         Mutation::WorkspaceInstructions { enabled } => {

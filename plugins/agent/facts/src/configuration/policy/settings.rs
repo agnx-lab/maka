@@ -44,7 +44,6 @@ pub struct NetworkProxy {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Personalization {
     pub display_name: String,
-    pub assistant_tone: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -113,12 +112,6 @@ pub struct PersonalizationPatch {
         deserialize_with = "present"
     )]
     pub display_name: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present"
-    )]
-    pub assistant_tone: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

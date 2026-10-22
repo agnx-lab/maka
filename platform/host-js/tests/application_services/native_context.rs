@@ -170,7 +170,6 @@ async fn native_context_uses_actual_root_and_stable_instances_across_deployments
                     0,
                     Personalization {
                         display_name: marker.clone(),
-                        assistant_tone: String::new(),
                     },
                 )
                 .await

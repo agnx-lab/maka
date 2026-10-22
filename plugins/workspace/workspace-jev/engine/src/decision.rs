@@ -420,7 +420,6 @@ mod tests {
                     },
                     personalization: maka_agent_facts::configuration::policy::Personalization {
                         display_name: String::new(),
-                        assistant_tone: String::new(),
                     },
                     workspace_instructions: false,
                 })

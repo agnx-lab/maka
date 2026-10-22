@@ -97,7 +97,6 @@ impl Default for RuntimePolicy {
             language: None,
             personalization: Personalization {
                 display_name: String::new(),
-                assistant_tone: String::new(),
             },
             memory: MemoryPolicy {
                 enabled: true,

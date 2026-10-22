@@ -536,7 +536,7 @@ async fn assistant_preferences_and_capability_guidance_freeze_at_message_accepta
         let initial = query(&fixture, "assistantPreferences", json!({})).await;
         let (saved, reference) = mutate(&fixture, "updateAssistantPreferences", json!({
             "expectedRevision":initial["revision"],
-            "mutation":{"kind":"personalization","displayName":"M4n5ter","assistantTone":"FIRST TONE"}
+            "mutation":{"kind":"personalization","displayName":"M4n5ter"}
         }), None).await;
         assert_eq!(saved["kind"], "committed");
         let observation = fixture.store.operation_observation(&reference).await.unwrap().unwrap();

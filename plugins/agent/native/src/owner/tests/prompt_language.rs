@@ -207,7 +207,7 @@ async fn settings_surfaces_share_saved_language_and_cas_across_activation() {
         let (deployment, configured) = configured_settings_app(&fixture, "zh-Hans-CN").await;
         let initial = preferences(&configured, &fixture.issuer, 3).await;
         let personalized = update_preferences(&configured, &fixture.issuer, 3, &initial["revision"],
-            json!({"kind":"personalization","displayName":"language-authority-用户","assistantTone":"Retain my exact custom tone."})).await;
+            json!({"kind":"personalization","displayName":"language-authority-用户"})).await;
         let chinese = update_preferences(&fixture.app, &fixture.issuer, 2, &personalized["revision"],
             json!({"kind":"language","preference":"zh-TW"})).await;
         let shared = preferences(&configured, &fixture.issuer, 3).await;
@@ -244,7 +244,6 @@ async fn settings_surfaces_share_saved_language_and_cas_across_activation() {
         assert_eq!(auto_configured["resolvedLanguage"], native["resolvedLanguage"], "explicit Auto bypasses the configured Chinese locale");
         assert_eq!(auto_configured, auto_native);
         assert_eq!(auto_configured["displayName"], "language-authority-用户");
-        assert_eq!(auto_configured["assistantTone"], "Retain my exact custom tone.");
     }).await.unwrap();
 }
 
