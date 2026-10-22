@@ -72,7 +72,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
       style={{ flex: 1, minHeight: 0, backgroundColor: C.background, padding: 8, gap: 8 }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 4 }}>
-        <Scroll horizontal style={{ flex: 1, minWidth: 0 }}>
+        <Scroll horizontal focusable={false} style={{ flex: 1, minWidth: 0 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Button
               accessibilityLabel={tr('Browse files')}

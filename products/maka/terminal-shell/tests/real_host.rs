@@ -2505,7 +2505,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view_state(&mut view, |view, screen| screen.contains("64 × 48 · Captured image") && !view.accessibility_snapshot().iter().any(|node| node.label == "Full screen image viewer")).await;
         assert!(view.accessibility_snapshot().iter().any(|node| node.label == captured_version));
-        assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse files"));
+        assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse files"), "closing the full-screen image must restore the preview navigation; focused native nodes: {:?}", view.accessibility_snapshot().into_iter().filter(|node| node.focused).map(|node| (node.label, node.frame)).collect::<Vec<_>>());
         view.resize(120, 40);
         wait_view_state(&mut view, |view, screen| screen.contains("64 × 48 · Captured image") && screen.contains("UNSENT_PREVIEW_DRAFT") && view.accessibility_snapshot().iter().any(|node| node.label == "Resize workspace preview")).await;
         support::click_button(&mut view, "Close workspace preview").await;
