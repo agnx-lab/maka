@@ -384,11 +384,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             KeyModifiers::NONE,
         )));
     }
-    async fn fill(view: &mut AppView, label: &str, value: &str) {
-        tab_to_label(view, label).await;
-        editable(view, label).await;
-        shortcut(view, 'a');
-        view.handle_event(Event::Paste(value.into()));
+    async fn commit_input(view: &mut AppView) {
         // Commit the real native onChange before another control can save it.
         let (done, committed) = tokio::sync::oneshot::channel();
         view.control()
@@ -400,6 +396,13 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             .await
             .unwrap()
             .unwrap();
+    }
+    async fn fill(view: &mut AppView, label: &str, value: &str) {
+        tab_to_label(view, label).await;
+        editable(view, label).await;
+        shortcut(view, 'a');
+        view.handle_event(Event::Paste(value.into()));
+        commit_input(view).await;
     }
     async fn assert_input(view: &mut AppView, label: &str, value: &str) {
         tab_to_label(view, label).await;
@@ -417,7 +420,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         let mut fixture = Fixture::empty_settings().await;
         let instruction_path = fixture.directory.path().join("assistant-home/.maka/AGENTS.md");
         std::fs::create_dir(instruction_path.parent().unwrap()).unwrap();
-        let initial_instructions = "  INITIAL GLOBAL UTF-8 指令\n\nKeep user-owned whitespace.\n";
+        let initial_instructions = "  INITIAL GLOBAL UTF-8 指令 🦀\r\n\r\n\tKeep user-owned whitespace.  \r\n\r\n";
         std::fs::write(&instruction_path, initial_instructions).unwrap();
         let client = fixture.client().await;
         let empty = client.query("settings", "connections", json!({"kind":"start"})).await.unwrap();
@@ -606,11 +609,27 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Edit global instructions").await;
         wait_view(&mut view, |screen| screen.contains(instruction_path.to_str().unwrap())).await;
         assert_input(&mut view, "Global instructions", initial_instructions).await;
-        let instruction_draft = "  GLOBAL_DRAFT_PRESERVED\n未保存的完整草稿。\n\n";
+        editable(&mut view, "Global instructions").await;
+        let global_editor = view.surface().focused().unwrap();
+        let save = view.accessibility_snapshot().into_iter().find(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Save global instructions").expect("the unchanged global file lost its Save button");
+        assert!(save.state.disabled, "loading and focusing the CRLF file must not make it dirty");
+        assert_eq!(std::fs::read_to_string(&instruction_path).unwrap(), initial_instructions);
+        // Edit the resident document instead of replacing it: existing CRLF,
+        // tabs and whitespace remain literal; physical Enter uses its first EOL.
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL)));
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('改'), KeyModifiers::NONE)));
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+        commit_input(&mut view).await;
+        let locally_edited = format!("{initial_instructions}改\r\n");
+        assert_input(&mut view, "Global instructions", &locally_edited).await;
+        assert_eq!(view.surface().focused(), Some(global_editor), "local editing replaced the resident global file input");
+        support::wait_enabled_button(&mut view, "Save global instructions").await;
+        assert_eq!(std::fs::read_to_string(&instruction_path).unwrap(), initial_instructions, "local typing must not save the file implicitly");
+        let instruction_draft = "  GLOBAL_DRAFT_PRESERVED\r\n\t未保存的完整草稿 🦀。\n保留独立回车\r末行\r\n\r\n";
         fill(&mut view, "Global instructions", instruction_draft).await;
         // A different shell can leave an original saved action unresolved.
         // Recover its actual receipt without taking ownership of this draft.
-        let remote_instructions = "REMOTE SAVED GLOBAL INSTRUCTIONS\n另一终端已保存。\n";
+        let remote_instructions = "REMOTE SAVED GLOBAL INSTRUCTIONS\r\n\t另一终端已保存。\r\n\r\n";
         {
             let gate = ReplyGate::global_instructions(fixture.directory.path(), fixture.address.clone());
             let remote = fixture.client_at(&gate.address).await;
@@ -653,7 +672,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         wait_view(&mut view, |screen| screen.contains("REMOTE SAVED GLOBAL INSTRUCTIONS") && !screen.contains("Reading global instructions…")).await;
         assert_input(&mut view, "Global instructions", remote_instructions).await;
         fill(&mut view, "Global instructions", instruction_draft).await;
-        let external_instructions = "EXTERNAL GLOBAL UPDATE\n外部编辑不能被覆盖。\n";
+        let external_instructions = "EXTERNAL GLOBAL UPDATE\r\n\t外部编辑不能被覆盖。\r\n\r\n";
         std::fs::write(&instruction_path, external_instructions).unwrap();
         activate(&mut view, "Save global instructions").await;
         wait_view(&mut view, |screen| screen.contains("Source changed. Your draft is preserved.")).await;
@@ -664,7 +683,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Reload (discard edits)").await;
         wait_view(&mut view, |screen| screen.contains("EXTERNAL GLOBAL UPDATE") && !screen.contains("Reading global instructions…")).await;
         assert_input(&mut view, "Global instructions", external_instructions).await;
-        let final_instructions = format!("  GLOBAL_UI_INSTRUCTIONS_UNIQUE\n{}\n\n", "保留完整 UTF-8 指令，遵循实际用户需求。\n".repeat(40));
+        let final_instructions = format!("  GLOBAL_UI_INSTRUCTIONS_UNIQUE\r\n{}\n\tMixed LF line 🦀\rStandalone CR line\r\n\r\n", "\t保留完整 UTF-8 指令，遵循实际用户需求。  \r\n".repeat(40));
         fill(&mut view, "Global instructions", &final_instructions).await;
         assert_input(&mut view, "Global instructions", &final_instructions).await;
         activate(&mut view, "Save global instructions").await;
