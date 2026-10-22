@@ -2580,7 +2580,6 @@ dependencies = [
  "crossterm_winapi",
  "derive_more",
  "document-features",
- "filedescriptor",
  "futures-core",
  "mio",
  "parking_lot",
@@ -6040,7 +6039,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_repr",
- "similar 2.7.0",
+ "similar",
  "smallvec",
  "smol",
  "tracing",
@@ -9078,7 +9077,6 @@ version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "cap-std",
- "crossterm",
  "futures-util",
  "hex",
  "image",
@@ -9114,7 +9112,6 @@ dependencies = [
  "maka-presentation",
  "maka-processes-native",
  "maka-providers",
- "maka-render-terminal",
  "maka-sandbox",
  "maka-scheduler",
  "maka-session-import",
@@ -9131,7 +9128,6 @@ dependencies = [
  "maka-web-api",
  "maka-workspace-api",
  "maka-workspace-support",
- "ratatui",
  "rusqlite",
  "schemars 1.2.2",
  "serde",
@@ -9291,14 +9287,12 @@ dependencies = [
  "maka-process",
  "maka-product-native",
  "maka-providers",
- "maka-render-terminal",
  "maka-sandbox",
  "maka-schema",
  "maka-settings-native",
  "maka-skills-api",
  "maka-terminal-shell",
  "maka-transport",
- "maka-ui-js",
  "maka-ui-runtime",
  "maka-workspace-api",
  "nsh-base",
@@ -9320,7 +9314,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing-subscriber",
- "unicode-width",
  "uuid",
  "windows 0.62.2",
  "windows-sys 0.61.2",
@@ -9937,43 +9930,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
-]
-
-[[package]]
-name = "maka-render-terminal"
-version = "0.2.0"
-dependencies = [
- "apply-patch",
- "base64 0.22.1",
- "clipboard-rs",
- "clipboard-win",
- "crossterm",
- "futures-util",
- "image",
- "libc",
- "maka-capabilities",
- "maka-event-log",
- "maka-packages",
- "maka-plugin-core",
- "maka-transport",
- "maka-ui-js",
- "maka-ui-runtime",
- "pulldown-cmark",
- "ratatui",
- "ratatui-crossterm",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "similar 3.2.0",
- "syntect",
- "tempfile",
- "tokio",
- "tokio-util",
- "unicode-linebreak",
- "unicode-segmentation",
- "unicode-width",
- "url",
- "uuid",
 ]
 
 [[package]]
@@ -13466,17 +13422,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pulldown-cmark"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
-dependencies = [
- "bitflags 2.13.2",
- "memchr",
- "unicase",
-]
-
-[[package]]
 name = "pulp"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16177,15 +16122,6 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 dependencies = [
  "bstr",
  "unicode-segmentation",
-]
-
-[[package]]
-name = "similar"
-version = "3.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
-dependencies = [
- "bstr",
 ]
 
 [[package]]
