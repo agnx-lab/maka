@@ -108,7 +108,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
             let frame = frame.complete().unwrap();
             // The fixture's actual input fill proves that native mount and its
             // initial paint completed; a blank startup frame is insufficient.
-            &frame.pixels()[(24 * 320 + 24) * 4..][..4] == [32, 64, 96, 255]
+            frame.pixels()[(24 * 320 + 24) * 4..][..4] == [32, 64, 96, 255]
         });
         if ready {
             break;
