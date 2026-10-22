@@ -912,6 +912,17 @@ pub(super) async fn named_tool_response(socket: &mut TcpStream, name: &str, inpu
     socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
 }
 pub(super) async fn facts(fixture: &Fixture, session: &str) -> Vec<Fact> {
+    stored_facts(fixture, session)
+        .await
+        .into_iter()
+        .map(|event| event.event.fact)
+        .collect()
+}
+
+pub(super) async fn stored_facts(
+    fixture: &Fixture,
+    session: &str,
+) -> Vec<maka_agent_facts::event::StoredEvent> {
     fixture
         .store
         .scoped_prefix(
@@ -922,9 +933,6 @@ pub(super) async fn facts(fixture: &Fixture, session: &str) -> Vec<Fact> {
         .await
         .unwrap()
         .events
-        .into_iter()
-        .map(|event| event.event.fact)
-        .collect()
 }
 
 async fn pending_approval(
