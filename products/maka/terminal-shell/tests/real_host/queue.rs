@@ -64,8 +64,10 @@ async fn queue_management_preserves_the_stream_draft_and_original_message_identi
 
         // Queueing a follow-up uses the resident saved draft. It must not pull
         // a user who is reading an earlier turn back to the streaming tail.
-        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)));
-        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        support::click_button(&mut view, "Jump to turn: History question 00").await;
+        // Leave the turn tooltip so only the original transcript can satisfy
+        // the reader assertion below.
+        view.handle_event(Event::Mouse(MouseEvent {kind:MouseEventKind::Moved,column:0,row:0,modifiers:KeyModifiers::NONE}));
         wait_view(&mut view, |screen| screen.contains("History question 00")).await;
         let original = "QUEUED_LOCAL 中文😀\nsecond line";
         replace_input(&mut view, "Message composer", original).await;
