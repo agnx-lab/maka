@@ -37,6 +37,7 @@ mod plugin_credentials;
 mod policy;
 pub mod pricing;
 pub mod projection;
+pub mod public_catalog;
 mod vault;
 
 pub use maka_event_log::connection::BoxFuture;
