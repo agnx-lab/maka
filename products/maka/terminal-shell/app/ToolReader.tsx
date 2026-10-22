@@ -462,7 +462,11 @@ function Sections(props: { items: ToolSection[] }) {
   );
 }
 
-export function ToolReader(props: { value: ToolProjection; source: ToolSource; userScroll(): void }) {
+export function ToolReader(props: {
+  value: ToolProjection;
+  source: ToolSource;
+  userScroll(): void;
+}) {
   const value = props.value;
   switch (value.kind) {
     case 'read':
