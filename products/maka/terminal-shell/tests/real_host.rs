@@ -383,9 +383,10 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             KeyCode::Enter,
             KeyModifiers::NONE,
         )));
+        commit_native_events(view).await;
     }
-    async fn commit_input(view: &mut AppView) {
-        // Commit the real native onChange before another control can save it.
+    async fn commit_native_events(view: &mut AppView) {
+        // Commit native callbacks before the next interaction uses their view.
         let (done, committed) = tokio::sync::oneshot::channel();
         view.control()
             .unwrap()
@@ -402,7 +403,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         editable(view, label).await;
         shortcut(view, 'a');
         view.handle_event(Event::Paste(value.into()));
-        commit_input(view).await;
+        commit_native_events(view).await;
     }
     async fn assert_input(view: &mut AppView, label: &str, value: &str) {
         tab_to_label(view, label).await;
@@ -619,7 +620,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL)));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('改'), KeyModifiers::NONE)));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        commit_input(&mut view).await;
+        commit_native_events(&mut view).await;
         let locally_edited = format!("{initial_instructions}改\r\n");
         assert_input(&mut view, "Global instructions", &locally_edited).await;
         assert_eq!(view.surface().focused(), Some(global_editor), "local editing replaced the resident global file input");
