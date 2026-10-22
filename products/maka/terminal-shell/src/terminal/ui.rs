@@ -263,7 +263,7 @@ impl Session {
     }
 
     fn cancel_pointer(&mut self) -> Result<(), String> {
-        self.surface.cancel_pointer();
+        self.surface.pointer_left();
         self.forward_events()
     }
 
