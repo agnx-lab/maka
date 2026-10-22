@@ -246,7 +246,7 @@ fn run(
     if window.borrow().is_none() {
         return Err("cannot open the terminal GPUI surface".into());
     }
-    let background = application.background_executor();
+    let background = application.update(|cx| cx.background_executor().clone());
     let mut mapping = Mapping::default();
     let mut inputs_before_draw = 0;
     let result = (|| {
