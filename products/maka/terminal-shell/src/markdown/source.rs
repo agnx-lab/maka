@@ -122,12 +122,27 @@ pub(super) fn text(
         let base = start(node) + offset;
         let ch = rest.chars().next().unwrap();
         if line_start {
-            let consumed = continuation(&mut result, rest, base, quote)?;
+            // Prose strips literal indentation after a soft line ending.
+            // A rendered leading space may instead come from an entity later
+            // on this line, so do not consume any parsed text for this gap.
+            let consumed = continuation_length(rest, quote);
             line_start = false;
             if consumed != 0 {
                 offset += consumed;
                 continue;
             }
+        }
+        if matches!(ch, ' ' | '\t') {
+            let end = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+            if rest[end..].starts_with(['\r', '\n']) {
+                // The Text tokenizer drops trailing literal whitespace;
+                // actual hard breaks have their own AST node and source map.
+                offset += end;
+                continue;
+            }
+            result.push(&rest[..end], base, base + end, MarkdownSourceKind::Literal)?;
+            offset += end;
+            continue;
         }
         if ch == '\\'
             && let Some(escaped) = rest.chars().nth(1)
@@ -192,13 +207,21 @@ fn reference(input: &str) -> Option<(usize, String)> {
     let name = &input[1..end];
     let decoded = if let Some(number) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X"))
     {
-        if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        // Match markdown-rs' character-reference grammar (CommonMark), rather
+        // than decoding invalid long literals merely because u32 accepts them.
+        if number.is_empty()
+            || number.len() > 6
+            || !number.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
             return None;
         }
         u32::from_str_radix(number, 16).ok()?;
         ::markdown::decode_numeric(number, 16)
     } else if let Some(number) = name.strip_prefix('#') {
-        if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+        if number.is_empty()
+            || number.len() > 7
+            || !number.bytes().all(|byte| byte.is_ascii_digit())
+        {
             return None;
         }
         number.parse::<u32>().ok()?;
@@ -236,7 +259,7 @@ pub(super) fn inline_code(
         let ch = rest.chars().next().unwrap();
         let base = start(node) + offset;
         if line_start {
-            let consumed = continuation(&mut result, rest, base, quote)?;
+            let consumed = code_continuation(&mut result, rest, base, quote)?;
             line_start = false;
             if consumed != 0 {
                 offset += consumed;
@@ -268,15 +291,7 @@ pub(super) fn inline_code(
     result.finish()
 }
 
-/// Container syntax and leading whitespace form one indentation token. Any
-/// whitespace retained by the parser belongs to that token, rather than to a
-/// guessed occurrence among several identical source spaces.
-fn continuation(
-    result: &mut Projection<'_>,
-    input: &str,
-    base: usize,
-    quote: u32,
-) -> Result<usize, String> {
+fn continuation_length(input: &str, quote: u32) -> usize {
     let mut quotes = 0;
     let mut consumed = 0;
     for ch in input.chars() {
@@ -289,6 +304,18 @@ fn continuation(
             break;
         }
     }
+    consumed
+}
+
+/// Inline code retains indentation left after its container prefix. Keep that
+/// whitespace as one lexical token rather than guessing among equal spaces.
+fn code_continuation(
+    result: &mut Projection<'_>,
+    input: &str,
+    base: usize,
+    quote: u32,
+) -> Result<usize, String> {
+    let consumed = continuation_length(input, quote);
     if consumed != 0 {
         let remaining = result.remaining();
         let end = remaining.len() - remaining.trim_start_matches([' ', '\t']).len();
@@ -350,14 +377,13 @@ pub(super) fn code(
         let rendered = result.remaining();
         let rendered_end = rendered.find(['\r', '\n']).unwrap_or(rendered.len());
         let rendered_line = &rendered[..rendered_end];
-        let normalized = content.replace('\0', "�");
-        let (prefix, leading) = if let Some(prefix) = normalized.strip_suffix(rendered_line) {
+        let (prefix, leading) = if let Some(prefix) = content.strip_suffix(rendered_line) {
             (prefix, "")
         } else {
             // A tab consumed partly by indentation can leave rendered spaces.
             // Keep that indentation as one lexical replacement, never the code.
             let tail = rendered_line.trim_start_matches([' ', '\t']);
-            let prefix = normalized
+            let prefix = content
                 .strip_suffix(tail)
                 .ok_or("Markdown code line is not an exact source suffix")?;
             (prefix, &rendered_line[..rendered_line.len() - tail.len()])
@@ -375,29 +401,12 @@ pub(super) fn code(
             )?;
         }
         let kept = &content[prefix.len()..];
-        if !kept.contains('\0') {
-            result.push(
-                kept,
-                base + prefix.len(),
-                base + content.len(),
-                MarkdownSourceKind::Literal,
-            )?;
-        } else {
-            for (at, ch) in kept.char_indices() {
-                let base = base + prefix.len() + at;
-                if ch == '\0' && result.remaining().starts_with('�') {
-                    result.push("�", base, base + 1, MarkdownSourceKind::Replacement)?;
-                } else {
-                    let text = &source[base..base + ch.len_utf8()];
-                    result.push(
-                        text,
-                        base,
-                        base + ch.len_utf8(),
-                        MarkdownSourceKind::Literal,
-                    )?;
-                }
-            }
-        }
+        result.push(
+            kept,
+            base + prefix.len(),
+            base + content.len(),
+            MarkdownSourceKind::Literal,
+        )?;
         if rendered_end < rendered.len() {
             let ending = if rendered[rendered_end..].starts_with("\r\n") {
                 "\r\n"

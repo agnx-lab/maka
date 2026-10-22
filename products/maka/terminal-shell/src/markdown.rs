@@ -623,6 +623,10 @@ mod tests {
         );
         let invalid = parse_source("&amp; &#999999999999999999999999;").unwrap();
         assert_eq!(invalid[0].runs[0].text, "& &#999999999999999999999999;");
+        for original in ["&#00000038;", "&#x0000026;"] {
+            let invalid = parse_source(&format!("&amp; {original}")).unwrap();
+            assert_eq!(invalid[0].runs[0].text, format!("& {original}"));
+        }
         assert_eq!(blocks[0].runs[1].text, "a🙂");
         assert_eq!(
             blocks[0].runs[1].source,
@@ -634,6 +638,31 @@ mod tests {
                 kind: MarkdownSourceKind::Literal,
             }]
         );
+        for (original, expected, ranges) in [
+            ("a \nb", "a\nb", vec![(0, 1, 0, 1), (1, 3, 2, 4)]),
+            ("a\t \nb", "a\nb", vec![(0, 1, 0, 1), (1, 3, 3, 5)]),
+            (
+                "a\n  &#32;b",
+                "a\n b",
+                vec![(0, 2, 0, 2), (2, 3, 4, 9), (3, 4, 9, 10)],
+            ),
+        ] {
+            let blocks = parse_source(original).unwrap();
+            let run = &blocks[0].runs[0];
+            assert_eq!(run.text, expected);
+            assert_eq!(
+                run.source
+                    .iter()
+                    .map(|segment| (
+                        segment.start,
+                        segment.end,
+                        segment.source_start,
+                        segment.source_end,
+                    ))
+                    .collect::<Vec<_>>(),
+                ranges,
+            );
+        }
     }
 
     #[test]
@@ -757,6 +786,18 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             [(0, 4, 4, 8), (4, 6, 12, 14), (6, 9, 18, 21)]
+        );
+        let nul = parse_source("```\na\0b\n```").unwrap();
+        assert_eq!(nul[0].text, "a\0b");
+        assert_eq!(
+            nul[0].source,
+            [MarkdownSourceSegment {
+                start: 0,
+                end: 3,
+                source_start: 4,
+                source_end: 7,
+                kind: MarkdownSourceKind::Literal,
+            }]
         );
     }
 
