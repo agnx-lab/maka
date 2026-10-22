@@ -91,6 +91,7 @@ async fn pending_trigger_survives_lost_reply_and_restart_while_stale_writers_and
     // be cancelled like an explicitly deferred notification.
     triggered.pending.as_mut().unwrap().delivery_started = true;
     let fire = triggered.pending.clone().unwrap();
+    let mut commits = log.subscribe_commits();
     // The SQL owner finishes an accepted batch after its response waiter is lost.
     assert!(
         repository
@@ -98,6 +99,8 @@ async fn pending_trigger_survives_lost_reply_and_restart_while_stale_writers_and
             .now_or_never()
             .is_none()
     );
+    // The independent reader does not fence an accepted writer's commit.
+    commits.changed().await.unwrap();
     let committed = repository.load().await.unwrap();
     assert_eq!(committed.plans["task-one"].plan.pending, Some(fire.clone()));
     assert!(matches!(
