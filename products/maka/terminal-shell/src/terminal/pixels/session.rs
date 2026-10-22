@@ -123,26 +123,16 @@ fn run(
                     )
                 });
             let mut state = delivered.state.lock().unwrap();
-            let pending_frame = timing.as_ref().and_then(|_| {
-                state
-                    .pixels
-                    .as_ref()?
-                    .pending
-                    .as_ref()
-                    .map(|candidate| candidate.frame.token().sequence())
-            });
+            let pending_frame = timing
+                .as_ref()
+                .and_then(|_| state.pixels.as_ref()?.oldest_frame());
             let mut admitted = false;
-            if let Some(inbox) = &mut state.pixels
-                && drawn_geometry.get() == inbox.geometry
-                && inbox.resize.is_none()
-                && inbox.pending.is_none()
-            {
-                inbox.pending = Some(super::input::Candidate {
+            if let Some(inbox) = &mut state.pixels {
+                admitted = inbox.submitted(super::input::Candidate {
                     frame,
                     geometry: drawn_geometry.get(),
                     pump_started: timing.as_ref().map(|(start, ..)| *start),
                 });
-                admitted = true;
             }
             if let Some((start, end, token, bytes, size)) = timing
                 && let Some(trace) = &mut state.trace
@@ -270,14 +260,6 @@ fn run(
                 platform
                     .resize(viewport)
                     .map_err(|error| error.to_string())?;
-                presentation
-                    .state
-                    .lock()
-                    .unwrap()
-                    .pixels
-                    .as_mut()
-                    .unwrap()
-                    .pending = None;
             }
             if cancel || resize.is_some() {
                 application.update(|cx| {
@@ -309,9 +291,9 @@ fn run(
                 }
                 let mut state = presentation.state.lock().unwrap();
                 let inbox = state.pixels.as_mut().unwrap();
-                if inbox.in_flight.as_ref() == Some(&offer.token) {
-                    inbox.in_flight = None;
-                }
+                inbox.presented(&offer.token);
+                drop(state);
+                presentation.wake_driver();
             }
             // Mount/focus callbacks and physical input share the native owner.
             // Apply queued native work without waiting for output or drawing.
@@ -468,19 +450,22 @@ fn run(
                 }
             }
             let allow_draw = {
-                let state = presentation.state.lock().unwrap();
-                let inbox = state.pixels.as_ref().unwrap();
-                inputs_before_draw == 0
-                    && inbox.pending.is_none()
-                    && inbox.encoded.is_none()
-                    && inbox.resize.is_none()
-                    && geometry.get() == inbox.geometry
-                    && inbox.capabilities.viewport().is_some()
+                let mut state = presentation.state.lock().unwrap();
+                let inbox = state.pixels.as_mut().unwrap();
+                inputs_before_draw == 0 && geometry.get() == inbox.geometry && inbox.reserve_frame()
             };
             if let Some(started) = &pump_started {
                 started.set(allow_draw.then(Instant::now));
             }
             worked |= platform.pump_with_draw(allow_draw);
+            presentation
+                .state
+                .lock()
+                .unwrap()
+                .pixels
+                .as_mut()
+                .unwrap()
+                .release_reservation();
             if let Some(started) = &pump_started {
                 started.set(None);
             }
@@ -539,9 +524,9 @@ fn run(
     result
 }
 
-/// Admit one readback-and-encoding job on the existing background executor.
-/// The native input/GPU owner keeps pumping independently of the in-flight
-/// output transaction. The job and executor shutdown cannot hold cleanup.
+/// Start an already reserved readback-and-encoding job on the existing executor.
+/// Its Inbox slot spans executor wait, readback, codec and completed FIFO wait.
+/// Native input keeps pumping; jobs and executor shutdown cannot hold cleanup.
 fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExecutor) -> bool {
     if presentation.stop.load(Ordering::Acquire) {
         return false;
@@ -554,15 +539,9 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
         let slots = state.pixel_probe.slots;
         let tracing = state.trace.is_some();
         let inbox = state.pixels.as_mut().unwrap();
-        if inbox.in_flight.is_some() || inbox.encoded.is_some() || inbox.resize.is_some() {
-            return false;
-        }
-        let Some(candidate) = inbox.pending.take() else {
+        let Some(candidate) = inbox.take_candidate() else {
             return false;
         };
-        if candidate.geometry != inbox.geometry {
-            return false;
-        }
         let previous = inbox.last_fully_written_image;
         let same_viewport_flushed = inbox.last_fully_written_geometry == Some(candidate.geometry);
         let image = if previous == Some(slots.first) {
@@ -571,7 +550,6 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
             slots.first
         };
         let capabilities = inbox.capabilities;
-        inbox.in_flight = Some(candidate.frame.token());
         if let Some(trace) = &mut state.trace {
             let at = Instant::now();
             trace.record(
@@ -689,11 +667,16 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
                 state.quit || state.error.is_some() || presentation.stop.load(Ordering::Acquire);
             let inbox = state.pixels.as_mut().unwrap();
             let discarded = !current || cancelled || inbox.geometry != geometry;
-            if let Some(result) = result.filter(|_| !discarded) {
-                inbox.encoded = Some(result);
-            } else if inbox.in_flight.as_ref() == Some(&token) {
-                inbox.in_flight = None;
-            }
+            let encoded = match result.filter(|_| !discarded) {
+                Some(Ok(encoded)) => Some(encoded),
+                Some(Err(error)) => {
+                    state.error.get_or_insert(error);
+                    None
+                }
+                None => None,
+            };
+            let inbox = state.pixels.as_mut().unwrap();
+            inbox.finished(&token, encoded);
             let wake = inbox.wake.clone();
             if let (Some(start), Some(end), Some(trace)) = (started, ended, &mut state.trace) {
                 let sample = trace.record(&token, geometry, "codec", start, end);

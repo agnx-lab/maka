@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::probe::{Capabilities, SixelGeometry};
+use super::probe::{Capabilities, Protocol, SixelGeometry};
 use nsh_gpui_terminal::{FrameToken, SubmittedFrame};
 use std::{collections::VecDeque, time::Instant};
 use termina::{
@@ -63,6 +63,31 @@ pub(super) struct Encoded {
     pub geometry: u64,
 }
 
+/// One admitted draw keeps its capacity through readback, codec and FIFO wait.
+/// Resize can discard completed work, but cannot cancel a running codec.
+struct FrameJob {
+    geometry: u64,
+    work: FrameWork,
+}
+
+enum FrameWork {
+    Reserved,
+    Submitted(Candidate),
+    Encoding(FrameToken),
+    Ready(Encoded),
+}
+
+impl FrameWork {
+    fn token(&self) -> Option<FrameToken> {
+        match self {
+            Self::Reserved => None,
+            Self::Submitted(candidate) => Some(candidate.frame.token()),
+            Self::Encoding(token) => Some(token.clone()),
+            Self::Ready(encoded) => Some(encoded.frame.token()),
+        }
+    }
+}
+
 /// Send-only physical input and output state; native contacts stay on the UI owner.
 pub(crate) struct Inbox {
     pub capabilities: Capabilities,
@@ -70,12 +95,13 @@ pub(crate) struct Inbox {
     tracing: bool,
     /// Last current-viewport writer receipt, used only by output diagnostics.
     pub published: Option<FrameToken>,
-    pub(super) pending: Option<Candidate>,
-    pub(super) encoded: Option<Result<Encoded, String>>,
+    frames: VecDeque<FrameJob>,
+    frame_capacity: usize,
     /// Last image whose entire upload-and-retirement transaction was flushed.
     pub last_fully_written_image: Option<u32>,
     /// The terminal geometry of the last whole image transaction's flush.
     pub last_fully_written_geometry: Option<u64>,
+    /// Sole writer transaction, retained until the native owner consumes its receipt.
     pub in_flight: Option<FrameToken>,
     pub(super) ready: Option<Offer>,
     pub geometry: u64,
@@ -93,8 +119,16 @@ impl Inbox {
             events: VecDeque::new(),
             tracing,
             published: None,
-            pending: None,
-            encoded: None,
+            frames: VecDeque::new(),
+            // A five-process whole-frame codec scout exceeded 120 encodes/s.
+            // Keep that finite candidate width; GUI/writer throughput is separate.
+            // Smaller hosts use the same hardware width as the native executor.
+            // Capacity gates GPU draws; it never rejects input or application data.
+            frame_capacity: std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+                .saturating_sub(1)
+                .clamp(1, 5),
             last_fully_written_image: None,
             last_fully_written_geometry: None,
             in_flight: None,
@@ -105,6 +139,117 @@ impl Inbox {
             wake: None,
             effects: None,
             restore_sixel_mode: false,
+        }
+    }
+
+    /// Admission is checked before drawing, so the native dirty bit coalesces
+    /// changes while these finite readback/codec/result slots are occupied.
+    pub(super) fn can_submit(&self) -> bool {
+        let parallel = self.capabilities.protocol == Some(Protocol::Sixel);
+        let capacity = if parallel { self.frame_capacity } else { 1 };
+        if self.resize.is_some()
+            || self.capabilities.viewport().is_none()
+            || self.frames.len() >= capacity
+            || (!parallel && self.in_flight.is_some())
+        {
+            return false;
+        }
+        // The first complete flush establishes opaque replacement eligibility
+        // for this geometry. Do not encode a speculative initial parallel burst.
+        self.last_fully_written_geometry == Some(self.geometry)
+            || (self.in_flight.is_none()
+                && !self.frames.iter().any(|job| job.geometry == self.geometry))
+    }
+
+    pub(super) fn reserve_frame(&mut self) -> bool {
+        if !self.can_submit() {
+            return false;
+        }
+        self.frames.push_back(FrameJob {
+            geometry: self.geometry,
+            work: FrameWork::Reserved,
+        });
+        true
+    }
+
+    pub(super) fn submitted(&mut self, candidate: Candidate) -> bool {
+        let Some(job) = self.frames.iter_mut().find(|job| {
+            job.geometry == candidate.geometry && matches!(job.work, FrameWork::Reserved)
+        }) else {
+            return false;
+        };
+        // A resize may arrive while draw submits. Keep that old readback's
+        // reservation until its worker returns, just like an active codec.
+        job.work = FrameWork::Submitted(candidate);
+        true
+    }
+
+    pub(super) fn release_reservation(&mut self) {
+        // A pump can produce no draw, or fail before producing a ticket.
+        self.frames
+            .retain(|job| !matches!(job.work, FrameWork::Reserved));
+    }
+
+    pub(super) fn oldest_frame(&self) -> Option<u64> {
+        self.frames
+            .front()?
+            .work
+            .token()
+            .map(|token| token.sequence())
+    }
+
+    pub(super) fn take_candidate(&mut self) -> Option<Candidate> {
+        let job = self
+            .frames
+            .iter_mut()
+            .find(|job| matches!(job.work, FrameWork::Submitted(_)))?;
+        let token = job.work.token().expect("submitted native frame");
+        let FrameWork::Submitted(candidate) =
+            std::mem::replace(&mut job.work, FrameWork::Encoding(token))
+        else {
+            unreachable!()
+        };
+        Some(candidate)
+    }
+
+    /// A worker can only finish its own immutable token. Stale and cancelled
+    /// jobs release capacity here, after their readback/codec actually returned.
+    pub(super) fn finished(&mut self, token: &FrameToken, encoded: Option<Encoded>) {
+        let Some(index) = self
+            .frames
+            .iter()
+            .position(|job| matches!(&job.work, FrameWork::Encoding(active) if active == token))
+        else {
+            return;
+        };
+        if let Some(encoded) = encoded.filter(|encoded| encoded.geometry == self.geometry) {
+            self.frames[index].work = FrameWork::Ready(encoded);
+        } else {
+            self.frames.remove(index);
+        }
+    }
+
+    /// Completion order cannot reorder terminal transactions. The native owner
+    /// must consume the previous writer receipt before another handoff.
+    pub(super) fn take_encoded(&mut self) -> Option<Encoded> {
+        if self.in_flight.is_some()
+            || !self
+                .frames
+                .front()
+                .is_some_and(|job| matches!(job.work, FrameWork::Ready(_)))
+        {
+            return None;
+        }
+        let FrameWork::Ready(encoded) = self.frames.pop_front()?.work else {
+            unreachable!()
+        };
+        self.in_flight = Some(encoded.frame.token());
+        Some(encoded)
+    }
+
+    pub(super) fn presented(&mut self, token: &FrameToken) {
+        if self.in_flight.as_ref() == Some(token) {
+            self.in_flight = None;
         }
     }
 
@@ -201,7 +346,10 @@ impl Inbox {
             .ok_or("terminal geometry generation exhausted")?;
         self.resize = Some(self.capabilities.size);
         self.published = None;
-        self.pending = None;
+        // A submitted readback or codec still consumes its original slot.
+        // Completed stale wire is safe to retire immediately.
+        self.frames
+            .retain(|job| !matches!(job.work, FrameWork::Ready(_)));
         self.lose_pointer();
         Ok(())
     }
@@ -306,6 +454,168 @@ mod tests {
             protocol: Some(super::super::probe::Protocol::Sixel),
             synchronized: false,
             sixel_geometry: SixelGeometry::Unknown,
+        }
+    }
+
+    fn encoded(geometry: u64) -> Encoded {
+        Encoded {
+            frame: WireFrame::Inline(Default::default()),
+            geometry,
+        }
+    }
+
+    #[test]
+    fn completed_tail_waits_for_its_predecessor_and_the_native_writer_receipt() {
+        let mut inbox = Inbox::new(capabilities(), false);
+        let token = FrameToken::default();
+        inbox.frames.push_back(FrameJob {
+            geometry: 1,
+            work: FrameWork::Encoding(token.clone()),
+        });
+        inbox.frames.push_back(FrameJob {
+            geometry: 1,
+            work: FrameWork::Ready(encoded(1)),
+        });
+        assert!(
+            inbox.take_encoded().is_none(),
+            "the completed tail cannot pass the head"
+        );
+        assert_eq!(inbox.frames.len(), 2);
+        inbox.finished(&token, Some(encoded(1)));
+        let first = inbox.take_encoded().unwrap();
+        assert_eq!(inbox.frames.len(), 1);
+        assert!(inbox.take_encoded().is_none());
+        inbox.written(
+            Offer {
+                token: first.frame.token(),
+                geometry: 1,
+            },
+            None,
+        );
+        assert!(
+            inbox.take_encoded().is_none(),
+            "a flush cannot overwrite an unconsumed receipt"
+        );
+        let receipt = inbox.ready.take().unwrap();
+        inbox.presented(&receipt.token);
+        assert!(inbox.take_encoded().is_some());
+        assert!(inbox.frames.is_empty());
+    }
+
+    #[test]
+    fn first_flush_opens_parallel_admission_and_every_resize_closes_it() {
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.frame_capacity = 5;
+        assert!(inbox.reserve_frame());
+        assert!(!inbox.can_submit(), "the first geometry admits one frame");
+        // A pump which produces no submission must return its reservation.
+        inbox.release_reservation();
+        assert!(inbox.reserve_frame());
+        let token = FrameToken::default();
+        inbox.frames.back_mut().unwrap().work = FrameWork::Encoding(token.clone());
+        inbox.finished(&token, Some(encoded(1)));
+        assert!(!inbox.can_submit(), "codec completion is not a flush");
+        let first = inbox.take_encoded().unwrap();
+        assert!(!inbox.can_submit(), "writer handoff is not a flush");
+        inbox.written(
+            Offer {
+                token: first.frame.token(),
+                geometry: 1,
+            },
+            None,
+        );
+        for _ in 0..5 {
+            assert!(inbox.reserve_frame());
+        }
+        assert!(
+            !inbox.can_submit(),
+            "all unhanded stages share the finite budget"
+        );
+        // Treat these reservations as executor-queued/active workers. Resize
+        // cannot recover their capacity before each worker really returns.
+        for job in &mut inbox.frames {
+            job.work = FrameWork::Encoding(token.clone());
+        }
+        inbox
+            .push(Event::WindowResized(capabilities().size))
+            .unwrap();
+        inbox.resize.take();
+        let receipt = inbox.ready.take().unwrap();
+        inbox.presented(&receipt.token);
+        assert_eq!(inbox.frames.len(), 5);
+        assert!(!inbox.can_submit());
+        inbox.finished(&token, Some(encoded(1)));
+        assert_eq!(
+            inbox.frames.len(),
+            4,
+            "a completed stale result releases only its own slot"
+        );
+        assert!(inbox.reserve_frame());
+        assert!(
+            !inbox.can_submit(),
+            "new geometry needs its own whole flush"
+        );
+        inbox.release_reservation();
+        for _ in 0..4 {
+            inbox.finished(&token, None);
+        }
+        assert!(inbox.frames.is_empty());
+        assert!(inbox.can_submit());
+        assert_eq!(inbox.last_fully_written_geometry, Some(1));
+    }
+
+    #[test]
+    fn stale_ready_wire_retires_but_failure_and_cancel_return_only_the_finished_slot() {
+        let mut inbox = Inbox::new(capabilities(), false);
+        let token = FrameToken::default();
+        inbox.frames.push_back(FrameJob {
+            geometry: 1,
+            work: FrameWork::Ready(encoded(1)),
+        });
+        inbox.frames.push_back(FrameJob {
+            geometry: 1,
+            work: FrameWork::Encoding(token.clone()),
+        });
+        inbox
+            .push(Event::WindowResized(capabilities().size))
+            .unwrap();
+        assert_eq!(
+            inbox.frames.len(),
+            1,
+            "only already completed wire is disposable"
+        );
+        inbox.finished(&token, None);
+        assert!(inbox.frames.is_empty());
+        assert!(inbox.take_encoded().is_none());
+        assert!(inbox.in_flight.is_none());
+        assert!(
+            inbox.ready.is_none(),
+            "failure/cancel cannot manufacture a writer receipt"
+        );
+    }
+
+    #[test]
+    fn protocols_with_previous_image_state_remain_serial_after_flush() {
+        for protocol in [Protocol::Kitty, Protocol::Iterm2] {
+            let mut caps = capabilities();
+            caps.protocol = Some(protocol);
+            let mut inbox = Inbox::new(caps, false);
+            inbox.frame_capacity = 5;
+            inbox.last_fully_written_geometry = Some(1);
+            assert!(inbox.reserve_frame());
+            assert!(!inbox.can_submit());
+            inbox.release_reservation();
+            let token = FrameToken::default();
+            inbox.in_flight = Some(token.clone());
+            inbox.written(Offer { token, geometry: 1 }, Some(41));
+            assert!(
+                !inbox.can_submit(),
+                "previous-image state waits for native receipt consumption"
+            );
+            let receipt = inbox.ready.take().unwrap();
+            inbox.presented(&receipt.token);
+            assert!(inbox.can_submit());
+            assert_eq!(inbox.last_fully_written_image, Some(41));
         }
     }
 

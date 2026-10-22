@@ -274,16 +274,9 @@ pub(super) fn run(
             if let Some(bytes) = inbox.effects.take() {
                 output.submit(bytes)?;
                 phase = Phase::Effect;
-            } else if let Some(encoded) = inbox.encoded.take() {
+            } else if let Some(encoded) = inbox.take_encoded() {
                 if let Some(wake) = &inbox.wake {
                     wake.unpark();
-                }
-                let encoded = encoded?;
-                if encoded.geometry != inbox.geometry {
-                    if inbox.in_flight.as_ref() == Some(&encoded.frame.token()) {
-                        inbox.in_flight = None;
-                    }
-                    continue;
                 }
                 let offer = input::Offer {
                     token: encoded.frame.token(),
