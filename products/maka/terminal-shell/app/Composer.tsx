@@ -282,38 +282,68 @@ export function Composer(props: {
           >
             {(session) => {
               const owner = session();
+              let editor: YNode | undefined;
+              const focusEditor = () => {
+                if (owner?.editable()) editor?.focus();
+              };
               // Undo, selection and queued native events belong to this session.
               // Hero/history and responsive layout never replace this editor.
               return (
-                <View style={{ gap: 8 }}>
-                  <If when={owner !== null}>
-                    <DraftAttachments draft={owner!.attachments} preview={owner!.previewImage} />
-                  </If>
-                  <Input
-                    ref={props.attach}
-                    testID="message"
-                    accessibilityLabel="Message composer"
-                    autoFocus
-                    multiline
-                    submitBehavior="submit"
-                    value={owner?.draft() ?? ''}
-                    readonly={!owner?.editable()}
-                    onChange={owner?.changeDraft}
-                    onSubmit={owner?.submit}
-                    placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
-                    style={{
-                      minHeight: hero() && !compact() ? 40 : 24,
-                      maxHeight: compact() ? 64 : 144,
-                      color: C.text,
-                      placeholderColor: C.muted,
-                      ...bodyTextStyle,
+                <>
+                  {/* A sibling backdrop leaves the Input and toolbar's native
+                      pointer owners intact. Native focus retains its selection. */}
+                  <View
+                    role="button"
+                    accessibilityLabel={
+                      owner ? 'Focus message composer' : 'Choose workspace from composer card'
+                    }
+                    focusable={owner === null}
+                    disabled={owner !== null && !owner.editable()}
+                    onPress={owner ? inputAction(focusEditor, null) : props.chooseWorkspace}
+                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+                    focusStyle={{
+                      borderWidth: 1,
+                      borderColor: C.accent,
+                      borderRadius: compact() ? 16 : 24,
                     }}
                   />
-                </View>
+                  <View pointerEvents="box-none" style={{ gap: 8 }}>
+                    <If when={owner !== null}>
+                      <DraftAttachments draft={owner!.attachments} preview={owner!.previewImage} />
+                    </If>
+                    <Input
+                      ref={(node) => {
+                        editor = node;
+                        props.attach(node);
+                      }}
+                      testID="message"
+                      accessibilityLabel="Message composer"
+                      autoFocus={owner !== null}
+                      pointerEvents={owner ? 'auto' : 'none'}
+                      multiline
+                      submitBehavior="submit"
+                      value={owner?.draft() ?? ''}
+                      readonly={!owner?.editable()}
+                      onChange={owner?.changeDraft}
+                      onSubmit={owner?.submit}
+                      placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
+                      style={{
+                        minHeight: hero() && !compact() ? 40 : 24,
+                        maxHeight: compact() ? 64 : 144,
+                        color: C.text,
+                        placeholderColor: C.muted,
+                        ...bodyTextStyle,
+                      }}
+                    />
+                  </View>
+                </>
               );
             }}
           </Each>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View
+            pointerEvents="box-none"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+          >
             <Button
               onPress={inputAction(props.commands, {
                 sessionId: props.session()?.sessionId ?? null,
@@ -356,14 +386,18 @@ export function Composer(props: {
                 <Icon name="paperclip" color={C.secondary} />
               </Button>
             </If>
-            <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}>
+            <Text
+              pointerEvents="none"
+              numberOfLines={1}
+              style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}
+            >
               {props.session()?.permissions()}
             </Text>
             <If when={props.session() !== null}>
-              <View style={{ flex: 1, minWidth: 0 }}>{props.models}</View>
+              <View pointerEvents="box-none" style={{ flex: 1, minWidth: 0 }}>{props.models}</View>
             </If>
             <If when={props.session() === null}>
-              <View style={{ flex: 1 }} />
+              <View pointerEvents="none" style={{ flex: 1 }} />
             </If>
             <If when={props.session()?.invocation() != null}>
               <Button

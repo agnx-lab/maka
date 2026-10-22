@@ -1286,14 +1286,26 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
                 .count(),
             1
         );
-        support::click_text(&mut view, "Message composer");
+        tab_to_label(&mut view, "Choose workspace from composer card").await;
         view.handle_event(Event::Paste("COLD_INPUT_MUST_STAY_INERT".into()));
-        assert_eq!(
-            view.surface().input_context().unwrap().text.as_deref(),
-            Some("")
-        );
+        assert!(view.surface().input_context().is_none());
+        assert!(!view.snapshot().contains("COLD_INPUT_MUST_STAY_INERT"));
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         support::evidence_cells("resident-composer-cold-start", &view);
+
+        // The readonly placeholder and the card's keyboard target both open
+        // the original picker; neither creates a session just by opening it.
+        support::click_text(&mut view, "Message composer");
+        wait_view(&mut view, |screen| screen.contains("Search workspaces…")).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| screen.contains("Choose a workspace to begin…")).await;
+        for key in [KeyCode::Enter, KeyCode::Char(' ')] {
+            tab_to_label(&mut view, "Choose workspace from composer card").await;
+            view.handle_event(Event::Key(KeyEvent::new(key, KeyModifiers::NONE)));
+            wait_view(&mut view, |screen| screen.contains("Search workspaces…")).await;
+            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+            wait_view(&mut view, |screen| screen.contains("Choose a workspace to begin…")).await;
+        }
 
         support::click_text(&mut view, "Choose composer workspace");
         select_palette(&mut view, "Search workspaces…", root_name, root_name).await;
@@ -1359,10 +1371,26 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         view.handle_event(Event::Paste("RESIDENT_FIRST_MESSAGE".into()));
         support::wait_draft(&client, &created_id, "RESIDENT_FIRST_MESSAGE").await;
 
-        // Opening and cancelling a model choice cannot replace this editor,
-        // discard its draft, or move a native caret that is inside the text.
+        // Card padding restores the same native editor and its interior caret.
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
         let selection = view.surface().input_context().unwrap().selection;
+        tab_to_label(&mut view, "Open commands").await;
+        assert_ne!(view.surface().focused(), Some(editor));
+        support::click_label(&mut view, "Focus message composer");
+        wait_focused_input(&mut view, "Message composer").await;
+        assert_eq!(view.surface().focused(), Some(editor));
+        assert_eq!(view.surface().input_context().unwrap().selection, selection);
+        view.handle_event(Event::Paste("你好".into()));
+        support::wait_draft(&client, &created_id, "RESIDENT_FIRST_MESSAG你好E").await;
+        for _ in 0..2 {
+            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
+        }
+        support::wait_draft(&client, &created_id, "RESIDENT_FIRST_MESSAGE").await;
+        assert_eq!(view.surface().focused(), Some(editor));
+        assert_eq!(view.surface().input_context().unwrap().selection, selection);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
+        // Opening and cancelling a model choice cannot replace this editor,
+        // discard its draft, or move a native caret that is inside the text.
         shortcut(&mut view, 'g');
         wait_view_state(&mut view, |view, _| {
             model_menu_ready(view, "Choose reasoning effort")
