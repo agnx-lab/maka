@@ -319,6 +319,7 @@ export const workspaceMessages = {
   'Retry current diff': ['Retry current diff', '重试当前差异', '重試目前差異'],
   'Retry current file': ['Retry current file', '重试当前文件', '重試目前檔案'],
   'Retry folder': ['Retry folder', '重试文件夹', '重試資料夾'],
+  'Retry image: {name}': ['Retry image: {name}', '重试加载图片：{name}', '重新載入圖片：{name}'],
   'Retry image': ['Retry image', '重试加载图片', '重新載入圖片'],
   'Retry terminal observation': ['Retry terminal observation', '重试终端观察', '重試終端觀察'],
   'Return to draft': ['Return to draft', '返回草稿', '返回草稿'],
@@ -542,5 +543,11 @@ export const workspaceMessages = {
     '{width} × {height} · Captured image',
     '{width} × {height} · 捕获的图像',
     '{width} × {height} · 擷取的影像',
+  ],
+  'View full image: {name}': ['View full image: {name}', '查看原图：{name}', '檢視原圖：{name}'],
+  'This file is not a supported image.': [
+    'This file is not a supported image.',
+    '此文件不是支持的图片。',
+    '此檔案不是支援的圖片。',
   ],
 } as const satisfies Catalog;

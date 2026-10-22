@@ -33,10 +33,12 @@ import {
   controlStyle,
 } from './ui';
 import { Icon } from './Icon';
+import { MarkdownImageView } from './MarkdownImage';
 
 export function MarkdownBlockView(props: {
   block: () => MarkdownBlock;
   sourceId: string;
+  sessionId: string;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   userScroll(): void;
@@ -53,6 +55,7 @@ export function MarkdownBlockView(props: {
         <MarkdownBlockContent
           block={block}
           sourceId={props.sourceId}
+          sessionId={props.sessionId}
           compact={props.compact}
           openLink={props.openLink}
           userScroll={props.userScroll}
@@ -79,6 +82,7 @@ export function MarkdownBlockView(props: {
           <MarkdownBlockContent
             block={block}
             sourceId={props.sourceId}
+            sessionId={props.sessionId}
             compact={props.compact}
             openLink={props.openLink}
             userScroll={props.userScroll}
@@ -89,9 +93,16 @@ export function MarkdownBlockView(props: {
   );
 }
 
-function StyledRuns(props: { runs(): MarkdownRun[]; sourceId: string; compact?: boolean }) {
+function StyledRuns(props: {
+  runs(): MarkdownRun[];
+  sourceId: string;
+  sessionId: string;
+  width?(): number;
+  compact?: boolean;
+  linked?: boolean;
+}) {
   return (
-    <Each of={props.runs()} key={(run) => run.key}>
+    <Each of={props.runs()} key={(run) => JSON.stringify([run.key, run.image?.target])}>
       {(run) => (
         <Text
           textSource={{ id: props.sourceId, segments: run().source }}
@@ -104,7 +115,14 @@ function StyledRuns(props: { runs(): MarkdownRun[]; sourceId: string; compact?: 
             backgroundColor: run().code ? C.surface : undefined,
           }}
         >
-          {run().text}
+          <If when={run().image} else={run().text}>
+            <MarkdownImageView
+              image={() => run().image!}
+              sessionId={props.sessionId}
+              width={props.width}
+              linked={props.linked ?? false}
+            />
+          </If>
         </Text>
       )}
     </Each>
@@ -114,6 +132,8 @@ function StyledRuns(props: { runs(): MarkdownRun[]; sourceId: string; compact?: 
 function InlineRuns(props: {
   runs(): MarkdownRun[];
   sourceId: string;
+  sessionId: string;
+  width?(): number;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
 }) {
@@ -159,6 +179,8 @@ function InlineRuns(props: {
               <StyledRuns
                 runs={() => group().runs}
                 sourceId={props.sourceId}
+                sessionId={props.sessionId}
+                width={props.width}
                 compact={props.compact}
               />
             }
@@ -169,7 +191,7 @@ function InlineRuns(props: {
               }}
               role="link"
               accessibilityLabel={group()
-                .runs.map((run) => run.text)
+                .runs.map((run) => (run.image ? run.image.alt || run.image.target : run.text))
                 .join('')}
               focusable
               onPress={inputAction(activate, { key: group().key, target: group().link!.target })}
@@ -178,7 +200,10 @@ function InlineRuns(props: {
               <StyledRuns
                 runs={() => group().runs}
                 sourceId={props.sourceId}
+                sessionId={props.sessionId}
+                width={props.width}
                 compact={props.compact}
+                linked
               />
             </Text>
           </If>
@@ -191,11 +216,13 @@ function InlineRuns(props: {
 function MarkdownBlockContent(props: {
   block: () => MarkdownBlock;
   sourceId: string;
+  sessionId: string;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   userScroll(): void;
 }) {
   const block = props.block;
+  const width = signal(0);
   return (
     <If
       when={block().kind === 'table'}
@@ -233,6 +260,7 @@ function MarkdownBlockContent(props: {
               }
             >
               <Text
+                onLayout={(frame) => width.set(frame.size.width)}
                 selectable
                 style={{
                   ...(props.compact ? secondaryTextStyle : bodyTextStyle),
@@ -248,6 +276,8 @@ function MarkdownBlockContent(props: {
                 <InlineRuns
                   runs={() => block().runs}
                   sourceId={props.sourceId}
+                  sessionId={props.sessionId}
+                  width={width}
                   compact={props.compact}
                   openLink={props.openLink}
                 />
@@ -267,6 +297,7 @@ function MarkdownBlockContent(props: {
       <TableBlock
         table={() => block().table!}
         sourceId={props.sourceId}
+        sessionId={props.sessionId}
         compact={props.compact}
         openLink={props.openLink}
         userScroll={props.userScroll}
@@ -278,6 +309,7 @@ function MarkdownBlockContent(props: {
 function TableBlock(props: {
   table(): MarkdownTable;
   sourceId: string;
+  sessionId: string;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   userScroll(): void;
@@ -339,6 +371,7 @@ function TableBlock(props: {
                 <InlineRuns
                   runs={() => cell().runs}
                   sourceId={props.sourceId}
+                  sessionId={props.sessionId}
                   compact={props.compact}
                   openLink={props.openLink}
                 />
