@@ -63,7 +63,7 @@ pub(in super::super) async fn synchronize(
         };
         if apply {
             // Recover only this frozen operation, even under a newer executable.
-            super::prepare(store, Roots::Saved).await?;
+            super::prepare_saved(store, Roots::Saved).await?;
             outcome.applied = true;
         }
         return Ok(outcome);
@@ -73,6 +73,124 @@ pub(in super::super) async fn synchronize(
     let authoring = super::super::authoring()?;
     super::super::verified_fingerprint(&authoring, &packages, &version)?;
     synchronize_packages(store, record, apply, packages).await
+}
+
+/// Read the ordinary management query through the live Host, never its database.
+/// Generic Hosts that do not expose product management remain independently owned.
+pub(crate) async fn live_update_available(
+    client: &maka_host_runtime::application::host::Client,
+) -> Result<bool, HostError> {
+    use maka_plugin_core::contract::{Interface, MethodMode};
+    let Ok(description) = client.catalogue().describe("management") else {
+        return Ok(false);
+    };
+    let expected = maka_plugin_core::deployment::management::deployment_manager_contract();
+    if description.contract.name != expected.name
+        || description.contract.version != expected.version
+    {
+        return Ok(false);
+    }
+    let Interface::Service { methods } = &description.contract.interface else {
+        return Ok(false);
+    };
+    if !matches!(methods.get("read"), Some(method) if method.mode == MethodMode::Query) {
+        return Ok(false);
+    }
+    let metadata: maka_plugin_core::deployment::management::ManagedDeployment =
+        serde_json::from_value(query_management(client, "read", serde_json::json!({})).await?)?;
+    if metadata.source.reference.state_domain != client.source().state_domain
+        || metadata.source.reference.deployment != client.source().deployment
+    {
+        return Err("Host management read returned another deployment".into());
+    }
+    let version = tokio::task::spawn_blocking(super::super::bundle_fingerprint).await??;
+    let packages = tokio::task::spawn_blocking(super::super::packages).await??;
+    let authoring = super::super::authoring()?;
+    super::super::verified_fingerprint(&authoring, &packages, &version)?;
+    let replacements = bundled_replacements(&packages)?;
+    let needs_update = |input: &Input| {
+        pins(input).values().any(|package| {
+            replacements
+                .get(&package.id)
+                .is_some_and(|replacement| replacement != *package)
+        })
+    };
+    if needs_update(&metadata.source.input) {
+        return Ok(true);
+    }
+    if metadata.source.reference == *client.source() {
+        return Ok(false);
+    }
+    // Management reads the desired head; this incarnation's initial source may
+    // still select older bundled pins while asynchronous adoption is pending.
+    // A revision change by itself never authorizes a restart.
+    let initial = read_initial_document(client).await?;
+    Ok(needs_update(&initial.input))
+}
+
+async fn query_management(
+    client: &maka_host_runtime::application::host::Client,
+    method: &str,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, HostError> {
+    use maka_host_runtime::application::transport::Reply;
+    use maka_plugin_core::contract::{Interface, MethodMode};
+    let description = client.catalogue().describe("management")?;
+    if !matches!(&description.contract.interface, Interface::Service { methods } if matches!(methods.get(method), Some(declaration) if declaration.mode == MethodMode::Query))
+    {
+        return Err(format!("Host management {method} is not a query").into());
+    }
+    let mut call = client
+        .call("management", method.into(), input, Default::default())
+        .await?;
+    let result = async {
+        call.start().await?;
+        match call.receive().await? {
+            Reply::Finished { result, cleanup } => {
+                cleanup?;
+                Ok::<_, HostError>(result?)
+            }
+            _ => Err(format!("Host management {method} returned an unexpected reply").into()),
+        }
+    }
+    .await;
+    let cleanup = call.close().await;
+    let value = result?;
+    cleanup?;
+    Ok(value)
+}
+
+async fn read_initial_document(
+    client: &maka_host_runtime::application::host::Client,
+) -> Result<maka_plugin_core::deployment::management::DeploymentDocument, HostError> {
+    use maka_plugin_core::deployment::management::DeploymentDocumentChunk;
+    let mut text = String::new();
+    let mut total = None;
+    loop {
+        let offset = text.len();
+        let chunk: DeploymentDocumentChunk = serde_json::from_value(
+            query_management(
+                client,
+                "readDocument",
+                serde_json::json!({"source": client.source(), "offset": offset}),
+            )
+            .await?,
+        )?;
+        if chunk.source != *client.source()
+            || chunk.offset != offset
+            || total.is_some_and(|total| total != chunk.total_bytes)
+        {
+            return Err("Host initial source document changed during paging".into());
+        }
+        total = Some(chunk.total_bytes);
+        text.push_str(&chunk.text);
+        match chunk.next {
+            Some(next) if next == text.len() && next > offset && next < chunk.total_bytes => {}
+            None if text.len() == chunk.total_bytes => break,
+            _ => return Err("Host initial source document returned an invalid page".into()),
+        }
+    }
+    Ok(serde_json::from_str(&text)?)
 }
 
 async fn synchronize_packages(
@@ -89,16 +207,7 @@ async fn synchronize_packages(
         return Err("public Host source cannot use remote observations".into());
     }
     validate_target(&loaded.source().input, loaded.packages())?;
-    let mut replacements = BTreeMap::new();
-    for package in bundled.values() {
-        let reference = package.application_ref();
-        if replacements
-            .insert(reference.id.clone(), reference)
-            .is_some()
-        {
-            return Err("current bundle contains duplicate package IDs".into());
-        }
-    }
+    let replacements = bundled_replacements(&bundled)?;
     let mut next = loaded.source().input.clone();
     for node in next.instances.values_mut() {
         if let PackageSelection::Pinned { package } = &mut node.package {
@@ -159,7 +268,7 @@ async fn synchronize_packages(
         store
             .begin_application_restore(record.deployment, serde_json::to_vec(&preparation)?)
             .await?;
-        super::prepare(store, Roots::Saved).await?;
+        super::prepare_saved(store, Roots::Saved).await?;
         outcome.applied = true;
     }
     Ok(outcome)
@@ -171,6 +280,22 @@ pub(super) fn validate_target(input: &Input, packages: &[Package]) -> Result<(),
     }
     maka_event_log::applications::validate_application(input, &[], packages)?;
     Ok(())
+}
+
+fn bundled_replacements(
+    bundled: &BTreeMap<String, Package>,
+) -> Result<BTreeMap<String, PackageRef>, HostError> {
+    let mut replacements = BTreeMap::new();
+    for package in bundled.values() {
+        let reference = package.application_ref();
+        if replacements
+            .insert(reference.id.clone(), reference)
+            .is_some()
+        {
+            return Err("current bundle contains duplicate package IDs".into());
+        }
+    }
+    Ok(replacements)
 }
 
 fn replace(package: &mut PackageRef, replacements: &BTreeMap<String, PackageRef>) {

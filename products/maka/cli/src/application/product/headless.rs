@@ -173,6 +173,45 @@ async fn prepare(
     store: &EventLog,
     roots: Roots,
 ) -> Result<(LoadedDeployment, Selection), HostError> {
+    // A fresh Host is already authored from the current bundle.
+    if store.application_launch().await?.is_none() {
+        return prepare_saved(store, roots).await;
+    }
+    // Recover a frozen operation before considering the executing bundle. The
+    // updater uses prepare_saved too, so applying a replacement cannot recurse.
+    let (loaded, selection) = prepare_saved(store, Roots::Saved).await?;
+    let root = store.owned_root()?.canonical_path().to_owned();
+    let outcome = update::synchronize(store, true).await.map_err(|error| {
+        HostError::from(format!(
+            "Automatic bundled application update failed: {error}. Resolve the reported error and retry starting the Host; application update-defaults --root {} previews the update.",
+            root.display()
+        ))
+    })?;
+    let configured = matches!(roots, Roots::Configured(_));
+    if let Roots::Configured(roots) = roots {
+        apply_directories(
+            store,
+            loaded.source().reference.deployment,
+            directories(roots)?,
+        )
+        .await?;
+    }
+    if outcome.applied || configured {
+        let loaded = store
+            .load_application(loaded.source().reference.deployment)
+            .await?
+            .ok_or("public Host source missing")?;
+        return Ok((loaded, selection));
+    }
+    Ok((loaded, selection))
+}
+
+// Explicit update recovery must finish only its frozen target, without starting
+// another update from a potentially newer bundle.
+async fn prepare_saved(
+    store: &EventLog,
+    roots: Roots,
+) -> Result<(LoadedDeployment, Selection), HostError> {
     if store.application_launch().await?.is_none() {
         let initial = match &roots {
             Roots::Saved => None,
@@ -209,9 +248,6 @@ async fn prepare(
             .await?;
         }
         store.complete_application_launch(record.deployment).await?;
-    }
-    if let Roots::Configured(roots) = roots {
-        apply_directories(store, record.deployment, directories(roots)?).await?;
     }
     let loaded = store
         .load_application(record.deployment)
@@ -380,6 +416,112 @@ fn configuration_values<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn startup_updates_old_selected_packages_and_retries_after_incompatible_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = launch::create(directory.path().join("host")).await.unwrap();
+        let (initial, _) = prepare(&store, Roots::Configured(Some(vec![])))
+            .await
+            .unwrap();
+        let deployment = initial.source().reference.deployment;
+        let selection = store
+            .application_launch()
+            .await
+            .unwrap()
+            .unwrap()
+            .configuration;
+        let current = initial
+            .packages()
+            .iter()
+            .find(|package| package.application_ref().id == "maka.agent.settings")
+            .unwrap();
+        // Model an older, valid settings package whose configuration accepted a
+        // setting removed by the current bundled revision.
+        let mut files = current.files().clone();
+        let mut manifest: Value = serde_json::from_slice(&files["maka.extension.json"]).unwrap();
+        manifest["application"]["entries"]["host"]["configuration"]["properties"]["legacySetting"] =
+            json!({"type":"boolean"});
+        files.insert(
+            "maka.extension.json".into(),
+            serde_json::to_vec(&manifest).unwrap(),
+        );
+        let previous = super::super::Package::new(files).unwrap();
+        let mut input = initial.source().input.clone();
+        let settings = input.instances.get_mut("settings").unwrap();
+        settings.package = previous.application_ref().into();
+        settings
+            .configuration
+            .values
+            .insert("legacySetting".into(), json!(true));
+        settings
+            .configuration
+            .values
+            .insert("locale".into(), json!("zh-CN"));
+        let packages: Vec<_> = initial
+            .packages()
+            .iter()
+            .map(|package| {
+                if package.application_ref() == current.application_ref() {
+                    previous.clone()
+                } else {
+                    package.clone()
+                }
+            })
+            .collect();
+        let old = store
+            .commit_application(
+                deployment,
+                initial.source().reference.revision,
+                input.clone(),
+                vec![],
+                packages.clone(),
+            )
+            .await
+            .unwrap();
+        let error = prepare(&store, Roots::Saved).await.err().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("Automatic bundled application update failed"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("configuration"), "{error}");
+        let unchanged = store.load_application(deployment).await.unwrap().unwrap();
+        assert_eq!(unchanged.source().reference, old);
+        assert_eq!(unchanged.source().input, input);
+        assert!(
+            store
+                .application_launch()
+                .await
+                .unwrap()
+                .unwrap()
+                .pending
+                .is_none()
+        );
+        // Fix the reported user configuration and retry the exact startup path.
+        input
+            .instances
+            .get_mut("settings")
+            .unwrap()
+            .configuration
+            .values
+            .remove("legacySetting");
+        let fixed = store
+            .commit_application(deployment, old.revision, input.clone(), vec![], packages)
+            .await
+            .unwrap();
+        let (updated, _) = prepare(&store, Roots::Saved).await.unwrap();
+        input.instances.get_mut("settings").unwrap().package = current.application_ref().into();
+        assert_eq!(updated.source().input, input);
+        assert_eq!(updated.source().reference.revision, fixed.revision + 1);
+        let record = store.application_launch().await.unwrap().unwrap();
+        assert_eq!(record.configuration, selection);
+        assert!(record.pending.is_none());
+        let (again, _) = prepare(&store, Roots::Saved).await.unwrap();
+        assert_eq!(again.source().reference, updated.source().reference);
+        store.drain().await;
+    }
+
     #[tokio::test]
     async fn public_host_resumes_original_source_and_starts_with_read_only_permissions() {
         let directory = tempfile::tempdir().unwrap();

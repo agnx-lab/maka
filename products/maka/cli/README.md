@@ -41,7 +41,9 @@ Dedicated Host processes capture stderr in their Root's private control-cache fi
 
 Composition commands read complete JSON source and remote-export files. The Plugins composition editor loads an exact source revision in UTF-8 pages of at most 64 KiB and saves the confirmed native editor snapshot against that revision. Whole documents have no separate byte ceiling; typed validation, package checks, Host permissions, revision conflicts and actual resource admission still apply. Committed revisions retain the complete source for subsequent reads and reopening the Root.
 
-To update a standalone Host's selected bundled plugins, stop that Host and use its State Root:
+Before a Host starts, it automatically updates selected bundled plugins using the same validation and recovery as `update-defaults --apply`. When opening the interface, a running product Host is checked through its management endpoint and automatically restarted for an available update only when no other session or active work remains. Busy Hosts keep serving their existing clients and startup explains that they must become idle before retrying. A startup with current packages does not create another source revision. If an update is incompatible with saved configuration, startup reports the error and leaves the source intact so it can be corrected and retried.
+
+To preview or explicitly apply an update while a standalone Host is stopped, use its State Root:
 
 ```sh
 maka application update-defaults --root /path/to/host

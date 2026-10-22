@@ -900,6 +900,30 @@ mod tests {
     }
 
     #[test]
+    fn font_zoom_with_the_same_physical_canvas_revokes_old_input_geometry() {
+        let mut inbox = Inbox::new(capabilities(), false);
+        let original = inbox.capabilities;
+        let old = FrameToken::default();
+        inbox.published = Some(old);
+        let mut zoomed = original.size;
+        zoomed.cols /= 2;
+        zoomed.rows /= 2;
+        inbox.push(Event::WindowResized(zoomed)).unwrap();
+        assert_eq!(inbox.geometry, 2);
+        assert!(inbox.published.is_none());
+        assert!(inbox.cancel_pointer);
+        assert_eq!(inbox.capabilities.viewport(), original.viewport());
+        assert_eq!(
+            inbox.capabilities.scale_factor(),
+            2.0 * original.scale_factor()
+        );
+        assert_eq!(
+            inbox.capabilities.logical_viewport().unwrap(),
+            original.logical_viewport().unwrap() / 2.0
+        );
+    }
+
+    #[test]
     fn first_flush_opens_parallel_admission_and_every_resize_closes_it() {
         let mut inbox = Inbox::new(capabilities(), false);
         inbox.frame_capacity = 5;

@@ -28,6 +28,7 @@ use std::{collections::BTreeMap, io::Write, path::PathBuf};
 mod headless;
 mod launch;
 mod update;
+pub(crate) use headless::update::live_update_available;
 pub(crate) use headless::{ProductHost, Roots, open_host, select_committed_host};
 pub(super) use update::Update;
 

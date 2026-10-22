@@ -177,7 +177,7 @@ fn run(
     // Renderer initialization can overlap a terminal resize. Wait for the
     // same reader/writer measurement to complete, then keep its size and
     // geometry together; never pair startup dimensions with a newer ticket.
-    let viewport = loop {
+    let (viewport, scale_factor) = loop {
         let measured = {
             let mut state = presentation.state.lock().unwrap();
             if presentation.stop.load(Ordering::Acquire) || state.quit {
@@ -191,14 +191,17 @@ fn run(
             inbox
                 .capabilities
                 .viewport()
-                .map(|viewport| (viewport, inbox.geometry))
+                .map(|viewport| (viewport, inbox.capabilities.scale_factor(), inbox.geometry))
         };
-        if let Some((viewport, generation)) = measured {
+        if let Some((viewport, scale_factor, generation)) = measured {
             geometry.set(generation);
-            break viewport;
+            break (viewport, scale_factor);
         }
         thread::park_timeout(Duration::from_millis(10));
     };
+    platform
+        .set_viewport(viewport, scale_factor)
+        .map_err(|error| error.to_string())?;
     config
         .assets
         .get_or_insert_with(|| Arc::new(crate::ApplicationAssets));
@@ -209,7 +212,10 @@ fn run(
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                 point(px(0.0), px(0.0)),
-                size(px(viewport.width.0 as f32), px(viewport.height.0 as f32)),
+                size(
+                    px(viewport.width.0 as f32 / scale_factor),
+                    px(viewport.height.0 as f32 / scale_factor),
+                ),
             ))),
             inactive_frame_interval: None,
             ..Default::default()
@@ -283,7 +289,7 @@ fn run(
                     .viewport()
                     .ok_or("terminal resize did not report its real pixel dimensions")?;
                 platform
-                    .resize(viewport)
+                    .set_viewport(viewport, caps.scale_factor())
                     .map_err(|error| error.to_string())?;
             }
             if cancel || resize.is_some() {
