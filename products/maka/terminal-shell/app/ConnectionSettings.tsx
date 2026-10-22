@@ -211,12 +211,13 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             disabled={disabled()}
             accessibilityLabel="Add model manually"
             onPress={inputAction(owner.editModel, { ...owner.action(), id: null })}
-            style={controlStyle}
+            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ ...captionTextStyle, color: C.accent }}>Add model manually</Text>
+            <Icon name="plus" color={C.secondary} />
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>Add model manually</Text>
           </Button>
           <List
             each={models()}
@@ -224,65 +225,94 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             estimatedItemSize={64}
             style={{ flex: 1 }}
           >
-            {(id) => (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 8,
-                  height: 64,
-                  padding: 8,
-                }}
-              >
-                <Button
-                  disabled={disabled()}
-                  style={{ ...controlStyle, flex: 1, minWidth: 0 }}
-                  accessibilityLabel={`Edit model ${id()}`}
-                  onPress={inputAction(owner.editModel, { ...owner.action(), id: id() })}
-                  hoverStyle={controlHoverStyle}
-                  focusStyle={controlFocusStyle}
-                  disabledStyle={controlDisabledStyle}
+            {(id) => {
+              const name = () =>
+                owner.editor()?.baseline?.editing?.modelOverrides?.[id()]?.displayName ?? id();
+              const isDefault = () =>
+                owner.defaultTarget()?.connectionId ===
+                  owner.editor()?.baseline?.target.connectionId &&
+                owner.defaultTarget()?.modelId === id();
+              return (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    height: 64,
+                    padding: 8,
+                  }}
                 >
-                  <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.text }}>
-                    {owner.editor()?.baseline?.editing?.modelOverrides?.[id()]?.displayName ?? id()}
-                  </Text>
-                  <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
-                    {id()}
-                  </Text>
-                </Button>
-                <Button
-                  disabled={disabled() || !owner.editor()?.enabled}
-                  accessibilityLabel={`Set default ${id()}`}
-                  selected={
-                    owner.defaultTarget()?.connectionId ===
-                      owner.editor()?.baseline?.target.connectionId &&
-                    owner.defaultTarget()?.modelId === id()
-                  }
-                  onPress={inputAction(owner.setDefault, { ...owner.action(), id: id() })}
-                  style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
-                  hoverStyle={controlHoverStyle}
-                  focusStyle={controlFocusStyle}
-                  disabledStyle={controlDisabledStyle}
-                >
-                  <ChoiceIndicator
-                    kind="radio"
-                    checked={
-                      owner.defaultTarget()?.connectionId ===
-                        owner.editor()?.baseline?.target.connectionId &&
-                      owner.defaultTarget()?.modelId === id()
-                    }
+                  <Button
+                    disabled={disabled()}
+                    style={{ ...controlStyle, height: 48, flex: 1, minWidth: 0 }}
+                    accessibilityLabel={`Edit model ${id()}`}
+                    onPress={inputAction(owner.editModel, { ...owner.action(), id: id() })}
+                    hoverStyle={controlHoverStyle}
+                    focusStyle={controlFocusStyle}
+                    disabledStyle={controlDisabledStyle}
+                  >
+                    <View pointerEvents="none" style={{ minWidth: 0 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                          style={{ ...captionTextStyle, color: C.text, minWidth: 0, flexShrink: 1 }}
+                        >
+                          {name()}
+                        </Text>
+                        <If when={isDefault()}>
+                          <Text
+                            style={{
+                              ...captionTextStyle,
+                              color: C.secondary,
+                              flexShrink: 0,
+                              paddingHorizontal: 6,
+                              backgroundColor: C.raised,
+                              borderRadius: 4,
+                            }}
+                          >
+                            Default
+                          </Text>
+                        </If>
+                      </View>
+                      <If when={name() !== id()}>
+                        <Text
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                          style={{ ...captionTextStyle, color: C.muted }}
+                        >
+                          {id()}
+                        </Text>
+                      </If>
+                    </View>
+                  </Button>
+                  <Button
                     disabled={disabled() || !owner.editor()?.enabled}
-                  />
-                  <Text style={{ ...captionTextStyle, color: C.accent }}>
-                    {owner.defaultTarget()?.connectionId ===
-                      owner.editor()?.baseline?.target.connectionId &&
-                    owner.defaultTarget()?.modelId === id()
-                      ? 'Default'
-                      : 'Set default'}
-                  </Text>
-                </Button>
-              </View>
-            )}
+                    accessibilityLabel={`Set default ${id()}`}
+                    tooltip={`Set default ${id()}`}
+                    selected={isDefault()}
+                    onPress={inputAction(owner.setDefault, { ...owner.action(), id: id() })}
+                    style={{
+                      ...controlStyle,
+                      width: 40,
+                      height: 40,
+                      paddingHorizontal: 0,
+                      paddingVertical: 0,
+                      alignItems: 'center',
+                    }}
+                    hoverStyle={controlHoverStyle}
+                    focusStyle={controlFocusStyle}
+                    disabledStyle={controlDisabledStyle}
+                  >
+                    <ChoiceIndicator
+                      kind="radio"
+                      checked={isDefault()}
+                      disabled={disabled() || !owner.editor()?.enabled}
+                    />
+                  </Button>
+                </View>
+              );
+            }}
           </List>
         </If>
       </If>
