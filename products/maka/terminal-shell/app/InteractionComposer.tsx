@@ -635,6 +635,7 @@ export function InteractionComposer({
           </Text>
         </View>
         <Scroll
+          accessibilityLabel="Request content"
           style={{ flexShrink: 1, minHeight: 0, maxHeight: 336 }}
           contentStyle={{ padding: 16, gap: 16 }}
         >

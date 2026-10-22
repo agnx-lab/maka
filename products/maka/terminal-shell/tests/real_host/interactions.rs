@@ -204,7 +204,24 @@ async fn computer_consent_keeps_the_original_target_boundary_and_single_click_re
         assert_eq!(view.surface().focused(), Some(composer));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("The original consent draft stays here"));
         assert_eq!(view.surface().input_context().unwrap().selection, caret);
+        // Returning to the resident editor keeps the independent request
+        // reader's position. Read its beginning and complete original target
+        // through the real native Scroll rather than requiring both ends at once.
+        tab_to_label(&mut view, "Request content").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         wait_request(&mut view, "Capability request", "Computer access for this session").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| {
+            screen.contains("Request details")
+                && screen.contains("Provider: maka_workspace_computer")
+                && screen.contains("Contract: maka_workspace_computer_v1")
+                && screen.contains("Server: maka_workspace_computer")
+                && screen.contains("Tool: cua_repl")
+                && screen.contains("Capability: computer_use")
+                && screen.contains("Scope: {\"kind\":\"capability\"}")
+                && screen.contains("Permission boundary: 0")
+        }).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == format!("Session: {}", fixture.session)));
         assert!(fixture.store.interaction(&denied.request_id).await.unwrap().unwrap().outcome.is_none());
         assert!(client.pending_controls().await.unwrap().is_empty());
 
