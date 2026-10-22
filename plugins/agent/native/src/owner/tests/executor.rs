@@ -641,6 +641,24 @@ async fn executor_service_javascript_uses_original_engine_and_read_only_restart(
         activate(&mut fixture, true, None, true).await;
         let session = fixture.create("External").await;
         let input = input_for(&session, "original 外部 text");
+        *fixture.owner.catalog.snapshot.write().await =
+            Err("fixture_public_catalog_unavailable".into());
+        let backend = json!({"kind":"executor","selection":input["executor"]});
+        let saved = fixture
+            .mutation(
+                2,
+                "selectBackend",
+                json!({"sessionId":session,"backend":backend}),
+                Uuid::new_v4(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved["kind"], "committed");
+        let selected = fixture
+            .query("observe", json!({"sessionId":session}))
+            .await
+            .unwrap();
+        assert_eq!(selected["session"]["backend"], backend);
         let operation = Uuid::new_v4();
         let accepted = fixture
             .mutation(2, "execute", input.clone(), operation)
