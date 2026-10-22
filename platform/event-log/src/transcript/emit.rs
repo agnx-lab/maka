@@ -73,13 +73,21 @@ pub(super) async fn source(
     let Some(candidate) = candidate else {
         return Ok(Vec::new());
     };
+    let (invocation, step, kind) = candidate;
+    let projection = if kind == "context_checkpoint_recorded" {
+        Projection::Compaction
+    } else {
+        Projection::Evidence(
+            evidence::selected(connection, &invocation, step.as_deref(), sequence, true).await?,
+        )
+    };
     let session = session.to_owned();
     connection
         .run_on_worker(move |handle| {
             // SAFETY: exclusive worker-local borrow; no handle-backed values escape.
             let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
             db.set_prepared_statement_cache_capacity(100);
-            project_source(&db, &session, sequence, candidate)
+            project_source(&db, &session, sequence, projection)
         })
         .await?
 }
@@ -102,22 +110,38 @@ pub(super) fn source_on_handle(
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })
         .optional()?;
-    let Some(candidate) = candidate else {
+    let Some((invocation, step, kind)) = candidate else {
         return Ok(Vec::new());
     };
-    project_source(db, session, source, candidate)
+    let projection = if kind == "context_checkpoint_recorded" {
+        Projection::Compaction
+    } else {
+        Projection::Evidence(evidence::selected_on_handle(
+            db,
+            &invocation,
+            step.as_deref(),
+            source,
+            true,
+        )?)
+    };
+    project_source(db, session, source, projection)
+}
+
+enum Projection {
+    Compaction,
+    Evidence(Vec<i64>),
 }
 
 fn project_source(
     db: &RawConnection,
     session: &str,
     source: i64,
-    (invocation, step, kind): (String, Option<String>, String),
+    projection: Projection,
 ) -> Result<Vec<Row>, StoreError> {
-    if kind == "context_checkpoint_recorded" {
-        return Ok(vec![super::compaction::project(db, source)?]);
-    }
-    let ids = evidence::selected_on_handle(db, &invocation, step.as_deref(), source, true)?;
+    let ids = match projection {
+        Projection::Compaction => return Ok(vec![super::compaction::project(db, source)?]),
+        Projection::Evidence(ids) => ids,
+    };
     let mut view = InvocationView::new();
     let mut own = Vec::new();
     for sequence in ids {

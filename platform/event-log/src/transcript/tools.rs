@@ -40,11 +40,11 @@ const TOOL_MAIN: &str = r#"SELECT EXISTS(SELECT 1 FROM runtime_events request
 
 /// Reconstruct one tool boundary, its actual dispatch ancestry and accepted
 /// provider step. Exclude sibling outcomes and unrelated raw payloads.
-pub(super) fn selected(
+pub(super) fn selection(
     db: &RawConnection,
     invocation: &str,
     through: i64,
-) -> Result<Vec<i64>, StoreError> {
+) -> Result<evidence::Selection, StoreError> {
     let (operation, kind): (String, String) = db
         .prepare_cached(TOOL_KIND)?
         .query_row(params![through, invocation], |row| {
@@ -116,12 +116,11 @@ pub(super) fn selected(
             return Err(ProjectionError::Invalid("tool belongs to a non-main step").into());
         }
     }
-    evidence::read_step(
-        db,
-        invocation,
-        step.as_deref(),
+    Ok(evidence::Selection::Step {
+        invocation: invocation.to_owned(),
+        step,
         through,
-        &serde_json::to_string(&ids)?,
-        true,
-    )
+        boundaries: serde_json::to_string(&ids)?,
+        completed: true,
+    })
 }
