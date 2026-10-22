@@ -63,9 +63,8 @@ pub(super) struct Inbox {
     pub quit: bool,
     /// The sole output owner replaces this only after a successful flush.
     pub last_frame: Option<(u64, InputSnapshot)>,
-    /// A physical input entered application code. Every earlier offered
-    /// action is revoked, including offers older than the UI's current frame.
-    pub reject_through: u64,
+    /// A resize invalidates all pointer coordinates from earlier presentations.
+    pub resized_through: u64,
     capture: Option<Capture>,
     #[cfg(target_os = "linux")]
     pub pixel_probe: super::pixels::Probe,
@@ -98,7 +97,7 @@ impl Inbox {
             self.resize = Some((columns, rows));
             self.cancel_pointer = true;
             if let Some((epoch, _)) = self.last_frame.take() {
-                self.reject_through = self.reject_through.max(epoch);
+                self.resized_through = self.resized_through.max(epoch);
             }
             self.capture = None;
             return;
@@ -112,7 +111,7 @@ impl Inbox {
                     self.capture = None;
                     if mouse.modifiers.is_empty() && self.resize.is_none() {
                         self.capture = self.last_frame.as_ref().and_then(|(offered, snapshot)| {
-                            (*offered > self.reject_through)
+                            (*offered > self.resized_through)
                                 .then(|| snapshot.press_at(mouse.column, mouse.row))
                                 .flatten()
                                 .map(|lease| {
@@ -161,7 +160,7 @@ impl Inbox {
                     if self.capture.is_none() && self.resize.is_none() =>
                 {
                     self.last_frame.as_ref().and_then(|(offered, snapshot)| {
-                        (*offered > self.reject_through)
+                        (*offered > self.resized_through)
                             .then(|| snapshot.wheel_at(*mouse))
                             .flatten()
                             .map(|lease| Pointer::Wheel {
@@ -173,7 +172,7 @@ impl Inbox {
                 _ => None,
             };
             if let Some(captured) = captured {
-                if captured.epoch() <= self.reject_through || self.resize.is_some() {
+                if captured.epoch() <= self.resized_through || self.resize.is_some() {
                     self.cancel_pointer = true;
                     return;
                 }
@@ -209,7 +208,7 @@ impl Inbox {
             let stale = match &input.pointer {
                 Some(Pointer::Exact(offered)) => *offered != epoch,
                 Some(Pointer::Press { epoch, .. } | Pointer::Wheel { epoch, .. }) => {
-                    *epoch <= self.reject_through
+                    *epoch <= self.resized_through
                 }
                 None => false,
             };
@@ -486,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn native_wheels_keep_their_owner_and_actions_and_resize_revoke_them() {
+    fn native_wheels_keep_their_owner_and_resize_revokes_them() {
         use nsh_core::{
             Bounds, MountBatch, MountItem, Point, ROOT_ID, Size, ViewKind, geometry::px,
         };
@@ -549,11 +548,10 @@ mod tests {
             matches!(inbox.pop(8).unwrap().event, Event::Paste(text) if text.len() == 256 * 1024)
         );
         inbox.push(pointer(MouseEventKind::ScrollUp), 0);
-        inbox.reject_through = 7;
-        assert!(
-            inbox.pop(8).is_none(),
-            "an earlier application action revokes the old owner"
-        );
+        inbox.push(Event::Resize(40, 12), 0);
+        assert!(inbox.pop(8).is_none(), "a resize revokes the old owner");
+        inbox.resize = None;
+        inbox.cancel_pointer = false;
         inbox.last_frame = Some((9, surface.input_snapshot()));
         inbox.push(pointer(MouseEventKind::ScrollUp), 0);
         inbox.push(Event::Resize(41, 12), 0);

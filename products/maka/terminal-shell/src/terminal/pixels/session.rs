@@ -461,18 +461,17 @@ fn run(
                                     outcome = "paste_handled";
                                     let mut state = presentation.state.lock().unwrap();
                                     let inbox = state.pixels.as_mut().unwrap();
-                                    inbox.reject_through =
-                                        inbox.reject_through.max(token.sequence());
+                                    inbox.exact_reject_through =
+                                        inbox.exact_reject_through.max(token.sequence());
                                 }
                             } else if let Some(event) = mapping.input(event, caps) {
-                                let (floor, current_geometry) = {
+                                let (exact_floor, current_geometry) = {
                                     let state = presentation.state.lock().unwrap();
                                     let inbox = state.pixels.as_ref().unwrap();
-                                    (inbox.reject_through, inbox.geometry)
+                                    (inbox.exact_reject_through, inbox.geometry)
                                 };
-                                let stale = super::input::pointer(&input.event)
-                                    && (token.sequence() <= floor
-                                        || input.geometry != current_geometry);
+                                let is_pointer = super::input::pointer(&input.event);
+                                let stale = is_pointer && input.geometry != current_geometry;
                                 outcome = "stale_pointer";
                                 if !stale {
                                     let disposition = source.borrow().dispatch(&snapshot, &event);
@@ -486,7 +485,13 @@ fn run(
                                             false
                                         }
                                         InputDisposition::ExactFallback => {
-                                            if exact_ready
+                                            // Only unsealed pointer handlers need a new
+                                            // offer after earlier input. Native owners
+                                            // have already validated their own identity.
+                                            let exact_unrevoked =
+                                                !is_pointer || token.sequence() > exact_floor;
+                                            if exact_unrevoked
+                                                && exact_ready
                                                 && input.geometry == current_geometry
                                                 && platform.dispatch_input_exact(
                                                     token.clone(),
@@ -504,6 +509,8 @@ fn run(
                                                 )?;
                                                 outcome = if committed {
                                                     "text_committed"
+                                                } else if !exact_unrevoked {
+                                                    "exact_revoked"
                                                 } else if !exact_ready {
                                                     "exact_not_ready"
                                                 } else if input.geometry != current_geometry {
@@ -540,8 +547,8 @@ fn run(
                                     {
                                         let mut state = presentation.state.lock().unwrap();
                                         let inbox = state.pixels.as_mut().unwrap();
-                                        inbox.reject_through =
-                                            inbox.reject_through.max(token.sequence());
+                                        inbox.exact_reject_through =
+                                            inbox.exact_reject_through.max(token.sequence());
                                     }
                                 }
                             } else {

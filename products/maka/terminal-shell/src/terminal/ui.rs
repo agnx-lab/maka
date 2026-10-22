@@ -266,7 +266,7 @@ impl Session {
             if matches!(
                 &input.pointer,
                 Some(Pointer::Press { epoch, .. } | Pointer::Wheel { epoch, .. })
-                    if *epoch <= self.presentation.state.lock().unwrap().reject_through
+                    if *epoch <= self.presentation.state.lock().unwrap().resized_through
             ) {
                 self.cancel_pointer()?;
                 changed = true;
@@ -324,9 +324,9 @@ impl Session {
                 changed |= self.surface.handle_event(input.event);
             }
             let events: Vec<_> = self.surface.drain_events().collect();
-            // A captured Down/Drag/Up group can finish before queued JS
-            // changes its meaning. Once a callback runs, remaining old-frame
-            // pointers lose their authority even if the pixels stay equal.
+            // Finish one captured gesture before applying its JS changes.
+            // A later independent gesture validates its original native owner
+            // and binding against that updated state.
             let invokes_application = self.dispatch_events(events, true, lease)?;
             if invokes_application {
                 if inputs.peek().is_some() {
@@ -395,10 +395,6 @@ impl Session {
                         } else {
                             self.engine.dispatch_event_now(id, event, payload)
                         };
-                        if invokes_application {
-                            let mut inbox = self.presentation.state.lock().unwrap();
-                            inbox.reject_through = inbox.reject_through.max(self.epoch);
-                        }
                     }
                 }
                 SurfaceEvent::Event(id, event, payload) => {
@@ -1122,7 +1118,7 @@ mod tests {
             {
                 let mut inbox = presentation.state.lock().unwrap();
                 assert_eq!(inbox.last_frame.as_ref().unwrap().0, 65);
-                inbox.reject_through = 56;
+                inbox.resized_through = 56;
                 inbox.push(
                     pointer(
                         MouseEventKind::Down(MouseButton::Left),

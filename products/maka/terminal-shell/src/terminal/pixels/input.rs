@@ -85,7 +85,9 @@ pub(crate) struct Inbox {
     pub cancel_pointer: bool,
     pub expected_ack: Option<u32>,
     pub ack: Option<(std::time::Instant, Result<(), String>)>,
-    pub reject_through: u64,
+    /// Earlier offers cannot enter opaque pointer dispatch; native owners
+    /// validate their own target, binding and geometry independently.
+    pub exact_reject_through: u64,
     pub wake: Option<std::thread::Thread>,
     pub effects: Option<Vec<u8>>,
     pub restore_sixel_mode: bool,
@@ -110,7 +112,7 @@ impl Inbox {
             cancel_pointer: false,
             expected_ack: None,
             ack: None,
-            reject_through: 0,
+            exact_reject_through: 0,
             wake: None,
             effects: None,
             restore_sixel_mode: false,
@@ -188,13 +190,7 @@ impl Inbox {
         if matches!(event, Event::MouseLeave) {
             return Ok(false);
         }
-        if pointer(&event)
-            && (token.is_none()
-                || self.resize.is_some()
-                || token
-                    .as_ref()
-                    .is_some_and(|token| token.sequence() <= self.reject_through))
-        {
+        if pointer(&event) && (token.is_none() || self.resize.is_some()) {
             if released(&event) {
                 self.lose_pointer();
             }
