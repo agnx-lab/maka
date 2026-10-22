@@ -2430,7 +2430,9 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         support::evidence_cells("workspace-current-diff-dock", &view);
         assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
         view.resize(80, 24);
-        let narrow = wait_view_state(&mut view, |view, screen| screen.contains("Current worktree diff") && screen.contains("+REFRESHED_CURRENT_EDIT") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close workspace preview" && !node.state.disabled)).await;
+        // The dock has the same text and close button. Wait until the native
+        // Dialog input scope hides the still-resident composer before Escape.
+        let narrow = wait_view_state(&mut view, |view, screen| screen.contains("Current worktree diff") && screen.contains("+REFRESHED_CURRENT_EDIT") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close workspace preview" && !node.state.disabled) && !view.accessibility_snapshot().iter().any(|node| node.id == composer)).await;
         evidence("workspace-current-diff-dialog", &narrow);
         support::evidence_cells("workspace-current-diff-dialog", &view);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
