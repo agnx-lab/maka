@@ -24,6 +24,8 @@ use crate::{ConfigError, ConfigurationStore, Result, TransactionMode, catalog};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+type CachedCatalogRow = (String, String, Option<String>, Option<String>, i64);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PublicCatalogSource {
     ModelsDev,
@@ -71,12 +73,11 @@ impl ConfigurationStore {
                 )
                 .fetch_one(&mut *tx)
                 .await?;
-                let rows: Vec<(String, String, Option<String>, Option<String>, i64)> =
-                    sqlx::query_as(
-                        "SELECT source, body, etag, last_modified, checked_at FROM public_catalog",
-                    )
-                    .fetch_all(&mut *tx)
-                    .await?;
+                let rows: Vec<CachedCatalogRow> = sqlx::query_as(
+                    "SELECT source, body, etag, last_modified, checked_at FROM public_catalog",
+                )
+                .fetch_all(&mut *tx)
+                .await?;
                 let mut sources = BTreeMap::new();
                 for (source, body, etag, last_modified, checked_at) in rows {
                     sources.insert(

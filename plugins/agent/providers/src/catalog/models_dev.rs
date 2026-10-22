@@ -112,10 +112,8 @@ fn model(provider: &str, row: &Value) -> Result<ModelInfo, String> {
                         }
                     }
                 }
-                Some("toggle") if toggle_off(provider) => {
-                    if !levels.contains(&ThinkingLevel::Off) {
-                        levels.push(ThinkingLevel::Off);
-                    }
+                Some("toggle") if toggle_off(provider) && !levels.contains(&ThinkingLevel::Off) => {
+                    levels.push(ThinkingLevel::Off);
                 }
                 _ => {} // Budgets and future controls are not effort levels.
             }
