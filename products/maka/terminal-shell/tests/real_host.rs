@@ -657,8 +657,15 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         support::evidence_cells("workbench-home", &view);
 
         support::click_text(&mut view, "Commands");
-        wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("Close")).await;
-        support::click_text(&mut view, "Close");
+        wait_view_state(&mut view, |view, screen| {
+            screen.contains("Search commands…")
+                && view.accessibility_snapshot().iter().any(|node| {
+                    node.role == nsh_core::AccessibilityRole::Button
+                        && node.label == "Close commands"
+                        && !node.state.disabled
+                })
+        }).await;
+        support::click_button(&mut view, "Close commands").await;
         wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Search commands…")).await;
         support::click_text(&mut view, "Commands");
         wait_view_state(&mut view, |view, screen| screen.contains("Search commands…") && selected_command(&view.accessibility_snapshot(), "Sessions").is_some()).await;
@@ -2694,9 +2701,9 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         // The emulator appends this ordinary Ctrl+P to its cell-size reply.
         terminal.wait_for("Search commands…").await;
         let palette = terminal.wait_for("Resume a conversation").await;
-        assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains("Close"));
+        assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains('×'));
         terminal.send(b"\x1b");
-        terminal.wait_for_absent("Close").await;
+        terminal.wait_for_absent("×").await;
         terminal.wait_for_absent("Loading session history").await;
         // Drafts belong to the client journal, not the Host. Observe the actual
         // binary's journal rather than the fixture client's separate client.db.
@@ -2909,7 +2916,7 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             assert!(
                 palette.contains("Search commands…")
                     && palette.contains("Sessions")
-                    && palette.contains("Close")
+                    && palette.contains('×')
             );
             terminal.paste("Choose workspace");
             // Removing the old first result proves the query reset keyboard
@@ -2918,7 +2925,7 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             assert!(
                 choice.contains("Choose workspace")
                     && choice.contains("Start a conversation in another folder")
-                    && choice.contains("Close")
+                    && choice.contains('×')
             );
             terminal.send(b"\r");
             terminal.wait_for("Search workspaces…").await;
@@ -3042,9 +3049,9 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         terminal.send(&input);
         terminal.wait_for("Search commands…").await;
         let palette = terminal.wait_for("Resume a conversation").await;
-        assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains("Close"));
-        terminal.click_text("Close");
-        terminal.wait_for_absent("Close").await;
+        assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains('×'));
+        terminal.click_text("×");
+        terminal.wait_for_absent("×").await;
         terminal.wait_for("Make something remarkable.").await;
         terminal.send(b"\x10");
         terminal.wait_for("Search commands…").await;
@@ -3054,9 +3061,9 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         // rather than treating a native Input border as an app-ready marker.
         terminal.wait_for_absent("A fresh start in your workspace").await;
         let choice = terminal.wait_for("Resume a conversation").await;
-        assert!(choice.contains("Sessions") && choice.contains("Close"));
+        assert!(choice.contains("Sessions") && choice.contains('×'));
         terminal.send(b"\r");
-        terminal.wait_for_absent("Close").await;
+        terminal.wait_for_absent("×").await;
         terminal.wait_for("Search sessions…").await;
         terminal.paste("NSH real");
         terminal.wait_for_absent("Search sessions…").await;
