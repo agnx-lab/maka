@@ -1853,6 +1853,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let boundary_turn = (0..16).find(|turn| added.contains(&format!("History {turn:02} paragraph 00"))).unwrap();
         let added_marker = format!("History {boundary_turn:02} paragraph 00");
         let wheel_marker = format!("History {:02} paragraph 01", boundary_turn + 1);
+        let boundary_tail = format!("History {boundary_turn:02} paragraph 29:");
         let gate = ReplyGate::before_history(fixture.directory.path(), fixture.address.clone(), final_cursor);
         let cancel_client = fixture.client_at(&gate.address).await;
         let (mut cancelled, cancel_bindings) = fixture.view(cancel_client.clone(), Some(fixture.session.clone()));
@@ -1882,6 +1883,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         commit_native_events(&cancelled).await;
         let wheel = wait_view_state(&mut cancelled, |view, screen| !view.surface().animating() && screen.contains(&wheel_marker)).await;
         let wheel_row = wheel.lines().position(|line| line.contains(&wheel_marker)).unwrap();
+        let reading_row = wheel.lines().position(|line| line.contains(&boundary_tail)).unwrap();
         assert!(!cancelled.accessibility_snapshot().iter().any(|node| node.label.contains(&added_marker)));
         evidence("history-home-wheel-before-final-page", &wheel);
         evidence("history-home-wheel-before-final-page-ax", &format!("{:#?}", cancelled.accessibility_snapshot()));
@@ -1894,14 +1896,19 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         evidence("history-home-wheel-final-page-published", &retained);
         evidence("history-home-wheel-final-page-published-ax", &format!("{:#?}", cancelled.accessibility_snapshot()));
         support::evidence_cells("history-home-wheel-final-page-published", &cancelled);
-        assert_eq!(retained.lines().position(|line| line.contains(&wheel_marker)), Some(wheel_row), "a completed, cancelled Home moved the user's wheel anchor:\n{retained}");
+        assert_eq!(retained.lines().position(|line| line.contains(&boundary_tail)), Some(reading_row), "a completed, cancelled Home moved the user's reading source:\n{retained}");
+        // Promise delivery may already include rich layout. While still raw,
+        // also retain the original downstream-row check; rich layout removes
+        // the source's two trailing blank lines below the reading position.
+        if cancelled.accessibility_snapshot().iter().any(|node| node.label.contains(&boundary_tail) && node.label.contains("**bold**")) {
+            assert_eq!(retained.lines().position(|line| line.contains(&wheel_marker)), Some(wheel_row), "a completed, cancelled Home moved the user's wheel anchor:\n{retained}");
+        }
         assert!(!retained.contains("History question 00"), "the cancelled Home snapped to canonical start:\n{retained}");
-        let boundary_tail = format!("History {boundary_turn:02} paragraph 29:");
         let formatted = wait_view_state(&mut cancelled, |view, _| view.accessibility_snapshot().iter().any(|node| node.label.starts_with(&boundary_tail) && !node.label.contains("**bold**"))).await;
         evidence("history-home-wheel-after-formatting", &formatted);
         evidence("history-home-wheel-after-formatting-ax", &format!("{:#?}", cancelled.accessibility_snapshot()));
         support::evidence_cells("history-home-wheel-after-formatting", &cancelled);
-        assert_eq!(formatted.lines().position(|line| line.contains(&wheel_marker)), Some(wheel_row), "formatting the newly completed prefix moved the same original reading anchor:\n{formatted}");
+        assert_eq!(formatted.lines().position(|line| line.contains(&boundary_tail)), Some(reading_row), "formatting the newly completed prefix moved the same original reading anchor:\n{formatted}");
         assert!(!formatted.contains("History question 00"), "formatting restored an obsolete Home target:\n{formatted}");
         support::wait_draft(&cancel_client, &fixture.session, HOME_DRAFT).await;
         assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["through"], observed["through"], "history navigation must not change the Host range");
