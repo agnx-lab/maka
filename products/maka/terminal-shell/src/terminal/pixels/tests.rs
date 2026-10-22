@@ -126,7 +126,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
         }
         assert!(Instant::now() < deadline, "real Input did not load");
     }
-    let initial_count = count.get();
+    let initial_count = Cell::new(count.get());
     let click = |y| {
         let position = point(px(32.0), px(y));
         platform
@@ -179,7 +179,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
             platform.pump_with_draw(false);
             assert_eq!(
                 count.get(),
-                initial_count,
+                initial_count.get(),
                 "text/focus must not force pixel output"
             );
             if let Some(text) = platform.take_clipboard_write().and_then(|item| item.text()) {
@@ -264,7 +264,53 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
             "Control-based mod binding did not reach the engine"
         );
     }
-    assert_eq!(count.get(), initial_count);
+    assert_eq!(count.get(), initial_count.get());
+    // Change density within this same application, as moving the terminal to
+    // another screen does. Preserve logical layout and rasterize at full size.
+    platform
+        .set_viewport(
+            size(gpui::DevicePixels(700), gpui::DevicePixels(350)),
+            2.1875,
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        platform.pump();
+        let ready = frames.borrow_mut().drain(..).any(|frame| {
+            let frame = frame.complete().unwrap();
+            frame.size() == size(gpui::DevicePixels(700), gpui::DevicePixels(350))
+                && frame.pixels()[(120 * 700 + 525) * 4..][..4] == [32, 64, 96, 255]
+        });
+        if ready {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "scaled native input did not paint at device resolution"
+        );
+    }
+    application.update(|cx| {
+        window
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .update(cx, |_, window, _| {
+                assert_eq!(window.viewport_size(), size(px(320.0), px(160.0)));
+                assert_eq!(window.scale_factor(), 2.1875);
+            })
+            .unwrap();
+    });
+    let scaled_count = count.get();
+    initial_count.set(scaled_count);
+    click(32.0);
+    stroke("a", None, true);
+    platform.paste("scaled 你好😀").unwrap();
+    assert_eq!(copied(), "scaled 你好😀");
+    assert_eq!(
+        count.get(),
+        scaled_count,
+        "scaled input must not wait for another image"
+    );
     application.update(|cx| {
         window
             .borrow()

@@ -141,19 +141,41 @@ impl Capabilities {
             && let SixelGeometry::Finite { width, height } = self.sixel_geometry
         {
             // Keep the actual terminal geometry for pointer conversion. The
-            // same native window lays out at this unscaled, top-left canvas.
+            // crop applies only to the device target, not to its logical density.
             viewport.width.0 = (viewport.width.0 as u32).min(width.get()) as i32;
             viewport.height.0 = (viewport.height.0 as u32).min(height.get()) as i32;
         }
         Some(viewport)
     }
 
+    /// Follow the user's terminal font size, independent of OS or image protocol.
+    /// An ordinary 16-device-pixel cell is one logical UI unit of density;
+    /// Retina/font zoom increases resolution without shrinking the interface.
+    pub fn scale_factor(self) -> f32 {
+        self.size
+            .pixel_height
+            .filter(|height| *height > 0)
+            .filter(|_| self.size.rows > 0)
+            .map_or(1.0, |height| {
+                f32::from(height) / f32::from(self.size.rows) / 16.0
+            })
+    }
+
+    pub fn logical_viewport(self) -> Option<gpui::Size<gpui::Pixels>> {
+        let viewport = self.viewport()?;
+        let scale = self.scale_factor();
+        Some(gpui::size(
+            gpui::px(viewport.width.0 as f32 / scale),
+            gpui::px(viewport.height.0 as f32 / scale),
+        ))
+    }
+
     pub fn contains(self, position: gpui::Point<gpui::Pixels>) -> bool {
-        self.viewport().is_some_and(|viewport| {
+        self.logical_viewport().is_some_and(|viewport| {
             position.x >= gpui::px(0.0)
                 && position.y >= gpui::px(0.0)
-                && f32::from(position.x) < viewport.width.0 as f32
-                && f32::from(position.y) < viewport.height.0 as f32
+                && f32::from(position.x) < f32::from(viewport.width)
+                && f32::from(position.y) < f32::from(viewport.height)
         })
     }
 }

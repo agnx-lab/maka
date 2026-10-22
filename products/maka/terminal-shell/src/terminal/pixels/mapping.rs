@@ -184,7 +184,7 @@ pub(super) fn mouse_position(
     event: &Event,
     caps: Capabilities,
 ) -> Option<gpui::Point<gpui::Pixels>> {
-    match event {
+    let position = match event {
         Event::SgrMouse(mouse) => {
             let position = match caps.mouse {
                 MouseCoordinates::Pixels(origin) => {
@@ -206,7 +206,8 @@ pub(super) fn mouse_position(
         }
         Event::Mouse(mouse) => cell_centre(mouse.column, mouse.row, caps),
         _ => None,
-    }
+    }?;
+    Some(position / caps.scale_factor())
 }
 
 fn cell_centre(x: u16, y: u16, caps: Capabilities) -> Option<gpui::Point<gpui::Pixels>> {
@@ -349,5 +350,62 @@ mod tests {
             (f32::from(event.position.x), f32::from(event.position.y)),
             (-5.0, 650.0)
         );
+    }
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::*;
+
+    #[test]
+    fn cell_and_both_pixel_origins_share_the_scaled_logical_canvas() {
+        for cell_height in [16, 32, 35, 48] {
+            let caps = Capabilities {
+                size: termina::WindowSize {
+                    cols: 80,
+                    rows: 40,
+                    pixel_width: Some(80 * cell_height / 2),
+                    pixel_height: Some(40 * cell_height),
+                },
+                mouse: MouseCoordinates::Cells,
+                protocol: None,
+                synchronized: false,
+                sixel_geometry: Default::default(),
+            };
+            assert_eq!(caps.scale_factor(), f32::from(cell_height) / 16.0);
+            assert_eq!(
+                caps.logical_viewport(),
+                Some(gpui::size(px(640.0), px(640.0)))
+            );
+            let event = |x, y| {
+                Event::SgrMouse(termina::event::SgrMouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    x,
+                    y,
+                    modifiers: Modifiers::NONE,
+                })
+            };
+            let position = mouse_position(&event(3, 4), caps).unwrap();
+            assert_eq!(position, point(px(20.0), px(56.0)));
+            for origin in [PixelOrigin::Zero, PixelOrigin::One] {
+                let offset = i32::from(origin == PixelOrigin::One);
+                let raw_x = f32::from(position.x) * caps.scale_factor();
+                let raw_y = f32::from(position.y) * caps.scale_factor();
+                // The odd-height cell has half-pixel centres; pixel protocols
+                // have integer coordinates, so use a nearby exact UI point.
+                let actual = mouse_position(
+                    &event(raw_x as i32 + offset, raw_y as i32 + offset),
+                    Capabilities {
+                        mouse: MouseCoordinates::Pixels(origin),
+                        ..caps
+                    },
+                )
+                .unwrap();
+                assert!((actual.x - position.x).abs() <= px(1.0 / caps.scale_factor()));
+                assert!((actual.y - position.y).abs() <= px(1.0 / caps.scale_factor()));
+            }
+            assert!(caps.contains(position));
+            assert!(!caps.contains(point(px(640.0), px(0.0))));
+        }
     }
 }
