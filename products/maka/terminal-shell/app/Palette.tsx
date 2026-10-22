@@ -22,14 +22,17 @@ import type { YNode } from 'nsh';
 import { List } from 'nsh/list';
 import { keymap } from 'nsh/keymap';
 import { Button, Dialog } from 'nsh/base';
+import { Icon } from './Icon';
 import {
   C,
+  captionTextStyle,
   inputBorderRadius,
   compact,
   controlStyle,
   controlHoverStyle,
   controlFocusStyle,
   controlDisabledStyle,
+  secondaryTextStyle,
 } from './ui';
 
 export type PaletteEntry = {
@@ -96,18 +99,22 @@ export function Palette(props: {
           borderColor: C.line,
         }}
       >
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <View
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+        >
           <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>
             Commands
           </Text>
           <Button
+            accessibilityLabel="Close commands"
+            tooltip="Close · Esc"
             onPress={inputAction(props.close, props.instance)}
-            style={controlStyle}
+            style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.muted }}>Close</Text>
+            <Icon name="close" color={C.muted} />
           </Button>
         </View>
         <Input
@@ -157,32 +164,65 @@ export function Palette(props: {
                 const entry = () => byId().get(key()) ?? initial;
                 return (
                   <Button
+                    accessibilityLabel={entry().title}
                     selected={matches()[index()]?.id === entry().id}
                     onPress={entry().run}
                     style={{
                       height: 48,
-                      paddingHorizontal: 8,
-                      backgroundColor: matches()[index()]?.id === entry().id ? C.line : C.surface,
+                      paddingHorizontal: 12,
+                      paddingVertical: 4,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                      borderWidth: 1,
+                      borderColor: 'transparent',
+                      borderRadius: 8,
+                      backgroundColor: matches()[index()]?.id === entry().id ? C.raised : C.surface,
                     }}
                     hoverStyle={controlHoverStyle}
                     focusStyle={controlFocusStyle}
                     disabledStyle={controlDisabledStyle}
                   >
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                    <View pointerEvents="none" style={{ flex: 1, minWidth: 0 }}>
                       <Text
                         numberOfLines={1}
+                        ellipsizeMode="tail"
                         style={{
-                          color: matches()[index()]?.id === entry().id ? C.accent : C.text,
-                          flex: 1,
+                          ...secondaryTextStyle,
+                          color: C.text,
+                          fontSize: 14,
+                          fontWeight: '500',
                         }}
                       >
                         {entry().title}
                       </Text>
-                      <Text style={{ color: C.muted }}>{entry().hint ?? ''}</Text>
+                      <If when={entry().detail}>
+                        <Text
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                          style={{ ...captionTextStyle, color: C.muted }}
+                        >
+                          {entry().detail}
+                        </Text>
+                      </If>
                     </View>
-                    <If when={entry().detail}>
-                      <Text numberOfLines={1} style={{ color: C.muted }}>
-                        {entry().detail}
+                    <If when={entry().hint}>
+                      <Text
+                        pointerEvents="none"
+                        style={{
+                          ...captionTextStyle,
+                          color: C.muted,
+                          fontSize: 11,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderWidth: 1,
+                          borderColor: C.line,
+                          borderRadius: 4,
+                          backgroundColor: C.background,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {entry().hint}
                       </Text>
                     </If>
                   </Button>
