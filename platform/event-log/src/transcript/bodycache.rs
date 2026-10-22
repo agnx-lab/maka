@@ -22,7 +22,7 @@ use super::read::sql_position;
 use crate::StoreError;
 use maka_agent_facts::history::RowPosition;
 use sha2::{Digest, Sha256};
-use sqlx::{Connection, SqliteConnection};
+use sqlx::{Connection, QueryBuilder, Sqlite, SqliteConnection};
 
 // The ordinary retained database is at most 32 MiB. One active producer may
 // exceed that target so tiny fragment/sibling reads do not repeatedly emit it.
@@ -166,23 +166,80 @@ pub(super) async fn ensure(
     if !rows.iter().any(|row| row.position == position) {
         return Err(StoreError::TranscriptConflict);
     }
-    for row in rows {
-        let (source, item) = sql_position(row.position)?;
-        let identity: Option<(String,String)> = sqlx::query_as("SELECT turn_id,message_id FROM transcript_directory WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
-            .bind(session).bind(source).bind(item).fetch_optional(&mut *db).await?;
-        if row.position.source_sequence != position.source_sequence
-            || !matches!(identity,Some((turn,message)) if turn==row.message.turn_id && message==row.message.id)
-        {
+    // Bound statement size and extra encoded bytes, not producer size. One
+    // oversized row still works; no further siblings join its batch. Every
+    // batch stays inside the caller's original read transaction.
+    let mut rows = rows.iter().peekable();
+    while rows.peek().is_some() {
+        let mut encoded = Vec::with_capacity(32);
+        let mut encoded_bytes = 0;
+        for row in rows.by_ref().take(32) {
+            if row.position.source_sequence != position.source_sequence {
+                return Err(StoreError::TranscriptConflict);
+            }
+            let (_, item) = sql_position(row.position)?;
+            let payload = serde_json::to_vec(&row.message)?;
+            let bytes = i64::try_from(payload.len()).map_err(|_| StoreError::PrefixTooLarge)?;
+            let digest = format!("sha256:{}", hex::encode(Sha256::digest(&payload)));
+            encoded_bytes += payload.len();
+            encoded.push((item, &row.message, payload, digest, bytes));
+            if encoded_bytes >= 64 * 1024 {
+                break;
+            }
+        }
+        let mut identities =
+            QueryBuilder::<Sqlite>::new("WITH wanted(item_index,turn_id,message_id) AS (");
+        identities.push_values(&encoded, |mut values, (item, message, ..)| {
+            values
+                .push_bind(item)
+                .push_bind(&message.turn_id)
+                .push_bind(&message.id);
+        });
+        identities.push(") SELECT count(*) FROM wanted JOIN transcript_directory d ON d.item_index=wanted.item_index AND d.turn_id=wanted.turn_id AND d.message_id=wanted.message_id WHERE d.session_id=")
+            .push_bind(session).push(" AND d.source_sequence=").push_bind(source);
+        let matched: i64 = identities.build_query_scalar().fetch_one(&mut *db).await?;
+        if matched != encoded.len() as i64 {
             return Err(StoreError::TranscriptConflict);
         }
-        let payload = serde_json::to_vec(&row.message)?;
-        let bytes = i64::try_from(payload.len()).map_err(|_| StoreError::PrefixTooLarge)?;
-        let digest = format!("sha256:{}", hex::encode(Sha256::digest(&payload)));
-        sqlx::query("INSERT OR IGNORE INTO transcript_cache.rows (session_id,source_sequence,item_index,turn_id,message_id,payload,digest,total_bytes) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)")
-            .bind(session).bind(source).bind(item).bind(&row.message.turn_id).bind(&row.message.id).bind(&payload).bind(&digest).bind(bytes).execute(&mut *db).await?;
-        let matches: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM transcript_cache.rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3 AND turn_id=?4 AND message_id=?5 AND payload=?6 AND digest=?7 AND total_bytes=?8)")
-            .bind(session).bind(source).bind(item).bind(&row.message.turn_id).bind(&row.message.id).bind(payload).bind(digest).bind(bytes).fetch_one(&mut *db).await?;
-        if !matches {
+        let mut insert = QueryBuilder::<Sqlite>::new(
+            "INSERT OR IGNORE INTO transcript_cache.rows (session_id,source_sequence,item_index,turn_id,message_id,payload,digest,total_bytes) ",
+        );
+        insert.push_values(
+            &encoded,
+            |mut values, (item, message, payload, digest, bytes)| {
+                values
+                    .push_bind(session)
+                    .push_bind(source)
+                    .push_bind(item)
+                    .push_bind(&message.turn_id)
+                    .push_bind(&message.id)
+                    .push_bind(payload)
+                    .push_bind(digest)
+                    .push_bind(bytes);
+            },
+        );
+        insert.build().execute(&mut *db).await?;
+        // A conflict must preserve an existing body and fail the entire read.
+        // Compare every field even when INSERT OR IGNORE changed no rows.
+        let mut verify = QueryBuilder::<Sqlite>::new(
+            "WITH wanted(item_index,turn_id,message_id,payload,digest,total_bytes) AS (",
+        );
+        verify.push_values(
+            &encoded,
+            |mut values, (item, message, payload, digest, bytes)| {
+                values
+                    .push_bind(item)
+                    .push_bind(&message.turn_id)
+                    .push_bind(&message.id)
+                    .push_bind(payload)
+                    .push_bind(digest)
+                    .push_bind(bytes);
+            },
+        );
+        verify.push(") SELECT count(*) FROM wanted JOIN transcript_cache.rows c ON c.item_index=wanted.item_index AND c.turn_id=wanted.turn_id AND c.message_id=wanted.message_id AND c.payload=wanted.payload AND c.digest=wanted.digest AND c.total_bytes=wanted.total_bytes WHERE c.session_id=")
+            .push_bind(session).push(" AND c.source_sequence=").push_bind(source);
+        let matched: i64 = verify.build_query_scalar().fetch_one(&mut *db).await?;
+        if matched != encoded.len() as i64 {
             return Err(StoreError::TranscriptConflict);
         }
     }

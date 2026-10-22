@@ -24,8 +24,6 @@ use rusqlite::{Connection as RawConnection, OptionalExtension, params};
 use sqlx::SqliteConnection;
 
 const HIGH: &str = r#"SELECT COALESCE(MAX(sequence), 0) FROM event_log"#;
-const KIND: &str = r#"SELECT kind FROM runtime_events WHERE sequence = ? AND invocation_id = ?"#;
-const EXTERNAL: &str = r#"SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND sequence <= ?2 AND kind = 'executor_started')"#;
 const EXEC_BOUNDARY: &str = r#"SELECT sequence FROM runtime_events
              WHERE invocation_id = ?1 AND sequence <= ?2 AND kind = 'invocation_opened'
              UNION
@@ -85,9 +83,29 @@ const PENDING: &str = r#"SELECT operation_id FROM runtime_events AS request
                  AND boundary.sequence <= ?2)
          ORDER BY sequence DESC LIMIT 1"#;
 
-/// Live readers retain their original transaction and reducer boundaries.
-/// Selection policy stays in one worker-local core; its final query uses the
-/// existing bounded SQLx statement cache across callbacks.
+// Tool boundaries keep their original ancestry path and do not inspect
+// external execution or unresolved model requests.
+const PLAN: &str = r#"WITH boundary(kind) AS (
+    SELECT CASE WHEN ?3 THEN (
+        SELECT kind FROM runtime_events WHERE sequence=?2 AND invocation_id=?1
+    ) END
+), classified AS (
+    SELECT kind, COALESCE(kind IN ('tool_dispatched','tool_rejected','tool_settled'),0) AS tool
+    FROM boundary
+)
+SELECT kind, tool, CASE WHEN tool THEN 0 ELSE EXISTS(
+    SELECT 1 FROM runtime_events WHERE invocation_id=?1 AND sequence<=?2 AND kind='executor_started'
+) END AS external FROM classified"#;
+
+#[derive(sqlx::FromRow)]
+struct Metadata {
+    kind: Option<String>,
+    tool: bool,
+    external: bool,
+}
+
+/// Live and preparation readers use the same metadata and selection policy.
+/// Both queries remain inside the reader's original transaction.
 pub(super) async fn selected(
     tx: &mut SqliteConnection,
     invocation: &str,
@@ -95,17 +113,44 @@ pub(super) async fn selected(
     through: i64,
     boundary: bool,
 ) -> Result<Vec<i64>, StoreError> {
-    let invocation = invocation.to_owned();
-    let step = step.map(str::to_owned);
-    let selection = tx
-        .run_on_worker(move |handle| {
-            // SAFETY: the worker exclusively borrows its handle for this callback.
-            // This wrapper and its statements are destroyed before returning the plan.
-            let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
-            db.set_prepared_statement_cache_capacity(100);
-            plan(&db, &invocation, step.as_deref(), through, boundary)
-        })
-        .await??;
+    let metadata = sqlx::query_as::<_, Metadata>(PLAN)
+        .bind(invocation)
+        .bind(through)
+        .bind(boundary)
+        .fetch_one(&mut *tx)
+        .await?;
+    let mut selection =
+        if let Some(selection) = plan(metadata, invocation, step, through, boundary)? {
+            selection
+        } else {
+            let invocation = invocation.to_owned();
+            tx.run_on_worker(move |handle| {
+                // SAFETY: no borrowed handle or statement escapes this callback.
+                let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
+                db.set_prepared_statement_cache_capacity(100);
+                super::tools::selection(&db, &invocation, through)
+            })
+            .await??
+        };
+    if let Some(slot) = selection.pending_step_slot() {
+        *slot = match sqlx::query_scalar::<_, Option<String>>(PENDING)
+            .bind(invocation)
+            .bind(through)
+            .fetch_optional(&mut *tx)
+            .await?
+        {
+            Some(Some(step)) => Some(step),
+            None => None,
+            Some(None) => {
+                return Err(rusqlite::Error::InvalidColumnType(
+                    0,
+                    "operation_id".into(),
+                    rusqlite::types::Type::Null,
+                )
+                .into());
+            }
+        };
+    }
     selection.read(tx).await
 }
 
@@ -191,65 +236,69 @@ pub(super) fn selected_on_handle(
     through: i64,
     boundary: bool,
 ) -> Result<Vec<i64>, StoreError> {
-    plan(db, invocation, step, through, boundary)?.read_on_handle(db)
+    let metadata =
+        db.prepare_cached(PLAN)?
+            .query_row(params![invocation, through, boundary], |row| {
+                Ok(Metadata {
+                    kind: row.get(0)?,
+                    tool: row.get(1)?,
+                    external: row.get(2)?,
+                })
+            })?;
+    let mut selection = match plan(metadata, invocation, step, through, boundary)? {
+        Some(selection) => selection,
+        None => super::tools::selection(db, invocation, through)?,
+    };
+    if let Some(slot) = selection.pending_step_slot() {
+        *slot = pending_step_on_handle(db, invocation, through)?;
+    }
+    selection.read_on_handle(db)
 }
 
+/// None requests the existing tool ancestry planner; all other branches own
+/// their complete query inputs without retaining a connection or evidence.
 fn plan(
-    db: &RawConnection,
+    metadata: Metadata,
     invocation: &str,
     step: Option<&str>,
     through: i64,
     boundary: bool,
-) -> Result<Selection, StoreError> {
-    let mut executor_boundary = false;
-    if boundary {
-        let kind: String = db
-            .prepare_cached(KIND)?
-            .query_row(params![through, invocation], |row| row.get(0))?;
-        executor_boundary = kind == "executor_observed";
-        if matches!(
-            kind.as_str(),
-            "tool_dispatched" | "tool_rejected" | "tool_settled"
-        ) {
-            return super::tools::selection(db, invocation, through);
-        }
+) -> Result<Option<Selection>, StoreError> {
+    if boundary && metadata.kind.is_none() {
+        return Err(rusqlite::Error::QueryReturnedNoRows.into());
     }
-    let external: bool = db
-        .prepare_cached(EXTERNAL)?
-        .query_row(params![invocation, through], |row| row.get(0))?;
-    if external {
-        return Ok(if executor_boundary {
-            Selection::ExecutorBoundary {
-                invocation: invocation.to_owned(),
-                through,
-                boundary,
-            }
-        } else {
-            Selection::ExecutorRest {
-                invocation: invocation.to_owned(),
-                through,
-                boundary,
-            }
-        });
+    if metadata.tool {
+        return Ok(None);
     }
-    let unresolved: Option<String> = if step.is_none() {
-        pending_step_on_handle(db, invocation, through)?
-    } else {
-        None
-    };
-    let step = step.or(unresolved.as_deref());
+    if metadata.external {
+        return Ok(Some(
+            if metadata.kind.as_deref() == Some("executor_observed") {
+                Selection::ExecutorBoundary {
+                    invocation: invocation.to_owned(),
+                    through,
+                    boundary,
+                }
+            } else {
+                Selection::ExecutorRest {
+                    invocation: invocation.to_owned(),
+                    through,
+                    boundary,
+                }
+            },
+        ));
+    }
     let boundaries = serde_json::to_string(if boundary {
         std::slice::from_ref(&through)
     } else {
         &[]
     })?;
-    Ok(Selection::Step {
+    Ok(Some(Selection::Step {
         invocation: invocation.to_owned(),
         step: step.map(str::to_owned),
         through,
         boundaries,
         completed: false,
-    })
+    }))
 }
 
 /// Owned query inputs selected under the current transaction. No evidence
@@ -275,6 +324,19 @@ pub(super) enum Selection {
 }
 
 impl Selection {
+    // A standalone tool deliberately has no model step. Only ordinary step
+    // selection may resolve a pending request, retaining NULL/error semantics.
+    fn pending_step_slot(&mut self) -> Option<&mut Option<String>> {
+        match self {
+            Self::Step {
+                step,
+                completed: false,
+                ..
+            } if step.is_none() => Some(step),
+            _ => None,
+        }
+    }
+
     fn sql(&self) -> &'static str {
         match self {
             Self::Step { .. } => STEP,
@@ -384,6 +446,10 @@ mod tests {
             for (step, through, boundary, expected) in [
                 (Some("42"), 5, false, vec![1, 2, 3]),
                 (None, 5, false, vec![1]),
+                (None, 3, false, vec![1, 2, 3]),
+                (None, 3, true, vec![1, 2, 3]),
+                (Some("42"), 7, false, vec![1, 2, 3, 6]),
+                (None, 7, false, vec![1]),
                 (Some("42"), 5, true, vec![1, 2, 3, 5]),
                 (Some("42"), 3, false, vec![1, 2, 3]),
                 (Some("missing"), 5, false, vec![1]),
@@ -397,6 +463,26 @@ mod tests {
                 }).await??;
                 assert_eq!(synchronous, expected);
             }
+            assert!(selected(&mut tx, "invocation", None, 7, true).await.is_err());
+            let missing_boundary = tx.run_on_worker(move |handle| {
+                // SAFETY: the raw handle and all statements stay within this callback.
+                let raw = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
+                selected_on_handle(&raw, "invocation", None, 7, true)
+            }).await?;
+            assert!(missing_boundary.is_err());
+            // A malformed pending request with NULL identity must remain an
+            // error, rather than becoming indistinguishable from no request.
+            sqlx::query("INSERT INTO event_log(sequence,event_id,invocation_id,kind,event_json) VALUES(8,'event-8','invocation','model_requested',?)")
+                .bind(json!({"invocation":{"session_id":"session"},"fact":{"purpose":"main"}}).to_string())
+                .execute(&mut *tx).await?;
+            assert!(selected(&mut tx, "invocation", None, 8, false).await.is_err());
+            let malformed_pending = tx.run_on_worker(move |handle| {
+                // SAFETY: the handle and statements stay within this callback.
+                let raw = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
+                selected_on_handle(&raw, "invocation", None, 8, false)
+            }).await?;
+            assert!(malformed_pending.is_err());
+            assert_eq!(selected(&mut tx, "invocation", Some("42"), 8, false).await?, vec![1, 2, 3, 6]);
             tx.rollback().await?;
             Ok(())
         })).await.unwrap();

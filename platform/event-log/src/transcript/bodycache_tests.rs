@@ -381,3 +381,132 @@ async fn oversized_source_reuses_fragments_then_reclaims_backing_file_on_replace
     );
     log.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn late_sibling_conflicts_roll_back_all_earlier_cache_fills() {
+    use maka_agent_facts::{
+        input::DeliveredMessage,
+        message::{MessageDisposition, Placement, RootSourceMessage, aggregate},
+    };
+    for corruption in ["identity", "payload", "digest", "bytes", "unique_message"] {
+        let directory = tempfile::tempdir().unwrap();
+        let log = EventLog::open(&directory.path().join("conflict.sqlite"))
+            .await
+            .unwrap();
+        log.create_session("cache", "create", &serde_json::json!({}), 1)
+            .await
+            .unwrap();
+        let sources: Vec<_> = (0..35)
+            .map(|index| {
+                let content: maka_agent_facts::input::MessageInput =
+                    format!("sibling {index}").into();
+                let digest = content.content_digest().unwrap();
+                RootSourceMessage {
+                    message: DeliveredMessage {
+                        origin: Some(maka_agent_facts::message::MessageOrigin::WorkhubTask {
+                            task_id: format!("task-{index}"),
+                        }),
+                        message_id: format!("message-{index}"),
+                        content: content.clone(),
+                        submitted_content_digest: digest,
+                    },
+                    unprepared_content: content,
+                    submitted_placement: Placement::CurrentTurn,
+                    disposition: MessageDisposition::TurnStarted,
+                    submitted_intent: None,
+                }
+            })
+            .collect();
+        let through = user_input(
+            &log,
+            "siblings",
+            InvocationInput::Message {
+                content: aggregate(sources.iter().map(|source| &source.message.content)),
+                source_messages: sources,
+                request_fingerprint: None,
+            },
+        )
+        .await;
+        read(&log, through, Position::Start).await;
+        let before = inspect(&log, move |db| {
+            db.execute(
+                "DELETE FROM transcript_cache.rows WHERE item_index != 34",
+                [],
+            )
+            .unwrap();
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM transcript_cache.rows", [], |row| row
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+                1
+            );
+            match corruption {
+                "identity" => db.execute(
+                    "UPDATE transcript_directory SET turn_id='wrong' WHERE item_index=34",
+                    [],
+                ),
+                "payload" => db.execute("UPDATE transcript_cache.rows SET payload=x'00'", []),
+                "digest" => db.execute("UPDATE transcript_cache.rows SET digest='wrong'", []),
+                "bytes" => db.execute(
+                    "UPDATE transcript_cache.rows SET total_bytes=total_bytes+1",
+                    [],
+                ),
+                "unique_message" => {
+                    db.execute("UPDATE transcript_cache.rows SET item_index=999", [])
+                }
+                _ => unreachable!(),
+            }
+            .unwrap();
+            db.query_row(
+                "SELECT item_index,payload,digest,total_bytes FROM transcript_cache.rows",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .unwrap()
+        })
+        .await;
+        let result = log
+            .history_text("cache", through, Position::Start, false, 8192, 1, 32768)
+            .await;
+        assert!(
+            matches!(result, Err(crate::StoreError::TranscriptConflict)),
+            "{corruption}: {result:?}"
+        );
+        inspect(&log, move |db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM transcript_cache.rows", [], |row| row
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+                1
+            );
+            let after = db
+                .query_row(
+                    "SELECT item_index,payload,digest,total_bytes FROM transcript_cache.rows",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, Vec<u8>>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(after, before, "{corruption}");
+        })
+        .await;
+        log.close().await.unwrap();
+    }
+}
