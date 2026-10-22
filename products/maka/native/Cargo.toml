@@ -47,5 +47,6 @@ maka-skills-native.workspace = true
 maka-web.workspace = true
 
 [dev-dependencies]
+sqlx.workspace = true
 maka-event-log.workspace = true
 tempfile.workspace = true

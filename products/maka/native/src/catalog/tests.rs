@@ -186,6 +186,8 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
             .snapshot
             .read()
             .await
+            .as_ref()
+            .unwrap()
             .get("openrouter", "runtime-test/model")
             .unwrap()
             .display_name
@@ -197,8 +199,12 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
         transport.entered.acquire_many(2).await.unwrap().forget();
         transport.release.add_permits(2);
     };
-    let (first, second, ()) = tokio::join!(catalog.refresh(), runtime.refresh(), release);
-    first.unwrap();
+    let (first, second, ()) = tokio::join!(
+        catalog.request_refresh().unwrap(),
+        runtime.refresh(),
+        release
+    );
+    first.unwrap().unwrap();
     second.unwrap();
     assert_eq!(
         transport.requests.lock().unwrap().len(),
@@ -231,6 +237,8 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
             .snapshot
             .read()
             .await
+            .as_ref()
+            .unwrap()
             .get("openrouter", "runtime-test/model")
             .unwrap()
             .display_name
@@ -260,7 +268,7 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
         assert!(request.body.is_empty());
     }
     transport.release.add_permits(2);
-    assert!(catalog.refresh().await.is_err());
+    assert!(catalog.request_refresh().unwrap().await.unwrap().is_err());
     assert_eq!(
         audit.public_catalog().await.unwrap(),
         current,
@@ -271,6 +279,8 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
             .snapshot
             .read()
             .await
+            .as_ref()
+            .unwrap()
             .get("openrouter", "runtime-test/model")
             .unwrap()
             .display_name
@@ -278,12 +288,14 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
         Some("New public name")
     );
     transport.release.add_permits(2);
-    catalog.refresh().await.unwrap();
+    catalog.request_refresh().unwrap().await.unwrap().unwrap();
     assert!(
         catalog
             .snapshot
             .read()
             .await
+            .as_ref()
+            .unwrap()
             .get("openrouter", "runtime-test/model")
             .is_none(),
         "a successful empty source must remove its old public-only model"
@@ -294,17 +306,141 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
     );
     runtime.shutdown().await.unwrap();
     assert!(
-        catalog.refresh().await.is_err(),
+        catalog.request_refresh().is_err(),
         "a retired owner cannot admit another refresh"
     );
     audit.close().await.unwrap();
     drop(root);
 }
 
+#[tokio::test]
+async fn failed_publication_reconciles_durable_state_or_fails_the_reader_closed() {
+    use sqlx::Connection;
+    let directory = tempfile::tempdir().unwrap();
+    let root = root(&directory);
+    let audit = ConfigurationStore::for_root(root.clone()).await.unwrap();
+    audit
+        .put_public_catalog(
+            PublicCatalogSource::ModelsDev,
+            record(json!({}), "models-old"),
+        )
+        .await
+        .unwrap();
+    let original = record(
+        json!({"data":[{"id":"runtime-test/model","name":"Durable original"}]}),
+        "router-old",
+    );
+    let revision = audit
+        .put_public_catalog(PublicCatalogSource::OpenRouter, original.clone())
+        .await
+        .unwrap();
+    let transport = Arc::new(Script {
+        replies: Mutex::new(BTreeMap::from([
+            (
+                SOURCES[0].1.into(),
+                VecDeque::from([
+                    Reply {
+                        status: 304,
+                        body: Value::Null,
+                        etag: "models-new",
+                    },
+                    Reply {
+                        status: 304,
+                        body: Value::Null,
+                        etag: "models-new",
+                    },
+                ]),
+            ),
+            (
+                SOURCES[1].1.into(),
+                VecDeque::from([
+                    Reply {
+                        status: 200,
+                        body: json!({"data":[]}),
+                        etag: "router-new",
+                    },
+                    Reply {
+                        status: 200,
+                        body: json!({"data":[]}),
+                        etag: "router-new",
+                    },
+                ]),
+            ),
+        ])),
+        requests: Mutex::new(Vec::new()),
+        entered: Arc::new(Semaphore::new(0)),
+        release: Arc::new(Semaphore::new(0)),
+    });
+    let mut runtime = RuntimeCatalog::with_transport(
+        ConfigurationStore::for_root(root.clone()).await.unwrap(),
+        transport.clone(),
+    )
+    .await
+    .unwrap();
+    let catalog = runtime.catalog();
+    let mut fault = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(root.canonical_path().join("configuration-rust.sqlite")),
+    )
+    .await
+    .unwrap();
+    // Use a real failed transaction, not a fabricated commit receipt. Recovery
+    // must read the durable body while publication remains fenced.
+    sqlx::query("CREATE TRIGGER reject_public_catalog BEFORE INSERT ON public_catalog WHEN NEW.source='openrouter' BEGIN SELECT RAISE(ABORT,'injected write failure'); END").execute(&mut fault).await.unwrap();
+    runtime.start(std::future::pending());
+    let release = async {
+        transport.entered.acquire_many(2).await.unwrap().forget();
+        transport.release.add_permits(2);
+    };
+    let (receipt, ()) = tokio::join!(runtime.refresh(), release);
+    assert!(receipt.is_err());
+    let durable = audit.public_catalog().await.unwrap();
+    assert_eq!(durable.catalog_revision, revision);
+    assert_eq!(durable.sources[&PublicCatalogSource::OpenRouter], original);
+    assert_eq!(
+        catalog
+            .snapshot
+            .read()
+            .await
+            .as_ref()
+            .unwrap()
+            .get("openrouter", "runtime-test/model")
+            .unwrap()
+            .display_name
+            .as_deref(),
+        Some("Durable original")
+    );
+    sqlx::query("DROP TRIGGER reject_public_catalog")
+        .execute(&mut fault)
+        .await
+        .unwrap();
+    let invalidate = async {
+        // The refresh has already captured the prior cache, but neither source
+        // has returned. Losing durable state must retire the readable snapshot.
+        transport.entered.acquire_many(2).await.unwrap().forget();
+        sqlx::query("DROP TABLE public_catalog")
+            .execute(&mut fault)
+            .await
+            .unwrap();
+        transport.release.add_permits(2);
+    };
+    let (receipt, ()) = tokio::join!(runtime.refresh(), invalidate);
+    assert!(receipt.is_err());
+    assert!(
+        catalog.snapshot.read().await.is_err(),
+        "unreconciled SQL state must never expose the old metadata reader"
+    );
+    runtime.shutdown().await.unwrap();
+    fault.close().await.unwrap();
+    audit.close().await.unwrap();
+}
+
 struct Closing {
     entered: Arc<Semaphore>,
     closing: Arc<Semaphore>,
     acknowledgement: Arc<Semaphore>,
+    acknowledged: Arc<Semaphore>,
+    unconfirmed: bool,
 }
 impl Transport for Closing {
     fn identity(&self) -> u64 {
@@ -322,6 +458,8 @@ impl Transport for Closing {
                     entered: self.entered.clone(),
                     closing: self.closing.clone(),
                     acknowledgement: self.acknowledgement.clone(),
+                    acknowledged: self.acknowledged.clone(),
+                    unconfirmed: self.unconfirmed,
                 }),
             })
         })
@@ -334,6 +472,8 @@ struct PendingBody {
     entered: Arc<Semaphore>,
     closing: Arc<Semaphore>,
     acknowledgement: Arc<Semaphore>,
+    acknowledged: Arc<Semaphore>,
+    unconfirmed: bool,
 }
 impl http::Body for PendingBody {
     fn next(&self) -> BoxFuture<'_, Result<Option<Vec<u8>>, http::Error>> {
@@ -347,34 +487,49 @@ impl http::Body for PendingBody {
         Box::pin(async {
             self.closing.add_permits(1);
             self.acknowledgement.acquire().await.unwrap().forget();
-            Ok(())
+            self.acknowledged.add_permits(1);
+            if self.unconfirmed {
+                Err(http::Error::CleanupUnconfirmed)
+            } else {
+                Ok(())
+            }
         })
     }
 }
 #[tokio::test]
-async fn shutdown_joins_both_cancelled_bodies_before_releasing_the_runtime() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = root(&directory);
-    let transport = Arc::new(Closing {
-        entered: Arc::new(Semaphore::new(0)),
-        closing: Arc::new(Semaphore::new(0)),
-        acknowledgement: Arc::new(Semaphore::new(0)),
-    });
-    let mut runtime = RuntimeCatalog::with_transport(
-        ConfigurationStore::for_root(root.clone()).await.unwrap(),
-        transport.clone(),
-    )
-    .await
-    .unwrap();
-    runtime.start(std::future::pending());
-    transport.entered.acquire_many(2).await.unwrap().forget();
-    let shutdown = tokio::spawn(async move { runtime.shutdown().await });
-    transport.closing.acquire_many(2).await.unwrap().forget();
-    assert!(
-        !shutdown.is_finished(),
-        "cancel is not a cleanup acknowledgement"
-    );
-    transport.acknowledgement.add_permits(2);
-    shutdown.await.unwrap().unwrap();
-    drop(root);
+async fn shutdown_joins_both_bodies_and_preserves_unconfirmed_cleanup() {
+    for unconfirmed in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let root = root(&directory);
+        let transport = Arc::new(Closing {
+            entered: Arc::new(Semaphore::new(0)),
+            closing: Arc::new(Semaphore::new(0)),
+            acknowledgement: Arc::new(Semaphore::new(0)),
+            acknowledged: Arc::new(Semaphore::new(0)),
+            unconfirmed,
+        });
+        let mut runtime = RuntimeCatalog::with_transport(
+            ConfigurationStore::for_root(root.clone()).await.unwrap(),
+            transport.clone(),
+        )
+        .await
+        .unwrap();
+        runtime.start(std::future::pending());
+        transport.entered.acquire_many(2).await.unwrap().forget();
+        let shutdown = tokio::spawn(async move { runtime.shutdown().await });
+        transport.closing.acquire_many(2).await.unwrap().forget();
+        assert!(
+            !shutdown.is_finished(),
+            "cancel is not a cleanup acknowledgement"
+        );
+        transport.acknowledgement.add_permits(1);
+        transport.acknowledged.acquire().await.unwrap().forget();
+        assert!(
+            !shutdown.is_finished(),
+            "one response acknowledgement cannot close the other response"
+        );
+        transport.acknowledgement.add_permits(1);
+        assert_eq!(shutdown.await.unwrap().is_err(), unconfirmed);
+        drop(root);
+    }
 }

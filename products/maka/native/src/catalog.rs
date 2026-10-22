@@ -49,6 +49,34 @@ const SOURCES: [(PublicCatalogSource, &str); 2] = [
     ),
 ];
 
+#[derive(Clone, Debug)]
+enum RefreshError {
+    Failed(String),
+    CleanupUnconfirmed(String),
+}
+impl RefreshError {
+    fn message(&self) -> &str {
+        match self {
+            Self::Failed(message) | Self::CleanupUnconfirmed(message) => message,
+        }
+    }
+}
+impl From<String> for RefreshError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+impl From<&str> for RefreshError {
+    fn from(message: &str) -> Self {
+        Self::Failed(message.into())
+    }
+}
+fn retain_cleanup(result: &Result<(), RefreshError>, failure: &mut Option<String>) {
+    if let Err(RefreshError::CleanupUnconfirmed(message)) = result {
+        *failure = Some(message.clone());
+    }
+}
+
 struct Owner {
     configuration: ConfigurationStore,
     catalog: Arc<Catalog>,
@@ -60,7 +88,7 @@ struct Owner {
 pub struct RuntimeCatalog {
     owner: Arc<Owner>,
     cancellation: CancellationToken,
-    task: Option<JoinHandle<()>>,
+    task: Option<JoinHandle<Result<(), String>>>,
     requests: Option<mpsc::UnboundedReceiver<oneshot::Sender<Result<(), String>>>>,
 }
 impl RuntimeCatalog {
@@ -132,7 +160,11 @@ impl RuntimeCatalog {
     /// A real explicit refresh on this same owner; there is no second plugin,
     /// timer, per-connection task, or mutable catalog authority.
     pub async fn refresh(&self) -> Result<(), String> {
-        self.owner.catalog.refresh().await
+        self.owner
+            .catalog
+            .request_refresh()?
+            .await
+            .map_err(|_| "public catalog refresh receipt unavailable".to_owned())?
     }
 
     pub async fn shutdown(&mut self) -> Result<(), String> {
@@ -141,7 +173,8 @@ impl RuntimeCatalog {
         let joined = match self.task.take() {
             Some(task) => task
                 .await
-                .map_err(|_| "public catalog task failed".to_owned()),
+                .map_err(|_| "public catalog task failed".to_owned())
+                .and_then(|result| result),
             None => Ok(()),
         };
         let closed = self
@@ -168,8 +201,9 @@ async fn drive(
     mut requests: mpsc::UnboundedReceiver<oneshot::Sender<Result<(), String>>>,
     cancellation: CancellationToken,
     draining: impl Future<Output = ()> + Send,
-) {
+) -> Result<(), String> {
     tokio::pin!(draining);
+    let mut cleanup_failure = None;
     let mut waiting: Vec<oneshot::Sender<Result<(), String>>> = Vec::new();
     loop {
         let refresh = owner.refresh(&cancellation);
@@ -178,26 +212,28 @@ async fn drive(
             tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => {
-                    let _ = refresh.await;
+                    retain_cleanup(&refresh.await, &mut cleanup_failure);
                     for reply in waiting { let _ = reply.send(Err("public catalog refresh cancelled".into())); }
-                    return;
+                    return cleanup_failure.map_or(Ok(()), Err);
                 }
                 _ = &mut draining => {
                     cancellation.cancel();
-                    let _ = refresh.await;
+                    retain_cleanup(&refresh.await, &mut cleanup_failure);
                     for reply in waiting { let _ = reply.send(Err("public catalog refresh cancelled".into())); }
-                    return;
+                    return cleanup_failure.map_or(Ok(()), Err);
                 }
                 result = &mut refresh => break result,
                 request = requests.recv() => match request {
                     Some(request) => waiting.push(request),
-                    None => { cancellation.cancel(); let _ = refresh.await; return; }
+                    None => { cancellation.cancel(); retain_cleanup(&refresh.await, &mut cleanup_failure); return cleanup_failure.map_or(Ok(()), Err); }
                 },
             }
         };
+        retain_cleanup(&result, &mut cleanup_failure);
         if let Err(error) = &result {
-            eprintln!("Public model catalog: {error}");
+            eprintln!("Public model catalog: {}", error.message());
         }
+        let result = result.map_err(|error| error.message().to_owned());
         // Complete requests already queued at this refresh's completion with
         // its same receipt; later arrivals request the next refresh.
         for _ in 0..requests.len() {
@@ -210,18 +246,18 @@ async fn drive(
         }
         tokio::select! {
             biased;
-            _ = cancellation.cancelled() => return,
-            _ = &mut draining => { cancellation.cancel(); return; }
+            _ = cancellation.cancelled() => return cleanup_failure.map_or(Ok(()), Err),
+            _ = &mut draining => { cancellation.cancel(); return cleanup_failure.map_or(Ok(()), Err); }
             request = requests.recv() => match request {
                 Some(request) => waiting.push(request),
-                None => return,
+                None => return cleanup_failure.map_or(Ok(()), Err),
             },
         }
     }
 }
 
 impl Owner {
-    async fn refresh(&self, cancellation: &CancellationToken) -> Result<(), String> {
+    async fn refresh(&self, cancellation: &CancellationToken) -> Result<(), RefreshError> {
         if cancellation.is_cancelled() {
             return Err("public catalog refresh cancelled".into());
         }
@@ -254,6 +290,7 @@ impl Owner {
                 .push(async move { (source, fetch(transport, url, previous, cancellation).await) });
         }
         let mut failures = Vec::new();
+        let mut cleanup_unconfirmed = false;
         while let Some((source, result)) = requests.next().await {
             let result = async {
                 let record = result?;
@@ -268,19 +305,42 @@ impl Owner {
                 if cancellation.is_cancelled() { return Err("public catalog refresh cancelled".into()); }
                 // Once a write is admitted, keep this guard until both durable
                 // commit and publication finish, including during shutdown.
-                self.configuration.put_public_catalog(source, record).await.map_err(|_| "public catalog cache update failed")?;
-                *publication = Arc::new(next);
-                sources = candidate;
-                Ok::<(), String>(())
+                match self.configuration.put_public_catalog(source, record).await {
+                    Ok(_) => { *publication = Ok(Arc::new(next)); sources = candidate; Ok(()) }
+                    Err(_) => {
+                        // A failed acknowledgement cannot tell us whether SQL
+                        // committed. Reconcile against durable facts while no
+                        // consumer can pair an old snapshot with a new revision.
+                        let durable = self.configuration.public_catalog().await
+                            .map_err(|_| "public catalog state unavailable after uncertain write".to_owned())
+                            .and_then(|durable| snapshot(&durable.sources).map(|next| (durable.sources, next)));
+                        match durable {
+                            Ok((durable, next)) => {
+                                let applied = durable.get(&source) == candidate.get(&source);
+                                *publication = Ok(Arc::new(next));
+                                sources = durable;
+                                if applied { Ok(()) } else { Err("public catalog update was not committed".into()) }
+                            }
+                            Err(error) => {
+                                *publication = Err(error.clone());
+                                cancellation.cancel();
+                                Err(RefreshError::Failed(error))
+                            }
+                        }
+                    }
+                }
             }.await;
             if let Err(error) = result {
-                failures.push(format!("{source:?}: {error}"));
+                cleanup_unconfirmed |= matches!(error, RefreshError::CleanupUnconfirmed(_));
+                failures.push(format!("{source:?}: {}", error.message()));
             }
         }
         if failures.is_empty() {
             Ok(())
+        } else if cleanup_unconfirmed {
+            Err(RefreshError::CleanupUnconfirmed(failures.join("; ")))
         } else {
-            Err(failures.join("; "))
+            Err(RefreshError::Failed(failures.join("; ")))
         }
     }
 }
@@ -317,7 +377,7 @@ async fn fetch(
     url: &'static str,
     previous: Option<PublicCatalogRecord>,
     cancellation: &CancellationToken,
-) -> Result<PublicCatalogRecord, String> {
+) -> Result<PublicCatalogRecord, RefreshError> {
     let mut headers = vec![("accept".into(), "application/json".into())];
     if let Some(previous) = &previous {
         if let Some(etag) = &previous.etag {
@@ -343,7 +403,7 @@ async fn fetch(
                 loop {
                     let next = tokio::select! {
                         biased;
-                        _ = cancellation.cancelled() => return Err("public catalog refresh cancelled".to_owned()),
+                        _ = cancellation.cancelled() => return Err(RefreshError::Failed("public catalog refresh cancelled".to_owned())),
                         next = response.body.next() => next.map_err(|_| "public catalog HTTP body failed")?,
                     };
                     let Some(chunk) = next else { break; };
@@ -359,11 +419,9 @@ async fn fetch(
         Ok(record)
     }.await;
     response.body.cancel();
-    response
-        .body
-        .close()
-        .await
-        .map_err(|_| "public catalog HTTP cleanup unconfirmed")?;
+    response.body.close().await.map_err(|_| {
+        RefreshError::CleanupUnconfirmed("public catalog HTTP cleanup unconfirmed".into())
+    })?;
     result
 }
 

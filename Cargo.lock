@@ -9919,6 +9919,7 @@ dependencies = [
  "maka-ui-authoring",
  "maka-web",
  "serde_json",
+ "sqlx",
  "tempfile",
  "tokio",
  "tokio-util",
