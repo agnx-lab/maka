@@ -90,6 +90,7 @@ export function Composer(props: {
     (!props.session()?.draft().trim() && !props.session()?.attachments.files().length);
   const sendLabel = () =>
     props.session()?.invocation() != null ? 'Queue message' : 'Send message';
+  const primaryStops = () => props.session()?.invocation() != null && cannotSend();
   let unbind = () => {};
   cleanup(() => unbind());
   const cardRoot = signal<YNode | null>(null);
@@ -409,41 +410,21 @@ export function Composer(props: {
             <If when={props.session() === null}>
               <View pointerEvents="none" style={{ flex: 1 }} />
             </If>
-            <If when={props.session()?.invocation() != null}>
-              <Button
-                disabled={props.session()!.stopping()}
-                accessibilityLabel="Stop response"
-                tooltip="Stop response · Esc"
-                onPress={inputAction(props.session()!.stop, props.session()!.invocation())}
-                style={{
-                  width: 32,
-                  height: 32,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: C.accent,
-                  borderRadius: 16,
-                }}
-                hoverStyle={{ backgroundColor: C.accentHover }}
-                focusStyle={{ backgroundColor: C.accentHover }}
-                activeStyle={{ backgroundColor: C.accent }}
-                disabledStyle={{ backgroundColor: C.line }}
-              >
-                <Icon name="stop" color={props.session()!.stopping() ? C.muted : C.background} />
-              </Button>
-            </If>
             <Button
-              accessibilityLabel={sendLabel()}
-              tooltip={`${sendLabel()} · Enter`}
-              disabled={cannotSend()}
+              accessibilityLabel={primaryStops() ? 'Stop response' : sendLabel()}
+              tooltip={primaryStops() ? 'Stop response · Esc' : `${sendLabel()} · Enter`}
+              disabled={primaryStops() ? props.session()!.stopping() : cannotSend()}
               onPress={
-                props.session()
-                  ? inputAction(props.session()!.sendRendered, {
-                      owner: props.session()!.sessionId,
-                      text: props.session()!.draft(),
-                      backend: props.session()!.backend(),
-                      attachments: props.session()!.attachments.ids(),
-                    })
-                  : undefined
+                primaryStops()
+                  ? inputAction(props.session()!.stop, props.session()!.invocation())
+                  : props.session()
+                    ? inputAction(props.session()!.sendRendered, {
+                        owner: props.session()!.sessionId,
+                        text: props.session()!.draft(),
+                        backend: props.session()!.backend(),
+                        attachments: props.session()!.attachments.ids(),
+                      })
+                    : undefined
               }
               style={{
                 width: 32,
@@ -458,7 +439,14 @@ export function Composer(props: {
               activeStyle={{ backgroundColor: C.accent }}
               disabledStyle={{ backgroundColor: C.line }}
             >
-              <Icon name="send" color={cannotSend() ? C.muted : C.background} />
+              <Icon
+                name={primaryStops() ? 'stop' : 'send'}
+                color={
+                  (primaryStops() ? props.session()!.stopping() : cannotSend())
+                    ? C.muted
+                    : C.background
+                }
+              />
             </Button>
           </View>
         </View>

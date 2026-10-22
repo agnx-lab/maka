@@ -22,6 +22,7 @@ mod approval;
 mod computer;
 pub(crate) mod image;
 mod shell;
+mod title;
 mod web;
 use crate::contract::{ServiceTool, ToolConfirmation, ToolInput, ToolResult};
 use futures_util::FutureExt;
@@ -147,6 +148,26 @@ pub(crate) fn catalog(
             let method = methods
                 .get(&selection.method)
                 .ok_or("agent_tool_method_unavailable")?;
+            // The actual binding owns the title meaning, never a tool alias.
+            let title_kind = if binding.contract() == &file_contract {
+                match selection.method.as_str() {
+                    "readText" | "readImage" => Some(title::Kind::Read),
+                    "write" => Some(title::Kind::Write),
+                    "edit" => Some(title::Kind::Edit),
+                    "applyPatch" => Some(title::Kind::Patch),
+                    "glob" => Some(title::Kind::Glob),
+                    "grep" => Some(title::Kind::Grep),
+                    _ => None,
+                }
+            } else if binding.contract() == &web_contract {
+                match selection.method.as_str() {
+                    "fetch" => Some(title::Kind::Fetch),
+                    "search" => Some(title::Kind::Search),
+                    _ => None,
+                }
+            } else {
+                None
+            };
             if (binding.contract() == &file_contract
                 && matches!(
                     selection.method.as_str(),
@@ -248,6 +269,7 @@ pub(crate) fn catalog(
                 ),
                 tool_names: tool_names.clone(),
                 selection: selection.clone(),
+                title_kind,
                 mode: method.mode,
                 web_basis: None,
             };
@@ -342,6 +364,7 @@ struct Service {
     binding: String,
     target: String,
     selection: ServiceTool,
+    title_kind: Option<title::Kind>,
     mode: MethodMode,
 }
 impl ToolPreparer for Service {
@@ -362,6 +385,7 @@ impl ToolPreparer for Service {
         let binding = self.binding.clone();
         let target = self.target.clone();
         let selection = self.selection.clone();
+        let default_title = self.title_kind;
         let mode = self.mode;
         Box::pin(async move {
             if name != selection.name {
@@ -371,16 +395,20 @@ impl ToolPreparer for Service {
                 return Err(ToolRejection::Cancelled);
             }
             // No request or effect is admitted until the existing ToolJournal T1.
-            let title = selection.title.clone().or_else(|| {
-                if selection.input == ToolInput::Shell {
-                    shell::title(&input)
-                } else if selection.input == ToolInput::Skill {
-                    maka_skills_api::model_title(&selection.method, &input)
-                } else {
-                    (selection.result == ToolResult::Computer)
-                        .then(|| computer::title(&selection.method, &input))
-                }
-            });
+            let title = selection
+                .title
+                .clone()
+                .or_else(|| {
+                    if selection.input == ToolInput::Shell {
+                        shell::title(&input)
+                    } else if selection.input == ToolInput::Skill {
+                        maka_skills_api::model_title(&selection.method, &input)
+                    } else {
+                        (selection.result == ToolResult::Computer)
+                            .then(|| computer::title(&selection.method, &input))
+                    }
+                })
+                .or_else(|| default_title.and_then(|kind| kind.render(&input)));
             let presentation = selection.presentation.clone();
             let prepared = PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {

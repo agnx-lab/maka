@@ -248,7 +248,7 @@ export function ToolCard(props: {
         <Button
           selected={props.expanded()}
           accessibilityLabel={`Toggle tool ${tool()?.call?.name ?? 'details'}`}
-          tooltip={tool()?.call?.name ?? 'Tool details'}
+          tooltip={title()}
           onPress={inputAction(props.expand, {
             sessionId: props.sessionId,
             key: props.ownerKey(),

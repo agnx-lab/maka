@@ -202,6 +202,7 @@ async fn native_web_redirects_require_each_destination_and_cancel_withdraws_pend
         assert_eq!(result["kind"], "completed", "{result}");
         assert!(result["value"]["content"].as_str().unwrap().contains("Web result retained"));
         let facts = service_tools::facts(&f, &session).await;
+        assert!(facts.iter().any(|fact| matches!(fact, Fact::ToolDispatched { name, title: Some(title), .. } if name == "WebFetch" && title.fallback == format!("Read web page · {url}"))));
         assert_eq!(facts.iter().filter(|fact| matches!(fact, Fact::ToolDispatched { name, .. } if name == "Http")).count(), 2);
         // A body remains owned until cancellation actually closes its socket.
         let streaming = start(&model, &f, &session, url.clone()).await;

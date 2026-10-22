@@ -1,0 +1,60 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use maka_agent_facts::display::Text;
+use serde_json::Value;
+
+#[derive(Clone, Copy)]
+pub(super) enum Kind {
+    Read,
+    Write,
+    Edit,
+    Patch,
+    Glob,
+    Grep,
+    Fetch,
+    Search,
+}
+
+impl Kind {
+    pub(super) fn render(self, input: &Value) -> Option<Text> {
+        // ToolCatalog has validated this already parsed input against its schema.
+        let (target, en, zh, tw) = match self {
+            Self::Read => (&input["path"], "Read file", "读取文件", "讀取檔案"),
+            Self::Write => (&input["path"], "Write file", "写入文件", "寫入檔案"),
+            Self::Edit => (&input["path"], "Edit file", "编辑文件", "編輯檔案"),
+            Self::Patch => (
+                &input["operation"]["path"],
+                "Patch file",
+                "修补文件",
+                "修補檔案",
+            ),
+            Self::Glob => (&input["pattern"], "Find files", "查找文件", "尋找檔案"),
+            Self::Grep => (&input["pattern"], "Search files", "搜索文件", "搜尋檔案"),
+            Self::Fetch => (&input["url"], "Read web page", "读取网页", "讀取網頁"),
+            Self::Search => (&input["query"], "Search the web", "搜索网络", "搜尋網路"),
+        };
+        let target = Text::single_line(target.as_str()?)?.fallback;
+        Some(Text::localized(
+            &format!("{en} · {target}"),
+            &format!("{zh} · {target}"),
+            &format!("{tw} · {target}"),
+        ))
+    }
+}

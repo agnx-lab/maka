@@ -70,95 +70,82 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
       }}
       style={{ flex: 1, minHeight: 0, backgroundColor: C.background, padding: 8, gap: 8 }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <Button
-          accessibilityLabel="Browse files"
-          selected={resources.active() === 'files'}
-          ref={(node) => {
-            control = node;
-            if (resources.focusRequest()) {
-              resources.focusHandled();
-              if (props.docked) node.focus();
-            }
-          }}
-          onPress={inputAction(resources.inventory, {
-            sessionId: resources.sessionId()!,
-            kind: 'files',
-          })}
-          style={{ ...controlStyle, paddingHorizontal: 8 }}
-          selectedStyle={{ backgroundColor: C.raised }}
-          hoverStyle={controlHoverStyle}
-          focusStyle={controlFocusStyle}
-        >
-          <Text
-            style={{
-              ...captionTextStyle,
-              color: resources.active() === 'files' ? C.text : C.muted,
-            }}
-          >
-            Files
-          </Text>
-        </Button>
-        <Button
-          accessibilityLabel="Browse current changes"
-          selected={resources.active() === 'changes'}
-          onPress={inputAction(resources.inventory, {
-            sessionId: resources.sessionId()!,
-            kind: 'changes',
-          })}
-          style={{ ...controlStyle, paddingHorizontal: 8 }}
-          selectedStyle={{ backgroundColor: C.raised }}
-          hoverStyle={controlHoverStyle}
-          focusStyle={controlFocusStyle}
-        >
-          <Text
-            style={{
-              ...captionTextStyle,
-              color: resources.active() === 'changes' ? C.text : C.muted,
-            }}
-          >
-            Changes
-          </Text>
-        </Button>
-        <Button
-          accessibilityLabel="Show conversation terminals"
-          selected={resources.active() === 'terminals'}
-          onPress={inputAction(resources.inventory, {
-            sessionId: resources.sessionId()!,
-            kind: 'terminals',
-          })}
-          style={{
-            ...controlStyle,
-            paddingHorizontal: 8,
-          }}
-          selectedStyle={{ backgroundColor: C.raised }}
-          hoverStyle={controlHoverStyle}
-          focusStyle={controlFocusStyle}
-        >
-          <Text
-            style={{
-              ...captionTextStyle,
-              color: resources.active() === 'terminals' ? C.text : C.muted,
-            }}
-          >
-            Terminal
-          </Text>
-        </Button>
-        <View style={{ flex: 1 }} />
-        <Button
-          accessibilityLabel="Close workspace preview"
-          onPress={inputAction(resources.close, closeTarget)}
-          tooltip="Close workspace preview · Esc"
-          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
-          hoverStyle={controlHoverStyle}
-          focusStyle={controlFocusStyle}
-        >
-          <Icon name="close" color={C.muted} />
-        </Button>
-      </View>
-      <If when={resources.tabs().length}>
-        <Scroll horizontal style={{ flexGrow: 0, flexShrink: 0 }}>
-          <View style={{ flexDirection: 'row', gap: 4 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 4 }}>
+        <Scroll horizontal style={{ flex: 1, minWidth: 0 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Button
+              accessibilityLabel="Browse files"
+              selected={resources.active() === 'files'}
+              ref={(node) => {
+                control = node;
+                if (resources.focusRequest()) {
+                  resources.focusHandled();
+                  if (props.docked) node.focus();
+                }
+              }}
+              onPress={inputAction(resources.inventory, {
+                sessionId: resources.sessionId()!,
+                kind: 'files',
+              })}
+              style={{ ...controlStyle, paddingHorizontal: 8 }}
+              selectedStyle={{ backgroundColor: C.raised }}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+            >
+              <Text
+                style={{
+                  ...captionTextStyle,
+                  color: resources.active() === 'files' ? C.text : C.muted,
+                }}
+              >
+                Files
+              </Text>
+            </Button>
+            <Button
+              accessibilityLabel="Browse current changes"
+              selected={resources.active() === 'changes'}
+              onPress={inputAction(resources.inventory, {
+                sessionId: resources.sessionId()!,
+                kind: 'changes',
+              })}
+              style={{ ...controlStyle, paddingHorizontal: 8 }}
+              selectedStyle={{ backgroundColor: C.raised }}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+            >
+              <Text
+                style={{
+                  ...captionTextStyle,
+                  color: resources.active() === 'changes' ? C.text : C.muted,
+                }}
+              >
+                Changes
+              </Text>
+            </Button>
+            <Button
+              accessibilityLabel="Show conversation terminals"
+              selected={resources.active() === 'terminals'}
+              onPress={inputAction(resources.inventory, {
+                sessionId: resources.sessionId()!,
+                kind: 'terminals',
+              })}
+              style={{
+                ...controlStyle,
+                paddingHorizontal: 8,
+              }}
+              selectedStyle={{ backgroundColor: C.raised }}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+            >
+              <Text
+                style={{
+                  ...captionTextStyle,
+                  color: resources.active() === 'terminals' ? C.text : C.muted,
+                }}
+              >
+                Terminal
+              </Text>
+            </Button>
             <Each of={resources.tabs()} key={(tab) => tab.instance}>
               {(tab) => (
                 <View
@@ -198,7 +185,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                       style={{
                         ...captionTextStyle,
                         color: resources.active() === tab().instance ? C.text : C.muted,
-                        maxWidth: 200,
+                        maxWidth: 160,
                       }}
                     >
                       {tab().title}
@@ -213,8 +200,10 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                     tooltip={`Close ${tab().title}`}
                     style={{
                       ...controlStyle,
-                      width: 32,
-                      paddingHorizontal: 8,
+                      width: 28,
+                      minHeight: 28,
+                      paddingHorizontal: 5,
+                      paddingVertical: 5,
                       alignItems: 'center',
                     }}
                     hoverStyle={controlHoverStyle}
@@ -227,7 +216,17 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
             </Each>
           </View>
         </Scroll>
-      </If>
+        <Button
+          accessibilityLabel="Close workspace preview"
+          onPress={inputAction(resources.close, closeTarget)}
+          tooltip="Close workspace preview · Esc"
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+        >
+          <Icon name="close" color={C.muted} />
+        </Button>
+      </View>
       <If when={resources.active() === 'terminals'}>
         <Terminals model={resources.terminals} sessionId={resources.sessionId()!} />
       </If>

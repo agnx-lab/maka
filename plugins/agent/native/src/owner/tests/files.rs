@@ -240,13 +240,13 @@ async fn native_read_text_pages_source_larger_than_one_mib() {
 #[tokio::test]
 async fn native_files_reuse_actual_read_search_write_edit_and_patch_executors() {
     tokio::time::timeout(Duration::from_secs(90), async {
-        for (method, input, expected) in [
-            ("readText", json!({"path":"original.txt"}), "alpha needle\n"),
-            ("glob", json!({"pattern":"*.txt","cwd":"."}), "original.txt"),
-            ("grep", json!({"pattern":"needle","path":"."}), "needle"),
-            ("write", json!({"path":"original.txt","content":"changed\n"}), "changed\n"),
-            ("edit", json!({"path":"original.txt","old_string":"alpha","new_string":"changed"}), "changed needle\n"),
-            ("applyPatch", json!({"callId":"patch","operation":{"type":"create_file","path":"new.txt","diff":"+created\n"}}), "created"),
+        for (method, input, expected, title) in [
+            ("readText", json!({"path":"original.txt"}), "alpha needle\n", "Read file · original.txt"),
+            ("glob", json!({"pattern":"*.txt","cwd":"."}), "original.txt", "Find files · *.txt"),
+            ("grep", json!({"pattern":"needle","path":"."}), "needle", "Search files · needle"),
+            ("write", json!({"path":"original.txt","content":"changed\n"}), "changed\n", "Write file · original.txt"),
+            ("edit", json!({"path":"original.txt","old_string":"alpha","new_string":"changed"}), "changed needle\n", "Edit file · original.txt"),
+            ("applyPatch", json!({"callId":"patch","operation":{"type":"create_file","path":"new.txt","diff":"+created\n"}}), "created", "Patch file · new.txt"),
         ] {
             let (listener, f, session) = fixture(method).await;
             std::fs::write(f.workspace.join("original.txt"), "alpha needle\n").unwrap();
@@ -267,6 +267,7 @@ async fn native_files_reuse_actual_read_search_write_edit_and_patch_executors() 
                 let page = f.query("history", json!({"sessionId":session,"through":through,"position":{"kind":"start"}})).await.unwrap();
                 assert!(page["chunks"].as_array().unwrap().iter().any(|chunk| chunk["tool"]["call"]["presentation"] == format!("maka.workspace.Files@1/{method}")), "{page}");
                 let call = page["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "tool_call").unwrap();
+                assert_eq!(call["tool"]["call"]["title"]["fallback"], title, "{method}: {call}");
                 if matches!(method, "glob" | "grep") {
                     let pattern = f.query("source", json!({"sessionId":session,"through":through,
                         "source":{"kind":"row","position":call["position"]},"field":"arguments",
