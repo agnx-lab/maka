@@ -33,7 +33,7 @@ fn provider_runtime() -> JsRuntime {
             "provider-errors",
             include_str!("../../../../../platform/js-runtime/trusted/provider-errors.js")
                 .replace(
-                    "import { isTransportFailure } from './network-fetch.js';",
+                    "import { isIdleTimeout, isTransportFailure } from './network-fetch.js';",
                     "",
                 )
                 .replace("export ", ""),

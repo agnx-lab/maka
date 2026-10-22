@@ -19,9 +19,12 @@
 
 // No ambient proxy policy: Rust uses the same immutable routing for HTTP and WS.
 const transportFailures = new WeakSet();
+const idleTimeouts = new WeakSet();
 export const isTransportFailure = (error) => transportFailures.has(error);
+export const isIdleTimeout = (error) => idleTimeouts.has(error);
 function nativeFailure(error) {
   if (error instanceof Error && error.code === 'MAKA_HTTP_TRANSPORT') transportFailures.add(error);
+  if (error instanceof Error && error.code === 'MAKA_MODEL_IDLE_TIMEOUT') idleTimeouts.add(error);
   throw error;
 }
 

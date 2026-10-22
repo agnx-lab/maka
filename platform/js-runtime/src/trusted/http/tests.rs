@@ -79,7 +79,11 @@ async fn json_op_preserves_shaped_values_and_original_request_authority() {
         models.active.insert(
             id,
             Output {
-                http: Rc::new(Exchange::new(network.clone(), token.clone())),
+                http: Rc::new(Exchange::new(
+                    network.clone(),
+                    token.clone(),
+                    Duration::from_secs(10),
+                )),
                 sender: sender.clone(),
                 cancellation: token,
                 endpoint: "fixture".into(),

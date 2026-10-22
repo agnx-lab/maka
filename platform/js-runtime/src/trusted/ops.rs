@@ -75,7 +75,7 @@ async fn op_model_emit(
     id: u32,
     #[serde] value: serde_json::Value,
 ) -> std::result::Result<(), JsErrorBox> {
-    let (sender, cancellation, budget) = {
+    let (sender, cancellation, budget, _waiting) = {
         let state = state.borrow();
         let models = state.borrow::<Models>();
         let output = models
@@ -86,6 +86,7 @@ async fn op_model_emit(
             output.sender.clone(),
             output.cancellation.clone(),
             models.budget.clone(),
+            output.http.wait_for_output(),
         )
     };
     let bytes = maka_agent_facts::model::budget::reservation(&value, 32 * 1024 * 1024)

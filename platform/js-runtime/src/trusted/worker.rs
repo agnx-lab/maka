@@ -106,6 +106,7 @@ async fn drive(
                     sender,
                     cancellation,
                     network,
+                    idle_timeout,
                     input,
                     reply,
                 } => {
@@ -124,6 +125,7 @@ async fn drive(
                                 http: std::rc::Rc::new(super::http::Exchange::new(
                                     network.clone(),
                                     cancellation.clone(),
+                                    idle_timeout,
                                 )),
                                 sender,
                                 cancellation,
