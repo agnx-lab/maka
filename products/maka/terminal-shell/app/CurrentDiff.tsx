@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { errorText, renderText, type UiText } from './text';
+import { tr } from './locale';
 import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -35,9 +37,15 @@ import {
 } from './ui';
 
 export const gitAreaLabel: Record<GitArea, string> = {
-  staged: 'Staged',
-  worktree: 'Worktree',
-  untracked: 'Untracked',
+  get staged() {
+    return tr('Staged');
+  },
+  get worktree() {
+    return tr('Worktree');
+  },
+  get untracked() {
+    return tr('Untracked');
+  },
 };
 
 export type CurrentDiffTarget = {
@@ -69,7 +77,7 @@ function diffRows(patch: string): DiffRow[] {
 type DiffState =
   | { kind: 'loading' }
   | { kind: 'unavailable' }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: UiText }
   | { kind: 'text'; rows: DiffRow[] }
   | Exclude<GitDiff, { kind: 'text' }>;
 export type CurrentDiffModel = {
@@ -116,7 +124,7 @@ export function createCurrentDiff(target: CurrentDiffTarget): CurrentDiffModel {
             : result,
       );
     } catch (reason) {
-      if (alive && reading === generation) state.set({ kind: 'error', message: String(reason) });
+      if (alive && reading === generation) state.set({ kind: 'error', message: errorText(reason) });
     }
   };
   const model: CurrentDiffModel = {
@@ -139,17 +147,17 @@ export function CurrentDiff(props: { model: CurrentDiffModel }) {
     const state = model.state();
     switch (state.kind) {
       case 'loading':
-        return 'Reading current diff…';
+        return tr('Reading current diff…');
       case 'unavailable':
-        return 'Not a Git workspace.';
+        return tr('Not a Git workspace.');
       case 'binary':
-        return 'Binary file. A text diff is unavailable.';
+        return tr('Binary file. A text diff is unavailable.');
       case 'unchanged':
-        return 'No current changes in this area.';
+        return tr('No current changes in this area.');
       case 'unsupported':
-        return 'This change does not support a text diff.';
+        return tr('This change does not support a text diff.');
       case 'error':
-        return state.message;
+        return renderText(state.message);
       case 'text':
         return '';
     }
@@ -165,9 +173,11 @@ export function CurrentDiff(props: { model: CurrentDiffModel }) {
           {model.target.title}
         </Text>
         <Button
-          accessibilityLabel="Refresh current diff"
+          accessibilityLabel={tr('Refresh current diff')}
           onPress={inputAction(model.refresh, null)}
-          tooltip={model.state().kind === 'error' ? 'Retry current diff' : 'Refresh current diff'}
+          tooltip={
+            model.state().kind === 'error' ? tr('Retry current diff') : tr('Refresh current diff')
+          }
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -176,7 +186,7 @@ export function CurrentDiff(props: { model: CurrentDiffModel }) {
         </Button>
       </View>
       <Text style={{ ...captionTextStyle, color: C.muted }}>
-        Current {gitAreaLabel[model.target.area].toLowerCase()} diff
+        {tr('Current {area} diff', { area: gitAreaLabel[model.target.area].toLowerCase() })}
       </Text>
       <If when={notice()}>
         <Text
@@ -214,7 +224,7 @@ function DiffRows(props: { model: CurrentDiffModel }) {
   });
   return (
     <List
-      accessibilityLabel="Current file diff"
+      accessibilityLabel={tr('Current file diff')}
       each={rows()}
       keyExtractor={(row: DiffRow) => row.key}
       estimatedItemSize={codeTextStyle.lineHeight}
@@ -225,7 +235,7 @@ function DiffRows(props: { model: CurrentDiffModel }) {
       style={{ flex: 1, minHeight: 0, backgroundColor: C.surface }}
       empty={
         <Text style={{ ...bodyTextStyle, color: C.muted }}>
-          The current patch has no displayable rows.
+          {tr('The current patch has no displayable rows.')}
         </Text>
       }
     >

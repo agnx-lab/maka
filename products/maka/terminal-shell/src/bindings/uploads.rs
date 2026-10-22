@@ -137,6 +137,11 @@ impl JsValue for AttachmentScope {
 #[derive(Clone, Debug, PartialEq, Props)]
 pub(super) struct AttachmentPickerProps {
     pub client: Prop<Option<AttachmentScope>>,
+    pub path_label: Prop<String>,
+    pub path_placeholder: Prop<String>,
+    pub upload_label: Prop<String>,
+    pub uploading_label: Prop<String>,
+    pub selected_file_label: Prop<String>,
     #[prop(default)]
     pub visible: Prop<bool>,
     #[prop(default)]
@@ -180,7 +185,7 @@ pub(super) fn AttachmentPicker(
             .filter(|character| !character.is_control())
             .collect();
         let name = if name.is_empty() {
-            "Selected file".into()
+            props.selected_file_label.get_untracked()
         } else {
             name
         };
@@ -227,12 +232,12 @@ pub(super) fn AttachmentPicker(
         let click = begin.clone();
         view()
             .gap(px(8.0))
-            .child(text("Attachment path"))
+            .child(text(move || props.path_label.get()))
             .child(
                 input()
                     .value(path)
-                    .placeholder("Absolute file path…")
-                    .label("Attachment path")
+                    .placeholder(move || props.path_placeholder.get())
+                    .label(move || props.path_label.get())
                     .auto_focus(true)
                     .readonly(move || busy.get() || props.disabled.get())
                     .on_change(move |value: &str| path.set(value.to_owned()))
@@ -250,7 +255,7 @@ pub(super) fn AttachmentPicker(
                     disabled: Prop::bind(move || {
                         busy.get() || props.disabled.get() || path.get().is_empty()
                     }),
-                    accessibility_label: "Upload selected file".into(),
+                    accessibility_label: Prop::bind(move || Some(props.upload_label.get().into())),
                     ..Default::default()
                 })
                 .on_event(move |event: &ButtonEvent| {
@@ -260,9 +265,9 @@ pub(super) fn AttachmentPicker(
                 })
                 .child(text(move || {
                     if busy.get() {
-                        "Uploading…"
+                        props.uploading_label.get()
                     } else {
-                        "Upload selected file"
+                        props.upload_label.get()
                     }
                 }))
                 .px_3()

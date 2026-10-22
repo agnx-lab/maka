@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { UiError } from './text';
+import { tr } from './locale';
 import type { AgentSession } from '../../../../packages/plugin-sdk/src/index.js';
 import type { Control } from './Conversation';
 
@@ -46,13 +48,14 @@ export type SessionActionResult =
   | { kind: 'updated' | 'forked'; session: AgentSession }
   | { kind: 'removed'; sessionId: string };
 
-export class SessionRevisionConflict extends Error {
+export class SessionRevisionConflict extends UiError {
   constructor() {
     super('This conversation changed. Review its current details, then try the action again.');
   }
 }
 
-export const forkTitle = (title: string) => `Fork of ${title || 'Untitled conversation'}`;
+export const forkTitle = (title: string) =>
+  tr('Fork of {title}', { title: title || tr('Untitled conversation') });
 
 // The captured Session is the user's original revision and labels. A conflict
 // requires another explicit action; never silently replace its CAS identity.
@@ -77,17 +80,21 @@ export async function performSessionAction(
   if (result.kind === 'rejected') {
     const reason =
       action.kind === 'fork' && result.reason === 'history_unavailable'
-        ? 'The Host cannot copy this history yet. Fork a completed turn, or wait for the current turn to finish.'
+        ? new UiError(
+            'The Host cannot copy this history yet. Fork a completed turn, or wait for the current turn to finish.',
+          )
         : action.kind === 'fork' && result.reason === 'managed_session'
-          ? 'WorkHub manages this conversation. Its history cannot be forked here.'
+          ? new UiError('WorkHub manages this conversation. Its history cannot be forked here.')
           : result.reason === 'busy'
-            ? 'This conversation is working, has queued messages, or still needs your input. Finish it before changing its lifecycle.'
-            : `Conversation action rejected: ${result.reason}`;
-    throw new Error(reason);
+            ? new UiError(
+                'This conversation is working, has queued messages, or still needs your input. Finish it before changing its lifecycle.',
+              )
+            : new UiError('Conversation action rejected: {reason}', { reason: result.reason });
+    throw reason;
   }
   if (result.kind === 'removed') return { kind: 'removed', sessionId: result.sessionId };
   if (result.kind === 'forked') return { kind: 'forked', session: result.session };
   if (result.kind === 'changed' || result.kind === 'committed')
     return { kind: 'updated', session: result.session };
-  throw new Error('Host returned an unexpected conversation action result.');
+  throw new UiError('Host returned an unexpected conversation action result.');
 }

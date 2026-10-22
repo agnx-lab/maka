@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { errorText, message, renderText, type UiText } from './text';
+import { tr } from './locale';
 import { cleanup, effect, Input, inputAction, Scroll, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button, Dialog, Popover } from 'nsh/base';
@@ -45,14 +47,14 @@ export function SessionActions(props: {
   anchor(): YNode | null;
   current(): boolean;
   close(): void;
-  notice(message: string): void;
+  notice(message: UiText): void;
   change(action: SessionAction): Promise<void>;
 }) {
   const session = signal(props.session);
   const page = signal<Page>('actions');
   const title = signal('');
   const pending = signal(false);
-  const error = signal('');
+  const error = signal<UiText>('');
   let alive = true;
   cleanup(() => {
     alive = false;
@@ -105,7 +107,7 @@ export function SessionActions(props: {
       if (active()) props.close();
     } catch (reason) {
       if (!active()) return;
-      error.set(reason instanceof Error ? reason.message : String(reason));
+      error.set(errorText(reason));
       if (reason instanceof SessionRevisionConflict) {
         // Keep the typed title. The refreshed snapshot supplies the next
         // explicitly requested action, never an automatic mutation retry.
@@ -115,7 +117,10 @@ export function SessionActions(props: {
         } catch (refreshError) {
           if (active())
             error.set(
-              `${error()} ${refreshError instanceof Error ? refreshError.message : String(refreshError)}`,
+              message('{message} {detail}', {
+                message: errorText(reason),
+                detail: errorText(refreshError),
+              }),
             );
         }
       }
@@ -126,7 +131,7 @@ export function SessionActions(props: {
   return (
     <View>
       <If when={page() === 'actions' && !props.anchor() && pending()}>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>Updating conversation…</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>{tr('Updating conversation…')}</Text>
       </If>
       <If when={page() === 'actions'}>
         <Popover
@@ -152,7 +157,7 @@ export function SessionActions(props: {
           }}
         >
           <Scroll style={{ flexShrink: 1, minHeight: 0 }}>
-            <View role="menu" accessibilityLabel="Conversation actions" style={{ gap: 2 }}>
+            <View role="menu" accessibilityLabel={tr('Conversation actions')} style={{ gap: 2 }}>
               <Text
                 style={{
                   ...captionTextStyle,
@@ -161,11 +166,11 @@ export function SessionActions(props: {
                   paddingVertical: 6,
                 }}
               >
-                Conversation actions
+                {tr('Conversation actions')}
               </Text>
               <Button
                 disabled={pending() || session().archived}
-                accessibilityLabel="Rename conversation"
+                accessibilityLabel={tr('Rename conversation')}
                 role="menuitem"
                 style={menuRowStyle()}
                 hoverStyle={controlHoverStyle}
@@ -175,12 +180,12 @@ export function SessionActions(props: {
               >
                 <Icon name="edit" color={C.secondary} />
                 <Text accessibilityElementsHidden style={{ ...secondaryTextStyle, color: C.text }}>
-                  Rename
+                  {tr('Rename')}
                 </Text>
               </Button>
               <Button
                 disabled={pending()}
-                accessibilityLabel="Fork conversation"
+                accessibilityLabel={tr('Fork conversation')}
                 role="menuitem"
                 style={menuRowStyle()}
                 hoverStyle={controlHoverStyle}
@@ -190,13 +195,13 @@ export function SessionActions(props: {
               >
                 <Icon name="fork" color={C.secondary} />
                 <Text accessibilityElementsHidden style={{ ...secondaryTextStyle, color: C.text }}>
-                  Fork conversation
+                  {tr('Fork conversation')}
                 </Text>
               </Button>
               <Button
                 disabled={pending()}
                 accessibilityLabel={
-                  session().archived ? 'Restore conversation' : 'Archive conversation'
+                  session().archived ? tr('Restore conversation') : tr('Archive conversation')
                 }
                 role="menuitem"
                 style={menuRowStyle()}
@@ -210,7 +215,7 @@ export function SessionActions(props: {
               >
                 <Icon name={session().archived ? 'latest' : 'archive'} color={C.secondary} />
                 <Text accessibilityElementsHidden style={{ ...secondaryTextStyle, color: C.text }}>
-                  {session().archived ? 'Restore' : 'Archive'}
+                  {session().archived ? tr('Restore') : tr('Archive')}
                 </Text>
               </Button>
               <View
@@ -219,7 +224,7 @@ export function SessionActions(props: {
               />
               <Button
                 disabled={pending()}
-                accessibilityLabel="Delete conversation"
+                accessibilityLabel={tr('Delete conversation')}
                 role="menuitem"
                 style={menuRowStyle()}
                 hoverStyle={controlHoverStyle}
@@ -232,17 +237,17 @@ export function SessionActions(props: {
                   accessibilityElementsHidden
                   style={{ ...secondaryTextStyle, color: C.danger }}
                 >
-                  Delete…
+                  {tr('Delete…')}
                 </Text>
               </Button>
-              <If when={error()}>
+              <If when={renderText(error())}>
                 <Text selectable style={{ ...bodyTextStyle, color: C.danger, padding: 8 }}>
-                  {error()}
+                  {renderText(error())}
                 </Text>
               </If>
               <If when={pending()}>
                 <Text style={{ ...captionTextStyle, color: C.muted, padding: 8 }}>
-                  Updating conversation…
+                  {tr('Updating conversation…')}
                 </Text>
               </If>
             </View>
@@ -280,8 +285,8 @@ export function SessionActions(props: {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Button
                 disabled={pending()}
-                accessibilityLabel="Back from conversation actions"
-                tooltip="Back · Esc"
+                accessibilityLabel={tr('Back from conversation actions')}
+                tooltip={tr('Back · Esc')}
                 onPress={inputAction(back, page())}
                 style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
                 hoverStyle={controlHoverStyle}
@@ -295,17 +300,17 @@ export function SessionActions(props: {
                 style={{ flex: 1, color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}
               >
                 {page() === 'rename'
-                  ? 'Rename conversation'
+                  ? tr('Rename conversation')
                   : page() === 'fork'
-                    ? 'Fork conversation'
+                    ? tr('Fork conversation')
                     : page() === 'remove'
-                      ? 'Delete conversation?'
-                      : 'Conversation actions'}
+                      ? tr('Delete conversation?')
+                      : tr('Conversation actions')}
               </Text>
               <Button
                 disabled={pending()}
-                accessibilityLabel="Close conversation actions"
-                tooltip="Close"
+                accessibilityLabel={tr('Close conversation actions')}
+                tooltip={tr('Close')}
                 onPress={inputAction(dismiss, page())}
                 style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
                 hoverStyle={controlHoverStyle}
@@ -318,21 +323,21 @@ export function SessionActions(props: {
             <Scroll style={{ flexShrink: 1, minHeight: 0 }}>
               <View style={{ gap: 8 }}>
                 <Text selectable style={{ color: C.text }}>
-                  {session().title || 'Untitled conversation'}
+                  {session().title || tr('Untitled conversation')}
                 </Text>
                 <Text numberOfLines={2} style={{ color: C.muted }}>
                   {session().workspace.path}
                 </Text>
                 <If when={session().archived}>
-                  <Text style={{ color: C.warning }}>Archived conversation</Text>
+                  <Text style={{ color: C.warning }}>{tr('Archived conversation')}</Text>
                 </If>
-                <If when={error()}>
+                <If when={renderText(error())}>
                   <Text selectable style={{ color: C.danger }}>
-                    {error()}
+                    {renderText(error())}
                   </Text>
                 </If>
                 <If when={pending()}>
-                  <Text style={{ color: C.muted }}>Confirming the original action…</Text>
+                  <Text style={{ color: C.muted }}>{tr('Confirming the original action…')}</Text>
                 </If>
                 <If when={page() === 'rename' || page() === 'fork'}>
                   <Input
@@ -341,11 +346,11 @@ export function SessionActions(props: {
                       node.setSelection(0, title().length);
                     }}
                     autoFocus
-                    accessibilityLabel="Conversation title"
+                    accessibilityLabel={tr('Conversation title')}
                     value={title()}
                     readonly={pending()}
                     onChange={(value) => title.set(value)}
-                    placeholder="Conversation title"
+                    placeholder={tr('Conversation title')}
                     style={{
                       height: 32,
                       color: C.text,
@@ -360,14 +365,17 @@ export function SessionActions(props: {
                   />
                   <If when={page() === 'fork'}>
                     <Text style={{ color: C.muted }}>
-                      Copy the current history into an independent conversation. This draft stays
-                      with its original conversation.
+                      {tr(
+                        'Copy the current history into an independent conversation. This draft stays with its original conversation.',
+                      )}
                     </Text>
                   </If>
                   <Button
                     disabled={pending() || !title().trim()}
                     accessibilityLabel={
-                      page() === 'fork' ? 'Create conversation fork' : 'Save conversation title'
+                      page() === 'fork'
+                        ? tr('Create conversation fork')
+                        : tr('Save conversation title')
                     }
                     style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
                     hoverStyle={{ backgroundColor: C.accentHover }}
@@ -381,25 +389,26 @@ export function SessionActions(props: {
                     )}
                   >
                     <Text style={{ color: C.background }}>
-                      {page() === 'fork' ? 'Create fork' : 'Save title'}
+                      {page() === 'fork' ? tr('Create fork') : tr('Save title')}
                     </Text>
                   </Button>
                 </If>
                 <If when={page() === 'remove'}>
                   <Text style={{ color: C.warning }}>
-                    Permanently delete this conversation and its history. Workspace files and
-                    independent forks are kept.
+                    {tr(
+                      'Permanently delete this conversation and its history. Workspace files and independent forks are kept.',
+                    )}
                   </Text>
                   <Button
                     disabled={pending()}
-                    accessibilityLabel="Confirm delete conversation"
+                    accessibilityLabel={tr('Confirm delete conversation')}
                     style={controlStyle}
                     hoverStyle={controlHoverStyle}
                     focusStyle={controlFocusStyle}
                     disabledStyle={controlDisabledStyle}
                     onPress={inputAction(submit, { kind: 'remove', session: session() })}
                   >
-                    <Text style={{ color: C.danger }}>Delete permanently</Text>
+                    <Text style={{ color: C.danger }}>{tr('Delete permanently')}</Text>
                   </Button>
                   <Button
                     disabled={pending()}
@@ -409,7 +418,7 @@ export function SessionActions(props: {
                     focusStyle={controlFocusStyle}
                     disabledStyle={controlDisabledStyle}
                   >
-                    <Text style={{ color: C.text }}>Keep conversation</Text>
+                    <Text style={{ color: C.text }}>{tr('Keep conversation')}</Text>
                   </Button>
                 </If>
               </View>

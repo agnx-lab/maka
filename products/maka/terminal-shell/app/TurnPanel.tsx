@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, errorText } from './text';
+import { tr } from './locale';
 import { cleanup, computed, effect, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
@@ -90,12 +92,12 @@ export function TurnSummary(props: {
   const label = () => {
     const outcome = turnOutcome(props.turn());
     return outcome === 'completed'
-      ? 'Completed'
+      ? tr('Completed')
       : outcome === 'failed'
-        ? 'Failed'
+        ? tr('Failed')
         : outcome === 'aborted'
-          ? 'Stopped'
-          : 'Activity';
+          ? tr('Stopped')
+          : tr('Activity');
   };
   const choose = (action: { turnId: string; answerKey: string | undefined; open: boolean }) => {
     const turn = props.turn();
@@ -104,7 +106,7 @@ export function TurnSummary(props: {
   };
   return (
     <Button
-      accessibilityLabel="Turn work details"
+      accessibilityLabel={tr('Turn work details')}
       disabled={!props.canFold()}
       selected={props.expanded()}
       onPress={inputAction(choose, {
@@ -180,7 +182,7 @@ function ActivityLog(props: {
   const lease = ++state.lease;
   const initial = signal<{ y: number } | null>(null);
   const measurements = signal(0);
-  const error = signal('');
+  const error = createText();
   // Reveal a user-opened source after its native height changes, so the outer
   // List positions the grown group rather than its old one-line body.
   const pendingReveal = signal<{ rowId: string; height: number } | null>(null);
@@ -242,13 +244,13 @@ function ActivityLog(props: {
         }
       })
       .catch((reason) => {
-        if (alive) error.set(String(reason));
+        if (alive) error.set(errorText(reason));
       });
   return (
     <View style={{ height: bodyHeight() }}>
       <If when={initial()}>
         <List
-          accessibilityLabel="Turn activity"
+          accessibilityLabel={tr('Turn activity')}
           each={props.group().rowIds}
           estimatedItemSize={controlStyle.minHeight + memberGap}
           scrollValue={state.offset}
@@ -409,17 +411,19 @@ export function TurnPanel(props: {
     const tools = props.group().toolIds.length;
     return (
       [
-        thoughts ? `${thoughts} thought${thoughts === 1 ? '' : 's'}` : '',
-        tools ? `${tools} tool${tools === 1 ? '' : 's'}` : '',
+        thoughts
+          ? tr(thoughts === 1 ? '{count} thought' : '{count} thoughts', { count: thoughts })
+          : '',
+        tools ? tr(tools === 1 ? '{count} tool' : '{count} tools', { count: tools }) : '',
       ]
         .filter(Boolean)
-        .join(' · ') || 'Process'
+        .join(' · ') || tr('Process')
     );
   };
   const desiredTitle = computed(() => {
     if (!active()) return counts();
     const activity = props.activity();
-    if (activity.kind === 'waiting') return 'Waiting for your response';
+    if (activity.kind === 'waiting') return tr('Waiting for your response');
     const tool = props.toolActivity();
     if (tool) return toolActivitySummary(tool);
     if (
@@ -427,8 +431,8 @@ export function TurnPanel(props: {
       activity.rowId &&
       props.group().rowIds.includes(activity.rowId)
     )
-      return `Analyzing the request${activity.detail ? ` · ${activity.detail}` : ''}`;
-    return 'Working…';
+      return `${tr('Analyzing the request')}${activity.detail ? ` · ${activity.detail}` : ''}`;
+    return tr('Working…');
   });
   const stableTitle = stableActivityTitle(desiredTitle, active);
   const choose = (action: { sessionId: string; key: string; open: boolean }) => {
@@ -449,7 +453,7 @@ export function TurnPanel(props: {
   return (
     <View style={panelStyle}>
       <Button
-        accessibilityLabel="Process group"
+        accessibilityLabel={tr('Process group')}
         disabled={props.group().rowIds.length === 0}
         selected={props.state.open()}
         onPress={inputAction(choose, {

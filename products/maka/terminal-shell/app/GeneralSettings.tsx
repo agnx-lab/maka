@@ -18,6 +18,7 @@
  */
 
 import { inputAction, Scroll, Text, View } from 'nsh';
+import { tr } from './locale';
 import { Button } from 'nsh/base';
 import {
   assistantLanguages,
@@ -43,7 +44,7 @@ export function GeneralSettings(props: { owner: GeneralSettingsOwner }) {
     <Scroll style={{ flex: 1, minHeight: 0 }}>
       <View style={{ padding: 8, gap: 16 }}>
         <If when={owner.loading()}>
-          <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading preferences…</Text>
+          <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Reading preferences…')}</Text>
         </If>
         <Each of={[owner.action()]} key={(request) => JSON.stringify(request)}>
           {(action) => {
@@ -65,32 +66,34 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
       <Button
         disabled={owner.loading() || owner.busy()}
         onPress={inputAction(owner.reload, request)}
-        accessibilityLabel="Refresh general preferences"
+        accessibilityLabel={tr('Refresh general preferences')}
         focusStyle={controlFocusStyle}
         style={{ ...controlStyle, alignSelf: 'flex-start' }}
         hoverStyle={controlHoverStyle}
         disabledStyle={controlDisabledStyle}
       >
-        <Text style={{ ...bodyTextStyle, color: C.secondary }}>Refresh preferences</Text>
+        <Text style={{ ...bodyTextStyle, color: C.secondary }}>{tr('Refresh preferences')}</Text>
       </Button>
       <If when={owner.facts()}>
         <View style={{ gap: 8 }}>
           <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}>
-            Assistant language
+            {tr('Language')}
           </Text>
           <Text style={{ ...captionTextStyle, color: C.muted }}>
-            Language used by the assistant. The interface remains English.
+            {tr('Language used by the interface and assistant.')}
           </Text>
           <If when={owner.facts()?.language == null}>
-            <Text style={{ ...captionTextStyle, color: C.muted }}>Using the default language.</Text>
+            <Text style={{ ...captionTextStyle, color: C.muted }}>
+              {tr('Using the default language.')}
+            </Text>
           </If>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Each of={assistantLanguages} key={(language) => language.value}>
+            <Each of={assistantLanguages()} key={(language) => language.value}>
               {(language) => (
                 <Button
-                  selected={owner.facts()?.language === language().value}
+                  selected={(owner.facts()?.language ?? 'auto') === language().value}
                   disabled={owner.disabled()}
-                  accessibilityLabel={`Assistant language: ${language().label}`}
+                  accessibilityLabel={tr('Language: {language}', { language: language().label })}
                   onPress={inputAction(owner.language, { request, preference: language().value })}
                   style={{
                     ...controlStyle,
@@ -106,13 +109,16 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
                 >
                   <ChoiceIndicator
                     kind="radio"
-                    checked={owner.facts()?.language === language().value}
+                    checked={(owner.facts()?.language ?? 'auto') === language().value}
                     disabled={owner.disabled()}
                   />
                   <Text
                     style={{
                       ...bodyTextStyle,
-                      color: owner.facts()?.language === language().value ? C.accent : C.text,
+                      color:
+                        (owner.facts()?.language ?? 'auto') === language().value
+                          ? C.accent
+                          : C.text,
                     }}
                   >
                     {language().label}
@@ -127,28 +133,28 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
             owner={owner}
             request={request}
             kind="instructions"
-            label="Workspace instructions"
+            label={tr('Workspace instructions')}
             enabled={owner.facts()?.workspaceInstructions ?? false}
           />
           <PreferenceToggle
             owner={owner}
             request={request}
             kind="privacy"
-            label="Incognito mode"
+            label={tr('Incognito mode')}
             enabled={owner.facts()?.incognitoActive ?? false}
           />
           <PreferenceToggle
             owner={owner}
             request={request}
             kind="titles"
-            label="Automatic shell titles"
+            label={tr('Automatic shell titles')}
             enabled={owner.facts()?.shellTitles ?? false}
           />
         </View>
         <Button
           disabled={owner.disabled()}
           onPress={inputAction(owner.open, { request, kind: 'personalization' })}
-          accessibilityLabel="Edit personalization"
+          accessibilityLabel={tr('Edit personalization')}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           style={{
@@ -161,9 +167,9 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
           disabledStyle={controlDisabledStyle}
         >
           <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
-            <Text style={{ ...bodyTextStyle, color: C.text }}>Personalization</Text>
+            <Text style={{ ...bodyTextStyle, color: C.text }}>{tr('Personalization')}</Text>
             <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
-              {owner.facts()?.displayName || 'Display name and assistant tone'}
+              {owner.facts()?.displayName || tr('Display name and assistant tone')}
             </Text>
           </View>
           <Icon name="right" color={C.muted} />
@@ -171,7 +177,7 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
         <Button
           disabled={owner.disabled()}
           onPress={inputAction(owner.open, { request, kind: 'compaction' })}
-          accessibilityLabel="Edit compaction prompt"
+          accessibilityLabel={tr('Edit compaction prompt')}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           style={{
@@ -184,9 +190,9 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
           disabledStyle={controlDisabledStyle}
         >
           <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
-            <Text style={{ ...bodyTextStyle, color: C.text }}>Compaction prompt</Text>
+            <Text style={{ ...bodyTextStyle, color: C.text }}>{tr('Compaction prompt')}</Text>
             <Text style={{ ...captionTextStyle, color: C.muted }}>
-              Instructions for summarizing conversation context.
+              {tr('Instructions for summarizing conversation context.')}
             </Text>
           </View>
           <Icon name="right" color={C.muted} />
@@ -207,7 +213,10 @@ function PreferenceToggle(props: {
     <Button
       selected={props.enabled}
       disabled={props.owner.disabled()}
-      accessibilityLabel={`${props.label}: ${props.enabled ? 'On' : 'Off'}`}
+      accessibilityLabel={tr('{label}: {state}', {
+        label: props.label,
+        state: props.enabled ? tr('On') : tr('Off'),
+      })}
       onPress={inputAction(props.owner.toggle, { request: props.request, kind: props.kind })}
       style={{
         ...controlStyle,
@@ -244,27 +253,27 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
   return (
     <View style={{ gap: 16 }}>
       <Text style={{ ...captionTextStyle, color: C.muted }}>
-        Changes apply when you save this page.
+        {tr('Changes apply when you save this page.')}
       </Text>
       <If when={request.kind === 'personalization'}>
         <SettingsField
-          label="Display name"
+          label={tr('Display name')}
           value={name()}
           change={(text) => owner.editName(request, 'displayName', text)}
           disabled={owner.disabled()}
         />
         <SettingsField
-          label="Assistant tone"
+          label={tr('Assistant tone')}
           value={tone()}
           change={(text) => owner.editName(request, 'assistantTone', text)}
           disabled={owner.disabled()}
           multiline
-          hint="How the assistant should respond."
+          hint={tr('How the assistant should respond.')}
         />
       </If>
       <If when={request.kind === 'compaction'}>
         <SettingsField
-          label="Compaction prompt"
+          label={tr('Compaction prompt')}
           value={prompt()}
           change={(text) => owner.editPrompt(request, text)}
           disabled={owner.disabled()}
@@ -272,38 +281,40 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
         />
         <Button
           disabled={owner.disabled()}
-          accessibilityLabel="Use Host default"
+          accessibilityLabel={tr('Use Host default')}
           onPress={inputAction(owner.useDefault, request)}
           focusStyle={controlFocusStyle}
           style={controlStyle}
           hoverStyle={controlHoverStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...bodyTextStyle, color: C.secondary }}>Use default prompt</Text>
+          <Text style={{ ...bodyTextStyle, color: C.secondary }}>{tr('Use default prompt')}</Text>
         </Button>
       </If>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Button
           disabled={owner.disabled() || !owner.dirty()}
           onPress={inputAction(owner.save, request)}
-          accessibilityLabel="Save this preference"
+          accessibilityLabel={tr('Save this preference')}
           focusStyle={{ backgroundColor: C.accentHover }}
           style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
           hoverStyle={{ backgroundColor: C.accentHover }}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...bodyTextStyle, color: C.background, fontWeight: '500' }}>Save</Text>
+          <Text style={{ ...bodyTextStyle, color: C.background, fontWeight: '500' }}>
+            {tr('Save')}
+          </Text>
         </Button>
         <Button
           disabled={owner.busy()}
-          accessibilityLabel="Cancel"
+          accessibilityLabel={tr('Cancel')}
           onPress={inputAction(owner.cancel, request)}
           focusStyle={controlFocusStyle}
           style={controlStyle}
           hoverStyle={controlHoverStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...bodyTextStyle, color: C.secondary }}>Cancel</Text>
+          <Text style={{ ...bodyTextStyle, color: C.secondary }}>{tr('Cancel')}</Text>
         </Button>
       </View>
     </View>

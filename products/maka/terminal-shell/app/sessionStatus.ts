@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import type {
   AgentRunState,
   AgentSessionActivity,
@@ -28,10 +29,22 @@ export const sessionStatusCaption: Record<
   AgentSessionActivity | 'loading' | 'stopping' | 'failed',
   string
 > = {
-  working: 'Working',
-  waiting: 'Waiting for you',
-  loading: 'Loading session…',
-  stopping: 'Stopping…',
-  idle: 'Idle',
-  failed: 'Failed',
+  get working() {
+    return tr('Working');
+  },
+  get waiting() {
+    return tr('Waiting for you');
+  },
+  get loading() {
+    return tr('Loading session…');
+  },
+  get stopping() {
+    return tr('Stopping…');
+  },
+  get idle() {
+    return tr('Idle');
+  },
+  get failed() {
+    return tr('Failed');
+  },
 };

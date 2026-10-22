@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { UiError, errorText, renderText, type UiText } from './text';
+import { tr } from './locale';
 import { cleanup, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import type { ModelUsage, UsageModelAttempt } from '../../../../packages/plugin-sdk/src/index.js';
@@ -27,7 +29,7 @@ import { Icon } from './Icon';
 type Reading =
   | { kind: 'loading'; checked: number }
   | { kind: 'ready'; attempts: UsageModelAttempt[] }
-  | { kind: 'failed'; message: string };
+  | { kind: 'failed'; message: UiText };
 type Counter =
   | 'input_tokens'
   | 'output_tokens'
@@ -39,9 +41,10 @@ function total(attempts: UsageModelAttempt[], key: Counter): string {
   let value = 0;
   for (const attempt of attempts) {
     const next: ModelUsage[Counter] = attempt.usage[key];
-    if (typeof next !== 'number' || next < 0 || !Number.isSafeInteger(next)) return 'Unavailable';
+    if (typeof next !== 'number' || next < 0 || !Number.isSafeInteger(next))
+      return tr('Unavailable');
     value += next;
-    if (!Number.isSafeInteger(value)) return 'Unavailable';
+    if (!Number.isSafeInteger(value)) return tr('Unavailable');
   }
   return String(value);
 }
@@ -89,7 +92,7 @@ export function TurnUsage(props: {
           end > page.total ||
           (page.nextOffset == null ? end !== page.total : page.nextOffset !== end || end <= offset)
         )
-          throw new Error('The original turn usage page could not be verified.');
+          throw new UiError('The original turn usage page could not be verified.');
         expectedTotal = page.total;
         for (const activity of page.attempts) {
           if (
@@ -97,7 +100,7 @@ export function TurnUsage(props: {
             activity.attempt.sessionId !== props.sessionId ||
             seen.has(activity.attempt.requestId)
           )
-            throw new Error('The Host returned inconsistent model usage.');
+            throw new UiError('The Host returned inconsistent model usage.');
           const attempt = activity.attempt;
           seen.add(attempt.requestId);
           const origin = attempt.origin;
@@ -118,7 +121,7 @@ export function TurnUsage(props: {
       if (active())
         reading.set({
           kind: 'failed',
-          message: reason instanceof Error ? reason.message : String(reason),
+          message: errorText(reason),
         });
     }
   };
@@ -127,19 +130,19 @@ export function TurnUsage(props: {
     const result = reading();
     return result.kind === 'ready' ? result.attempts : [];
   };
-  const counters: { key: Counter; label: string }[] = [
-    { key: 'input_tokens', label: 'Input tokens' },
-    { key: 'output_tokens', label: 'Output tokens' },
-    { key: 'reasoning_tokens', label: 'Reasoning tokens' },
-    { key: 'cache_read_tokens', label: 'Cache read tokens' },
-    { key: 'cache_write_tokens', label: 'Cache write tokens' },
+  const counters = (): { key: Counter; label: string }[] => [
+    { key: 'input_tokens', label: tr('Input tokens') },
+    { key: 'output_tokens', label: tr('Output tokens') },
+    { key: 'reasoning_tokens', label: tr('Reasoning tokens') },
+    { key: 'cache_read_tokens', label: tr('Cache read tokens') },
+    { key: 'cache_write_tokens', label: tr('Cache write tokens') },
   ];
   const cost = () => {
     let value = 0;
     for (const attempt of attempts()) {
-      if (attempt.costUsd == null || !Number.isFinite(attempt.costUsd)) return 'Unavailable';
+      if (attempt.costUsd == null || !Number.isFinite(attempt.costUsd)) return tr('Unavailable');
       value += attempt.costUsd;
-      if (!Number.isFinite(value)) return 'Unavailable';
+      if (!Number.isFinite(value)) return tr('Unavailable');
     }
     return `$${value.toFixed(6)}`;
   };
@@ -172,39 +175,42 @@ export function TurnUsage(props: {
         }}
       >
         <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
-          <Text style={{ flex: 1, color: C.text, fontWeight: '700' }}>Main model usage</Text>
+          <Text style={{ flex: 1, color: C.text, fontWeight: '700' }}>
+            {tr('Main model usage')}
+          </Text>
           <Button
             ref={(node) => node.focus()}
-            accessibilityLabel="Close turn usage"
-            tooltip="Close"
+            accessibilityLabel={tr('Close turn usage')}
+            tooltip={tr('Close')}
             onPress={props.close}
             style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
           >
             <Icon name="close" color={C.secondary} />
-            <Text style={{ color: C.accent }}>Close</Text>
+            <Text style={{ color: C.accent }}>{tr('Close')}</Text>
           </Button>
         </View>
         <Scroll style={{ flexShrink: 1, minHeight: 0 }}>
           <View style={{ gap: 8 }}>
             <If when={reading().kind === 'loading'}>
               <Text style={{ color: C.muted }}>
-                Reading original usage…{' '}
-                {reading().kind === 'loading'
-                  ? (reading() as Extract<Reading, { kind: 'loading' }>).checked
-                  : 0}{' '}
-                records checked
+                {tr('Reading original usage… {count} records checked', {
+                  count:
+                    reading().kind === 'loading'
+                      ? (reading() as Extract<Reading, { kind: 'loading' }>).checked
+                      : 0,
+                })}
               </Text>
             </If>
             <If when={reading().kind === 'failed'}>
               <Text selectable style={{ color: C.danger }}>
                 {reading().kind === 'failed'
-                  ? (reading() as Extract<Reading, { kind: 'failed' }>).message
+                  ? renderText((reading() as Extract<Reading, { kind: 'failed' }>).message)
                   : ''}
               </Text>
               <Button
-                accessibilityLabel="Retry original turn usage"
+                accessibilityLabel={tr('Retry original turn usage')}
                 style={controlStyle}
                 hoverStyle={controlHoverStyle}
                 focusStyle={controlFocusStyle}
@@ -214,21 +220,26 @@ export function TurnUsage(props: {
                   through: props.through,
                 })}
               >
-                <Text style={{ color: C.accent }}>Retry</Text>
+                <Text style={{ color: C.accent }}>{tr('Retry')}</Text>
               </Button>
             </If>
             <If when={reading().kind === 'ready' && attempts().length === 0}>
               <Text style={{ color: C.muted }}>
-                No model usage is recorded for this turn in this conversation. Copied and imported
-                history does not add model charges.
+                {tr(
+                  'No model usage is recorded for this turn in this conversation. Copied and imported history does not add model charges.',
+                )}
               </Text>
             </If>
             <If when={reading().kind === 'ready' && attempts().length > 0}>
               <Text style={{ color: C.muted }}>
-                {attempts().length} main model {attempts().length === 1 ? 'request' : 'requests'} in
-                this turn
+                {tr(
+                  attempts().length === 1
+                    ? '{count} main model request in this turn'
+                    : '{count} main model requests in this turn',
+                  { count: attempts().length },
+                )}
               </Text>
-              <Each of={counters} key={(counter) => counter.key}>
+              <Each of={counters()} key={(counter) => counter.key}>
                 {(counter) => (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
                     <Text style={{ flex: 1, color: C.secondary }}>{counter().label}</Text>
@@ -239,14 +250,15 @@ export function TurnUsage(props: {
                 )}
               </Each>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-                <Text style={{ flex: 1, color: C.secondary }}>Recorded cost</Text>
+                <Text style={{ flex: 1, color: C.secondary }}>{tr('Recorded cost')}</Text>
                 <Text selectable style={{ color: C.text }}>
                   {cost()}
                 </Text>
               </View>
               <Text style={{ color: C.muted }}>
-                Missing provider counters or prices are unavailable. Auxiliary requests and tools
-                are counted separately.
+                {tr(
+                  'Missing provider counters or prices are unavailable. Auxiliary requests and tools are counted separately.',
+                )}
               </Text>
             </If>
           </View>

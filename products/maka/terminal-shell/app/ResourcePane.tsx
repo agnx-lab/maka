@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { cleanup, effect, inputAction, Scroll, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
@@ -74,7 +75,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
         <Scroll horizontal style={{ flex: 1, minWidth: 0 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Button
-              accessibilityLabel="Browse files"
+              accessibilityLabel={tr('Browse files')}
               selected={resources.active() === 'files'}
               ref={(node) => {
                 control = node;
@@ -98,11 +99,11 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                   color: resources.active() === 'files' ? C.text : C.muted,
                 }}
               >
-                Files
+                {tr('Files')}
               </Text>
             </Button>
             <Button
-              accessibilityLabel="Browse current changes"
+              accessibilityLabel={tr('Browse current changes')}
               selected={resources.active() === 'changes'}
               onPress={inputAction(resources.inventory, {
                 sessionId: resources.sessionId()!,
@@ -119,11 +120,11 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                   color: resources.active() === 'changes' ? C.text : C.muted,
                 }}
               >
-                Changes
+                {tr('Changes')}
               </Text>
             </Button>
             <Button
-              accessibilityLabel="Show conversation terminals"
+              accessibilityLabel={tr('Show conversation terminals')}
               selected={resources.active() === 'terminals'}
               onPress={inputAction(resources.inventory, {
                 sessionId: resources.sessionId()!,
@@ -143,7 +144,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                   color: resources.active() === 'terminals' ? C.text : C.muted,
                 }}
               >
-                Terminal
+                {tr('Terminal')}
               </Text>
             </Button>
             <Each of={resources.tabs()} key={(tab) => tab.instance}>
@@ -162,7 +163,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                       sessionId: tab().sessionId,
                       instance: tab().instance,
                     })}
-                    accessibilityLabel={`Preview ${tab().title}`}
+                    accessibilityLabel={tr('Preview {name}', { name: tab().title })}
                     tooltip={tab().title}
                     style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                     hoverStyle={controlHoverStyle}
@@ -196,8 +197,8 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                       sessionId: tab().sessionId,
                       instance: tab().instance,
                     })}
-                    accessibilityLabel={`Close ${tab().title}`}
-                    tooltip={`Close ${tab().title}`}
+                    accessibilityLabel={tr('Close {name}', { name: tab().title })}
+                    tooltip={tr('Close {name}', { name: tab().title })}
                     style={{
                       ...controlStyle,
                       width: 28,
@@ -217,9 +218,9 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
           </View>
         </Scroll>
         <Button
-          accessibilityLabel="Close workspace preview"
+          accessibilityLabel={tr('Close workspace preview')}
           onPress={inputAction(resources.close, closeTarget)}
-          tooltip="Close workspace preview · Esc"
+          tooltip={tr('Close workspace preview · Esc')}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -264,7 +265,7 @@ function OriginalImage(props: { image: ImagePreview; openImageViewer: OpenImageV
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <Text style={{ ...captionTextStyle, color: C.secondary, fontWeight: '500' }}>
-        Image preview
+        {tr('Image preview')}
       </Text>
       <Image
         src={props.image.uri}
@@ -276,7 +277,7 @@ function OriginalImage(props: { image: ImagePreview; openImageViewer: OpenImageV
       />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Text style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
-          {props.image.width} × {props.image.height} · Original image
+          {props.image.width} × {props.image.height} · {tr('Original image')}
         </Text>
         <ImageViewerButton
           open={props.openImageViewer}
@@ -284,7 +285,7 @@ function OriginalImage(props: { image: ImagePreview; openImageViewer: OpenImageV
             uri: props.image.uri,
             width: props.image.width,
             height: props.image.height,
-            title: 'Original image',
+            title: tr('Original image'),
           }}
         />
       </View>

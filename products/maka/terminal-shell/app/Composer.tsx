@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { cleanup, effect, Input, inputAction, signal, Text, View } from 'nsh';
 import type { JSX, YNode } from 'nsh';
 import { Image } from 'nsh/image';
@@ -89,7 +90,7 @@ export function Composer(props: {
     !!blocked() ||
     (!props.session()?.draft().trim() && !props.session()?.attachments.files().length);
   const sendLabel = () =>
-    props.session()?.invocation() != null ? 'Queue message' : 'Send message';
+    props.session()?.invocation() != null ? tr('Queue message') : tr('Send message');
   const primaryStops = () => props.session()?.invocation() != null && cannotSend();
   let unbind = () => {};
   cleanup(() => unbind());
@@ -106,7 +107,7 @@ export function Composer(props: {
           .split(path.startsWith('/') ? '/' : /[\\/]/)
           .filter(Boolean)
           .at(-1) ?? path)
-      : 'Choose workspace';
+      : tr('Choose workspace');
   };
   return (
     <View
@@ -147,7 +148,7 @@ export function Composer(props: {
                   fontWeight: '500',
                 }}
               >
-                Make something remarkable.
+                {tr('Make something remarkable.')}
               </Text>
             </View>
             <View
@@ -160,8 +161,8 @@ export function Composer(props: {
               }}
             >
               <Button
-                accessibilityLabel="Choose composer workspace"
-                tooltip={props.session()?.workspace() || 'Choose workspace'}
+                accessibilityLabel={tr('Choose composer workspace')}
+                tooltip={props.session()?.workspace() || tr('Choose workspace')}
                 onPress={props.chooseWorkspace}
                 style={{
                   ...controlStyle,
@@ -182,13 +183,13 @@ export function Composer(props: {
                 <Icon name="down" color={C.secondary} />
               </Button>
               <Button
-                accessibilityLabel="Connections & models"
+                accessibilityLabel={tr('Connections & models')}
                 onPress={props.settings}
                 style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                 hoverStyle={{ backgroundColor: C.surface }}
                 focusStyle={{ backgroundColor: C.raised }}
               >
-                <Text style={{ color: C.muted, fontSize: 13 }}>Connections & models</Text>
+                <Text style={{ color: C.muted, fontSize: 13 }}>{tr('Connections & models')}</Text>
               </Button>
             </View>
           </View>
@@ -228,8 +229,8 @@ export function Composer(props: {
                   >
                     <Text style={{ color: C.warning }}>
                       {owner.recovering()
-                        ? 'Reading original receipts…'
-                        : 'Recover original send receipt'}
+                        ? tr('Reading original receipts…')
+                        : tr('Recover original send receipt')}
                     </Text>
                   </Button>
                 </If>
@@ -243,7 +244,7 @@ export function Composer(props: {
                       focusStyle={{ backgroundColor: C.line }}
                     >
                       <Text style={{ color: C.warning }}>
-                        Abandon unconfirmed send · {id().slice(0, 8)}
+                        {tr('Abandon unconfirmed send')} · {id().slice(0, 8)}
                       </Text>
                     </Button>
                   )}
@@ -269,7 +270,7 @@ export function Composer(props: {
               { when: 'always', within: node },
             );
           }}
-          accessibilityLabel="Conversation composer"
+          accessibilityLabel={tr('Conversation composer')}
           style={{
             flexShrink: 0,
             backgroundColor: C.raised,
@@ -302,7 +303,9 @@ export function Composer(props: {
                   <View
                     role="button"
                     accessibilityLabel={
-                      owner ? 'Focus message composer' : 'Choose workspace from composer card'
+                      owner
+                        ? tr('Focus message composer')
+                        : tr('Choose workspace from composer card')
                     }
                     focusable={owner === null}
                     disabled={owner !== null && !owner.editable()}
@@ -324,7 +327,7 @@ export function Composer(props: {
                         props.attach(node);
                       }}
                       testID="message"
-                      accessibilityLabel="Message composer"
+                      accessibilityLabel={tr('Message composer')}
                       autoFocus={owner !== null}
                       pointerEvents={owner ? 'auto' : 'none'}
                       multiline
@@ -334,7 +337,7 @@ export function Composer(props: {
                       onChange={owner?.changeDraft}
                       onSubmit={owner?.submit}
                       placeholder={
-                        owner ? 'Message or run a task…' : 'Choose a workspace to begin…'
+                        owner ? tr('Message or run a task…') : tr('Choose a workspace to begin…')
                       }
                       style={{
                         minHeight: hero() && !compact() ? 40 : 24,
@@ -357,8 +360,8 @@ export function Composer(props: {
               onPress={inputAction(props.commands, {
                 sessionId: props.session()?.sessionId ?? null,
               })}
-              accessibilityLabel="Open commands"
-              tooltip="Commands · Ctrl+P"
+              accessibilityLabel={tr('Open commands')}
+              tooltip={tr('Commands · Ctrl+P')}
               style={{
                 width: 32,
                 height: 32,
@@ -374,8 +377,8 @@ export function Composer(props: {
             </Button>
             <If when={props.session() !== null}>
               <Button
-                accessibilityLabel="Attach files"
-                tooltip="Attach files · Ctrl+U"
+                accessibilityLabel={tr('Attach files')}
+                tooltip={tr('Attach files · Ctrl+U')}
                 disabled={props.session()!.attachments.restoring()}
                 onPress={inputAction(props.session()!.attachments.open, {
                   owner: props.session()!.sessionId,
@@ -411,8 +414,8 @@ export function Composer(props: {
               <View pointerEvents="none" style={{ flex: 1 }} />
             </If>
             <Button
-              accessibilityLabel={primaryStops() ? 'Stop response' : sendLabel()}
-              tooltip={primaryStops() ? 'Stop response · Esc' : `${sendLabel()} · Enter`}
+              accessibilityLabel={primaryStops() ? tr('Stop response') : sendLabel()}
+              tooltip={primaryStops() ? tr('Stop response · Esc') : `${sendLabel()} · Enter`}
               disabled={primaryStops() ? props.session()!.stopping() : cannotSend()}
               onPress={
                 primaryStops()

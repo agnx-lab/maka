@@ -19,6 +19,7 @@
 
 import { inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
+import { tr } from './locale';
 import type { ProxyProtocol } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { SettingsField } from './SettingsField';
 import { ChoiceIndicator } from './ChoiceIndicator';
@@ -41,18 +42,18 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <If when={owner.loading()}>
-        <Text style={{ ...bodyTextStyle, color: C.muted }}>Loading network settings…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Loading network settings…')}</Text>
       </If>
       <If when={owner.draft() && owner.snapshot()}>
         <Scroll style={{ flex: 1, minHeight: 0 }}>
           <View style={{ gap: 12, padding: 8 }}>
             <Text style={{ ...captionTextStyle, color: C.muted }}>
-              Applies to new requests. Requests already running keep their settings.
+              {tr('Applies to new requests. Requests already running keep their settings.')}
             </Text>
             <Button
               disabled={disabled()}
               selected={value().proxy.enabled}
-              accessibilityLabel="Enable Host proxy"
+              accessibilityLabel={tr('Enable Host proxy')}
               onPress={inputAction(owner.choose, {
                 ...owner.action(),
                 kind: 'enabled',
@@ -69,7 +70,7 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>Proxy</Text>
+              <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>{tr('Proxy')}</Text>
               <ChoiceIndicator
                 kind="switch"
                 checked={value().proxy.enabled}
@@ -82,7 +83,7 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                   <Button
                     disabled={disabled()}
                     selected={value().proxy.protocol === protocol()}
-                    accessibilityLabel={`Proxy protocol ${protocol()}`}
+                    accessibilityLabel={tr('Proxy protocol {protocol}', { protocol: protocol() })}
                     onPress={inputAction(owner.choose, {
                       ...owner.action(),
                       kind: 'protocol',
@@ -111,14 +112,14 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               </Each>
             </View>
             <SettingsField
-              label="Proxy host"
+              label={tr('Proxy host')}
               value={value().proxy.host}
               disabled={disabled()}
               change={(text) => owner.edit('host', text)}
-              hint="Hostname or IP address; enter the port separately."
+              hint={tr('Hostname or IP address; enter the port separately.')}
             />
             <SettingsField
-              label="Proxy port"
+              label={tr('Proxy port')}
               value={value().port}
               disabled={disabled()}
               change={(text) => owner.edit('port', text)}
@@ -126,7 +127,7 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
             <Button
               disabled={disabled()}
               selected={value().proxy.authEnabled}
-              accessibilityLabel="Enable proxy authentication"
+              accessibilityLabel={tr('Enable proxy authentication')}
               onPress={inputAction(owner.choose, {
                 ...owner.action(),
                 kind: 'authentication',
@@ -143,7 +144,9 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>Proxy authentication</Text>
+              <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>
+                {tr('Proxy authentication')}
+              </Text>
               <ChoiceIndicator
                 kind="switch"
                 checked={value().proxy.authEnabled}
@@ -151,11 +154,11 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               />
             </Button>
             <Text style={{ ...captionTextStyle, color: C.muted }}>
-              Saving with proxy authentication disabled deletes its stored password.
+              {tr('Saving with proxy authentication disabled deletes its stored password.')}
             </Text>
             <If when={value().proxy.authEnabled}>
               <SettingsField
-                label="Proxy username"
+                label={tr('Proxy username')}
                 value={value().proxy.username}
                 disabled={disabled()}
                 change={(text) => owner.edit('username', text)}
@@ -164,7 +167,7 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                 <Button
                   disabled={disabled()}
                   selected={value().credential === 'keep'}
-                  accessibilityLabel="Keep proxy password"
+                  accessibilityLabel={tr('Keep proxy password')}
                   onPress={inputAction(owner.choose, {
                     ...owner.action(),
                     kind: 'credential',
@@ -187,12 +190,14 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                     checked={value().credential === 'keep'}
                     disabled={disabled()}
                   />
-                  <Text style={{ ...bodyTextStyle, color: C.text }}>Keep stored password</Text>
+                  <Text style={{ ...bodyTextStyle, color: C.text }}>
+                    {tr('Keep stored password')}
+                  </Text>
                 </Button>
                 <Button
                   disabled={disabled()}
                   selected={value().credential === 'replace'}
-                  accessibilityLabel="Replace proxy password"
+                  accessibilityLabel={tr('Replace proxy password')}
                   onPress={inputAction(owner.choose, {
                     ...owner.action(),
                     kind: 'credential',
@@ -215,41 +220,43 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                     checked={value().credential === 'replace'}
                     disabled={disabled()}
                   />
-                  <Text style={{ ...bodyTextStyle, color: C.text }}>Replace password</Text>
+                  <Text style={{ ...bodyTextStyle, color: C.text }}>{tr('Replace password')}</Text>
                 </Button>
               </View>
               <Text style={{ ...captionTextStyle, color: C.muted }}>
                 {owner.snapshot()?.credential.configured
-                  ? 'A proxy password is stored. Its value is never read back.'
-                  : 'No proxy password is stored.'}
+                  ? tr('A proxy password is stored. Its value is never read back.')
+                  : tr('No proxy password is stored.')}
               </Text>
               <If when={value().credential === 'replace'}>
                 <SettingsField
-                  label="Proxy password"
+                  label={tr('Proxy password')}
                   value={value().secret}
                   masked
                   disabled={disabled()}
                   change={(text) => owner.edit('secret', text)}
-                  hint="Stored securely, separately from your proxy settings."
+                  hint={tr('Stored securely, separately from your proxy settings.')}
                 />
               </If>
             </If>
             <SettingsField
-              label="Proxy bypass rules"
+              label={tr('Proxy bypass rules')}
               value={value().bypass}
               multiline
               disabled={disabled()}
               change={(text) => owner.edit('bypass', text)}
-              hint="One bypass rule per line. Automatic rules are retained."
+              hint={tr('One bypass rule per line. Automatic rules are retained.')}
             />
             <If when={owner.snapshot()!.proxy.autoBypassDomains.length > 0}>
               <Text style={{ ...captionTextStyle, color: C.muted }}>
-                Automatic bypass: {owner.snapshot()!.proxy.autoBypassDomains.join(', ')}
+                {tr('Automatic bypass: {domains}', {
+                  domains: owner.snapshot()!.proxy.autoBypassDomains.join(', '),
+                })}
               </Text>
             </If>
             <Button
               disabled={disabled()}
-              accessibilityLabel="Save network settings"
+              accessibilityLabel={tr('Save network settings')}
               onPress={inputAction(owner.save, owner.action())}
               style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
               hoverStyle={{ backgroundColor: C.accentHover }}
@@ -257,33 +264,37 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               disabledStyle={controlDisabledStyle}
             >
               <Text style={{ ...bodyTextStyle, color: C.background, fontWeight: '500' }}>
-                Save network settings
+                {tr('Save network settings')}
               </Text>
             </Button>
             <Button
               disabled={disabled()}
-              accessibilityLabel="Reload network settings"
+              accessibilityLabel={tr('Reload network settings')}
               onPress={inputAction(owner.reload, owner.action())}
               style={{ ...controlStyle, alignSelf: 'flex-start' }}
               hoverStyle={controlHoverStyle}
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ ...bodyTextStyle, color: C.secondary }}>Discard edits and reload</Text>
+              <Text style={{ ...bodyTextStyle, color: C.secondary }}>
+                {tr('Discard edits and reload')}
+              </Text>
             </Button>
           </View>
         </Scroll>
       </If>
       <If when={!owner.draft() && !owner.loading()}>
         <Button
-          accessibilityLabel="Reload network settings"
+          accessibilityLabel={tr('Reload network settings')}
           onPress={inputAction(owner.reload, owner.action())}
           style={{ ...controlStyle, alignSelf: 'flex-start' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...bodyTextStyle, color: C.secondary }}>Reload network settings</Text>
+          <Text style={{ ...bodyTextStyle, color: C.secondary }}>
+            {tr('Reload network settings')}
+          </Text>
         </Button>
       </If>
     </View>

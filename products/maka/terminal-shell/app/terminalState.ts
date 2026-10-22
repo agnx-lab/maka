@@ -17,10 +17,12 @@
  * under the License.
  */
 
+import { errorText, renderText, UiError } from './text';
 import { cleanup, effect, signal, untracked } from 'nsh';
 import { TerminalGrid } from 'maka/host';
 import { host, terminalMutation, pendingTerminals, recoverTerminal, abandonTerminal } from './host';
 import type { ScopedHost } from './host';
+import { tr } from './locale';
 import type {
   ClientOperation,
   OperationReply,
@@ -31,7 +33,24 @@ import type {
 
 type Stream<T> = { next(): Promise<T | null>; close(): Promise<void> };
 type Watch<T> = { closed: boolean; stream: Stream<T> | null };
-const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
+export function terminalStatus(status: ResourceUpdate['result']['status']): string {
+  switch (status) {
+    case 'starting':
+      return tr('starting');
+    case 'running':
+      return tr('running');
+    case 'completed':
+      return tr('completed');
+    case 'failed':
+      return tr('failed');
+    case 'timed_out':
+      return tr('timed_out');
+    case 'cancelled':
+      return tr('cancelled');
+    case 'orphaned':
+      return tr('orphaned');
+  }
+}
 export function completed<T>(
   outcome: { kind: 'completed'; value: T } | { kind: 'failed'; message: string },
 ): T {
@@ -54,7 +73,7 @@ export function createTerminals(options: {
   open(entry: ResourceUpdate, model: TerminalModel): void;
 }) {
   const entries = signal<ResourceUpdate[]>([]);
-  const error = signal('');
+  const error = signal<unknown>('');
   const loading = signal(false);
   const starting = signal(false);
   const pending = signal<ClientOperation[]>([]);
@@ -85,7 +104,7 @@ export function createTerminals(options: {
       method !== 'release' &&
       (!owns(owner.sessionId) || scope !== owner || !known() || pending().length)
     )
-      throw new Error('Recover the unresolved terminal action before sending new input.');
+      throw new UiError('Recover the unresolved terminal action before sending new input.');
     try {
       return await terminalMutation(owner, method, input);
     } catch (reason) {
@@ -95,7 +114,7 @@ export function createTerminals(options: {
         } catch (failure) {
           if (owns(owner.sessionId) && scope === owner) {
             known.set(false);
-            error.set(message(failure));
+            error.set(failure);
           }
         }
       }
@@ -140,7 +159,7 @@ export function createTerminals(options: {
         for (;;) {
           const outcome = await opened.next();
           if (!current()) return;
-          if (!outcome) throw new Error('The Host closed the terminal list.');
+          if (!outcome) throw new UiError('The Host closed the terminal list.');
           const page = completed(outcome);
           const resources = [...page.resources];
           for (let offset = page.nextOffset ?? null; offset !== null; ) {
@@ -156,7 +175,7 @@ export function createTerminals(options: {
         }
       } catch (reason) {
         if (current()) {
-          error.set(message(reason));
+          error.set(reason);
           loading.set(false);
         }
       } finally {
@@ -197,7 +216,7 @@ export function createTerminals(options: {
       const owner = scope;
       if (selected && owner)
         void refreshPending(selected, owner).catch((reason) => {
-          if (owns(selected) && scope === owner) error.set(message(reason));
+          if (owns(selected) && scope === owner) error.set(reason);
         });
     });
   });
@@ -218,7 +237,7 @@ export function createTerminals(options: {
     const selected = sessionId;
     const owner = scope;
     void refreshPending(selected, owner).catch((reason) => {
-      if (owns(selected) && scope === owner) error.set(message(reason));
+      if (owns(selected) && scope === owner) error.set(reason);
     });
     if (options.active()) follow(selected);
   };
@@ -237,7 +256,7 @@ export function createTerminals(options: {
       accept([...entries().filter((item) => item.result.ref !== entry.result.ref), entry]);
       open(entry);
     } catch (reason) {
-      if (owns(selected) && scope === owner) error.set(message(reason));
+      if (owns(selected) && scope === owner) error.set(reason);
     } finally {
       if (owns(selected) && scope === owner) starting.set(false);
     }
@@ -258,12 +277,12 @@ export function createTerminals(options: {
       else {
         const reply: OperationReply = await recoverTerminal(owner, target.id);
         if (reply.receipt.kind !== 'recorded' || reply.receipt.outcome.kind !== 'returned')
-          throw new Error('The original terminal result is still unknown. It was not repeated.');
+          throw new UiError('The original terminal result is still unknown. It was not repeated.');
       }
       await refreshPending(target.sessionId, owner);
       if (owns(target.sessionId) && scope === owner && options.active()) follow(target.sessionId);
     } catch (reason) {
-      if (owns(target.sessionId) && scope === owner) error.set(message(reason));
+      if (owns(target.sessionId) && scope === owner) error.set(reason);
     } finally {
       if (owns(target.sessionId) && scope === owner) recovering.set(false);
     }
@@ -276,7 +295,7 @@ export function createTerminals(options: {
   });
   return {
     entries,
-    error,
+    error: () => renderText(errorText(error())),
     loading,
     starting,
     pending,
@@ -301,7 +320,7 @@ function createTerminal(
   const entry = signal(initial);
   const version = signal(0);
   const state = signal<'idle' | 'loading' | 'live' | 'closed' | 'unavailable' | 'failed'>('idle');
-  const error = signal('');
+  const error = signal<unknown>('');
   const control = signal<'none' | 'acquiring' | 'held' | 'refused'>('none');
   const stopping = signal(false);
   const grid = new TerminalGrid(DEFAULT_SIZE);
@@ -341,7 +360,7 @@ function createTerminal(
         if (previous.held && previous.id)
           completed(await hooks.mutate(scope, 'release', { target, controllerId: previous.id }));
       } catch (reason) {
-        if (alive) error.set(message(reason));
+        if (alive) error.set(reason);
       } finally {
         stop(previous);
       }
@@ -349,7 +368,7 @@ function createTerminal(
   };
   const fail = (reason: unknown) => {
     if (!alive || !active) return;
-    error.set(message(reason));
+    error.set(reason);
     state.set('failed');
     release();
   };
@@ -376,7 +395,7 @@ function createTerminal(
         await opened.close();
         run.stream = null;
         if (!alive || !active || run.closed || retained !== run) return;
-        if (!installed) throw new Error('The retained terminal display did not complete.');
+        if (!installed) throw new UiError('The retained terminal display did not complete.');
         version.set(version() + 1);
         state.set('closed');
       } catch (reason) {
@@ -404,7 +423,7 @@ function createTerminal(
         for (;;) {
           const value = await opened.next();
           if (!alive || !active || run.closed || observing !== run) return;
-          if (!value) throw new Error('The Host closed the terminal resource observation.');
+          if (!value) throw new UiError('The Host closed the terminal resource observation.');
           entry.set(completed(value));
           if (state() === 'unavailable' && !running(entry())) snapshot();
         }
@@ -443,7 +462,7 @@ function createTerminal(
         for (;;) {
           const value = await opened.next();
           if (!alive || !active || run.closed || reading !== run) return;
-          if (!value) throw new Error('The Host closed output without an end marker.');
+          if (!value) throw new UiError('The Host closed output without an end marker.');
           const event = completed(value);
           const applied = grid.apply(event) as { after: number; status: string };
           after = applied.after;
@@ -506,7 +525,7 @@ function createTerminal(
       if (lease === owner && !owner.closed) {
         release();
         control.set('refused');
-        error.set(message(reason));
+        error.set(reason);
       }
     } finally {
       sending = false;
@@ -535,10 +554,10 @@ function createTerminal(
       for (;;) {
         const outcome = await opened.next();
         if (lease !== owner || owner.closed) return;
-        if (!outcome) throw new Error('Terminal input control was released by the Host.');
+        if (!outcome) throw new UiError('Terminal input control was released by the Host.');
         const held = completed(outcome);
         if (!held.held || held.nextSequence == null)
-          throw new Error('Another controller owns this terminal.');
+          throw new UiError('Another controller owns this terminal.');
         owner.id = held.controllerId;
         owner.next = held.nextSequence;
         owner.held = true;
@@ -550,7 +569,7 @@ function createTerminal(
       if (lease === owner && !owner.closed) {
         release();
         control.set('refused');
-        error.set(message(reason));
+        error.set(reason);
       }
     } finally {
       stop(owner);
@@ -597,7 +616,7 @@ function createTerminal(
     version,
     grid,
     state,
-    error,
+    error: () => renderText(errorText(error())),
     control,
     stopping,
     running: () => running(entry()),
@@ -653,7 +672,7 @@ function createTerminal(
         release();
       } catch (reason) {
         if (alive) {
-          error.set(message(reason));
+          error.set(reason);
           release();
         }
       } finally {

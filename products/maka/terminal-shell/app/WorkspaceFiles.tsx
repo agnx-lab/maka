@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { cleanup, effect, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -59,7 +60,7 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
               {(directory, index) => (
                 <Button
                   disabled={!model.active()}
-                  accessibilityLabel={`Open ${directory().title}`}
+                  accessibilityLabel={tr('Open {name}', { name: directory().title })}
                   onPress={inputAction(model.navigate, {
                     sessionId: model.sessionId()!,
                     path: directory().path,
@@ -92,9 +93,9 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
         </Scroll>
         <Button
           disabled={!model.active() || model.busy()}
-          accessibilityLabel="Refresh workspace files"
+          accessibilityLabel={tr('Refresh workspace files')}
           onPress={inputAction(model.refresh, null)}
-          tooltip="Refresh workspace files"
+          tooltip={tr('Refresh workspace files')}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -143,7 +144,7 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
               onLoadMore={() => {
                 if (ownsView()) void model.loadMore();
               }}
-              accessibilityLabel="Workspace files"
+              accessibilityLabel={tr('Workspace files')}
               style={{ flex: 1, minHeight: 32 }}
               empty={<DirectoryStatus model={model} />}
               footer={model.entries().length ? <DirectoryStatus model={model} /> : undefined}
@@ -155,7 +156,7 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
                     !!model.error() ||
                     (entry().kind !== 'directory' && entry().kind !== 'file')
                   }
-                  accessibilityLabel={`${entry().kind}: ${label(entry().path)}`}
+                  accessibilityLabel={`${entry().kind === 'directory' ? tr('Folder') : entry().kind === 'file' ? tr('File') : entry().kind === 'symlink' ? tr('Symbolic link') : tr('Unsupported')}: ${label(entry().path)}`}
                   onPress={inputAction(model.activate, {
                     sessionId: sessionId!,
                     parent: directory,
@@ -188,7 +189,7 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
                   </Text>
                   <If when={entry().kind === 'symlink' || entry().kind === 'other'}>
                     <Text style={{ ...captionTextStyle, color: C.muted }}>
-                      {entry().kind === 'symlink' ? 'Link' : 'Unsupported'}
+                      {entry().kind === 'symlink' ? tr('Link') : tr('Unsupported')}
                     </Text>
                   </If>
                 </Button>
@@ -205,10 +206,10 @@ function DirectoryStatus(props: { model: WorkspaceFilesModel }) {
   const model = props.model;
   const message = () => {
     if (model.error()) return model.error();
-    if (!model.sessionId()) return 'Select a conversation to browse its workspace.';
-    if (model.loading() || (model.busy() && !model.entries().length)) return 'Loading files…';
-    if (model.busy()) return 'Updating files…';
-    return model.entries().length ? '' : 'This directory is empty.';
+    if (!model.sessionId()) return tr('Select a conversation to browse its workspace.');
+    if (model.loading() || (model.busy() && !model.entries().length)) return tr('Loading files…');
+    if (model.busy()) return tr('Updating files…');
+    return model.entries().length ? '' : tr('This directory is empty.');
   };
   return (
     <If when={message()}>
@@ -221,7 +222,7 @@ function DirectoryStatus(props: { model: WorkspaceFilesModel }) {
         </Text>
         <If when={model.error()}>
           <Button
-            accessibilityLabel="Retry workspace files"
+            accessibilityLabel={tr('Retry workspace files')}
             disabled={!model.active() || model.busy()}
             onPress={inputAction(model.refresh, null)}
             style={{
@@ -236,7 +237,7 @@ function DirectoryStatus(props: { model: WorkspaceFilesModel }) {
             disabledStyle={controlDisabledStyle}
           >
             <Icon name="refresh" color={C.secondary} />
-            <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry</Text>
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Retry')}</Text>
           </Button>
         </If>
       </View>

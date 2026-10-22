@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { createText } from './text';
 import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
@@ -25,6 +26,7 @@ import type { YNode } from 'nsh';
 import { C, captionTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 import { immutableAsset } from './immutableAsset';
+import { tr } from './locale';
 import type {
   AgentToolImageRead,
   AgentAttachmentImageRead,
@@ -55,7 +57,7 @@ export function ImageThumbnail(props: {
       : immutableAsset('attachment-image', source.read);
   const action = Object.freeze({ sessionId: source.read.sessionId, uri });
   const size = signal<{ width: number; height: number } | null>(null);
-  const error = signal('');
+  const error = createText();
   const attempt = signal(0);
   let alive = true;
   let button: YNode | undefined;
@@ -96,15 +98,15 @@ export function ImageThumbnail(props: {
         ref={(node) => {
           button = node;
         }}
-        accessibilityLabel={props.label ?? 'Open image preview'}
+        accessibilityLabel={props.label ?? tr('Open image preview')}
         tooltip={
           props.compact
-            ? `${props.tooltip ?? props.label ?? 'Open image preview'}\n${
+            ? `${props.tooltip ?? props.label ?? tr('Open image preview')}\n${
                 size()
                   ? `${size()!.width} × ${size()!.height}`
                   : error()
-                    ? 'Image unavailable'
-                    : 'Loading image…'
+                    ? tr('Image unavailable')
+                    : tr('Loading image…')
               }`
             : undefined
         }
@@ -136,10 +138,13 @@ export function ImageThumbnail(props: {
         <If when={!props.compact}>
           <Text style={{ ...captionTextStyle, color: size() ? C.accent : C.muted }}>
             {size()
-              ? `Open image · ${size()!.width} × ${size()!.height}`
+              ? tr('Open image · {width} × {height}', {
+                  width: size()!.width,
+                  height: size()!.height,
+                })
               : error()
-                ? 'Image unavailable'
-                : 'Loading image…'}
+                ? tr('Image unavailable')
+                : tr('Loading image…')}
           </Text>
         </If>
         <Each of={[attempt()]} key={(value: number) => value}>
@@ -193,9 +198,9 @@ export function ImageThumbnail(props: {
         >
           <If when={props.compact}>
             <Text selectable style={{ ...captionTextStyle, color: C.text }}>
-              {props.tooltip ?? props.label ?? 'Image'}
+              {props.tooltip ?? props.label ?? tr('Image')}
             </Text>
-            <Text style={{ ...captionTextStyle, color: C.danger }}>Image unavailable</Text>
+            <Text style={{ ...captionTextStyle, color: C.danger }}>{tr('Image unavailable')}</Text>
           </If>
           <Text selectable style={{ color: C.danger }}>
             {error()}
@@ -206,7 +211,7 @@ export function ImageThumbnail(props: {
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.line }}
           >
-            <Text style={{ color: C.accent }}>Retry image</Text>
+            <Text style={{ color: C.accent }}>{tr('Retry image')}</Text>
           </Button>
         </View>
       </If>

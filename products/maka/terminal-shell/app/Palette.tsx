@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { cleanup, computed, Input, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { List } from 'nsh/list';
@@ -103,11 +104,11 @@ export function Palette(props: {
           style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
         >
           <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>
-            Commands
+            {tr('Commands')}
           </Text>
           <Button
-            accessibilityLabel="Close commands"
-            tooltip="Close · Esc"
+            accessibilityLabel={tr('Close commands')}
+            tooltip={tr('Close · Esc')}
             onPress={inputAction(props.close, props.instance)}
             style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
             hoverStyle={controlHoverStyle}
@@ -128,7 +129,7 @@ export function Palette(props: {
             removeSearchKeys = () => unbind.forEach((remove) => remove());
           }}
           testID="palette-search"
-          accessibilityLabel="Search commands"
+          accessibilityLabel={tr('Search commands')}
           autoFocus
           value={query()}
           onChange={(text) => {
@@ -136,7 +137,7 @@ export function Palette(props: {
             query.set(text);
             list?.scrollToIndex({ index: 0, animated: false });
           }}
-          placeholder="Search commands…"
+          placeholder={tr('Search commands…')}
           style={{
             placeholderColor: C.muted,
             color: C.text,
@@ -154,7 +155,7 @@ export function Palette(props: {
           }}
           estimatedItemSize={48}
           style={{ height: Math.max(1, ids().length) * 48, flexShrink: 1, minHeight: 0 }}
-          empty={<Text style={{ color: C.muted }}>No matches.</Text>}
+          empty={<Text style={{ color: C.muted }}>{tr('No matches.')}</Text>}
         >
           {(id) => (
             <Each of={[id()]} key={(key: string) => key}>

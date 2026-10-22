@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { createText, errorText, UiError } from './text';
 import { batch, cleanup, signal } from 'nsh';
 import { host } from './host';
 import type {
@@ -71,7 +72,6 @@ type CatalogRead = {
   ready(): void;
 };
 
-const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
 const uniqueSessions = (items: BrowserSession[]) => [
   ...new Map(items.map((session) => [session.id, session])).values(),
 ];
@@ -85,8 +85,8 @@ export function createBrowsing(): Browsing {
   const sessions = signal<BrowserSession[]>([]);
   const projects = signal<BrowserProject[]>([]);
   const loading = signal(true);
-  const error = signal('');
-  const projectError = signal('');
+  const error = createText();
+  const projectError = createText();
   let alive = true;
   let current: CatalogRead | null = null;
   let page: SessionPage | null = null;
@@ -111,7 +111,7 @@ export function createBrowsing(): Browsing {
     });
     sameRevision(next, previous.revision);
     if (next.after === previous.after)
-      throw new Error('Conversation paging did not advance. Refresh to continue.');
+      throw new UiError('Conversation paging did not advance. Refresh to continue.');
     return next;
   };
   const close = (read: CatalogRead | null) => {
@@ -168,7 +168,7 @@ export function createBrowsing(): Browsing {
       for (;;) {
         const next = await opened.next();
         if (!owns(read)) return;
-        if (next === null) throw new Error('Conversation updates ended. Refresh to reconnect.');
+        if (next === null) throw new UiError('Conversation updates ended. Refresh to reconnect.');
         if (page?.revision === next.revision) continue;
         // Preserve the requested read range, never append across revisions.
         // The old snapshot stays mounted while this revision is assembled.
@@ -202,7 +202,7 @@ export function createBrowsing(): Browsing {
           if (!owns(read)) return;
           // Subscription-before-read guarantees a newer catalog window for
           // this conflict. Keep the gate until it arrives, without retry IO.
-          if (message(reason) === 'agent_catalog_changed') continue;
+          if (errorText(reason) === 'agent_catalog_changed') continue;
           throw reason;
         }
         const snapshot = [...rows.values()];
@@ -223,7 +223,7 @@ export function createBrowsing(): Browsing {
         page = null;
         continuation = null;
         batch(() => {
-          error.set(message(reason));
+          error.set(errorText(reason));
           loading.set(false);
         });
       })
@@ -255,11 +255,11 @@ export function createBrowsing(): Browsing {
       sessions.set(snapshot);
     } catch (reason) {
       if (!owns(read) || continuation !== original) return;
-      if (message(reason) === 'agent_catalog_changed') {
+      if (errorText(reason) === 'agent_catalog_changed') {
         waitForCatalog = true;
         return;
       }
-      error.set(message(reason));
+      error.set(errorText(reason));
     } finally {
       if (owns(read) && continuation === original) {
         if (!waitForCatalog) continuation = null;
@@ -285,11 +285,11 @@ export function createBrowsing(): Browsing {
           } satisfies AgentProjectsRead);
           if (!alive || projectRead !== reading) return;
           if (next.kind === 'changed') break;
-          if (next.kind !== 'projects') throw new Error('Projects are unavailable.');
+          if (next.kind !== 'projects') throw new UiError('Projects are unavailable.');
           if (cursor && next.revision !== cursor.revision)
-            throw new Error('The project list changed between pages. Refresh to try again.');
+            throw new UiError('The project list changed between pages. Refresh to try again.');
           if (cursor && next.next?.after === cursor.after)
-            throw new Error('Project paging did not advance. Refresh to try again.');
+            throw new UiError('Project paging did not advance. Refresh to try again.');
           items.push(...next.projects);
           cursor = next.next;
           if (cursor === null) {
@@ -298,9 +298,9 @@ export function createBrowsing(): Browsing {
           }
         }
       }
-      throw new Error('Projects changed while reading. Refresh to try again.');
+      throw new UiError('Projects changed while reading. Refresh to try again.');
     } catch (reason) {
-      if (alive && projectRead === reading) projectError.set(message(reason));
+      if (alive && projectRead === reading) projectError.set(errorText(reason));
     }
   };
 

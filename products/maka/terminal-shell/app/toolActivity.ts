@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+import { displayText, tr } from './locale';
+import type { DisplayText } from '../../../../packages/plugin-sdk/src/index.js';
 
 // Display-only source observations. No preview is parsed or used to authorize a tool.
 export type ToolActivity = {
@@ -25,7 +27,7 @@ export type ToolActivity = {
   stepId?: string;
   startSequence: number;
   name: string;
-  title?: string;
+  title?: DisplayText;
   source: 'native' | 'provider' | 'executor';
   phase: 'preparing' | 'running';
   inputReady: boolean;
@@ -86,7 +88,7 @@ export function updateToolActivity(active: ToolActivity[], event: Delivery): Too
         source: 'native',
         phase: 'running',
         name: snippet(fact.name),
-        title: fact.title?.fallback ? snippet(fact.title.fallback) : undefined,
+        title: fact.title,
       };
       break;
     case 'executor_tool_start':
@@ -144,9 +146,9 @@ export function latestToolActivity(
 export function toolActivitySummary(tool: ToolActivity): string {
   const detail = tool.detail.replace(/\s+/g, ' ').trim();
   return [
-    tool.phase === 'preparing' ? 'Preparing tool' : 'Running tool',
+    tool.phase === 'preparing' ? tr('Preparing tool') : tr('Running tool'),
     tool.name,
-    tool.title,
+    tool.title ? snippet(displayText(tool.title)) : undefined,
     detail,
   ]
     .filter(Boolean)

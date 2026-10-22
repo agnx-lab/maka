@@ -17,6 +17,9 @@
  * under the License.
  */
 
+import { tr } from './locale';
+import type { UiText } from './text';
+
 export type ModelBackend = {
   connectionId: string;
   modelId: string;
@@ -32,7 +35,7 @@ export type ModelChoice = {
 };
 export type ModelDetails =
   | { kind: 'loading' }
-  | { kind: 'unavailable'; message: string }
+  | { kind: 'unavailable'; message: UiText }
   | { kind: 'ready'; choice: ModelChoice };
 
 type ModelRoute = Pick<ModelBackend, 'connectionId' | 'modelId'>;
@@ -42,10 +45,12 @@ export const sameRoute = (left: ModelRoute | null, right: ModelRoute | null): bo
     : left.connectionId === right.connectionId && left.modelId === right.modelId;
 
 export function modelCaption(backend: BackendIdentity, details: ModelDetails): string {
-  if (backend === null) return 'Choose a model';
+  if (backend === null) return tr('Choose a model');
   if (details.kind === 'ready' && sameRoute(backend, details.choice.selection))
     return details.choice.label;
-  return details.kind === 'unavailable' ? `${backend.modelId} · Unavailable` : backend.modelId;
+  return details.kind === 'unavailable'
+    ? tr('{model} · Unavailable', { model: backend.modelId })
+    : backend.modelId;
 }
 
 export function effortCaption(backend: BackendIdentity, details: ModelDetails): string {
@@ -55,9 +60,9 @@ export function effortCaption(backend: BackendIdentity, details: ModelDetails): 
       : null;
   if (backend?.thinkingLevel == null)
     return choice?.defaultThinkingLevel != null
-      ? `Default · ${choice.defaultThinkingLevel}`
-      : 'Default';
+      ? tr('Default · {level}', { level: choice.defaultThinkingLevel })
+      : tr('Default');
   return choice && !choice.thinkingLevels.includes(backend.thinkingLevel)
-    ? `${backend.thinkingLevel} · Unavailable`
+    ? tr('{level} · Unavailable', { level: backend.thinkingLevel })
     : backend.thinkingLevel;
 }

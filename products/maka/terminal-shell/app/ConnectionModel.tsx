@@ -22,6 +22,7 @@ import { Button } from 'nsh/base';
 import { thinkingLevels, type ModelSettingsOwner } from './settings';
 import { SettingsField } from './SettingsField';
 import { ChoiceIndicator } from './ChoiceIndicator';
+import { tr } from './locale';
 import {
   C,
   bodyTextStyle,
@@ -40,22 +41,22 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
     <Scroll style={{ flex: 1 }}>
       <View style={{ padding: 8, gap: 16 }}>
         <SettingsField
-          label="Model ID"
+          label={tr('Model ID')}
           value={model().id}
           readonly={model().originalId !== null}
           disabled={disabled()}
           change={(id) => owner.changeModel({ id })}
-          hint="The exact API model ID, including its provider prefix when required."
+          hint={tr('The exact API model ID, including its provider prefix when required.')}
         />
         <SettingsField
-          label="Model display name"
+          label={tr('Model display name')}
           value={model().label}
           disabled={disabled()}
           change={(label) => owner.changeModel({ label })}
-          hint="Optional. Empty uses the provider’s name."
+          hint={tr('Optional. Empty uses the provider’s name.')}
         />
         <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
-          Supported reasoning efforts
+          {tr('Supported reasoning efforts')}
         </Text>
         <Button
           disabled={disabled()}
@@ -71,7 +72,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
             checked={model().thinkingLevels === null}
             disabled={disabled()}
           />
-          <Text style={{ ...captionTextStyle, color: C.text }}>Use provider defaults</Text>
+          <Text style={{ ...captionTextStyle, color: C.text }}>{tr('Use provider defaults')}</Text>
         </Button>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
           <Each of={thinkingLevels} key={(level) => level}>
@@ -79,7 +80,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
               <Button
                 disabled={disabled()}
                 selected={model().thinkingLevels?.includes(level()) ?? false}
-                accessibilityLabel={`Support effort ${level()}`}
+                accessibilityLabel={tr('Support effort {level}', { level: level() })}
                 onPress={inputAction(owner.toggleThinking, {
                   ...owner.modelAction(),
                   level: level(),
@@ -100,11 +101,12 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           </Each>
         </View>
         <Text style={{ ...bodyTextStyle, color: C.muted }}>
-          Select the reasoning efforts supported by this model. They will be available in
-          conversations.
+          {tr(
+            'Select the reasoning efforts supported by this model. They will be available in conversations.',
+          )}
         </Text>
         <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
-          Connection default reasoning effort
+          {tr('Connection default reasoning effort')}
         </Text>
         <Button
           disabled={disabled()}
@@ -120,7 +122,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
             checked={model().defaultThinkingLevel === null}
             disabled={disabled()}
           />
-          <Text style={{ ...captionTextStyle, color: C.text }}>Provider default</Text>
+          <Text style={{ ...captionTextStyle, color: C.text }}>{tr('Provider default')}</Text>
         </Button>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
           <Each of={model().thinkingLevels ?? []} key={(level) => level}>
@@ -128,7 +130,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
               <Button
                 disabled={disabled()}
                 selected={model().defaultThinkingLevel === level()}
-                accessibilityLabel={`Default effort ${level()}`}
+                accessibilityLabel={tr('Default effort {level}', { level: level() })}
                 onPress={inputAction(owner.defaultThinking, {
                   ...owner.modelAction(),
                   level: level(),
@@ -150,7 +152,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
         </View>
         <Button
           disabled={disabled()}
-          accessibilityLabel="Save model"
+          accessibilityLabel={tr('Save model')}
           onPress={inputAction(owner.saveModel, owner.modelAction())}
           style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
           hoverStyle={{ backgroundColor: C.accentHover }}
@@ -158,7 +160,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           disabledStyle={controlDisabledStyle}
         >
           <Text style={{ ...captionTextStyle, color: C.background, fontWeight: '500' }}>
-            {owner.busy() ? 'Saving…' : 'Save model'}
+            {owner.busy() ? tr('Saving…') : tr('Save model')}
           </Text>
         </Button>
         <If when={model().originalId !== null}>
@@ -174,7 +176,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ ...captionTextStyle, color: C.danger }}>Remove model</Text>
+            <Text style={{ ...captionTextStyle, color: C.danger }}>{tr('Remove model')}</Text>
           </Button>
         </If>
       </View>

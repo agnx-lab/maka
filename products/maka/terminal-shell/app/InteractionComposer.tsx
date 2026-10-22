@@ -17,6 +17,15 @@
  * under the License.
  */
 
+import {
+  createText,
+  UiError,
+  errorText,
+  renderText,
+  type UiText,
+  message as uiMessage,
+} from './text';
+import { tr } from './locale';
 import { cleanup, effect, inputAction, Input, signal, Scroll, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { host } from './host';
@@ -126,34 +135,48 @@ function InteractionAction(props: {
 function interactionPermissions(value: Permissions): string {
   const paths = value.filesystem.map(
     (rule) =>
-      `${rule.access === 'write' ? 'Read/write' : 'Read'} · ${rule.scope === 'exact' ? 'this exact path' : 'path and descendants'}\n  ${rule.path}`,
+      `${tr(rule.access === 'write' ? 'Read/write' : 'Read')} · ${tr(rule.scope === 'exact' ? 'this exact path' : 'path and descendants')}\n  ${rule.path}`,
   );
   const network =
     value.network === 'allowed'
-      ? 'Network: all destinations'
+      ? tr('Network: all destinations')
       : value.network === 'denied'
-        ? 'Network: no additional access'
-        : `Network: listed destinations only\n${value.network.restricted.destinations.map((target) => `  ${target.host}:${target.port}`).join('\n')}`;
-  return [...(paths.length ? paths : ['Filesystem: no additional access']), network].join('\n\n');
+        ? tr('Network: no additional access')
+        : `${tr('Network: listed destinations only')}\n${value.network.restricted.destinations.map((target) => `  ${target.host}:${target.port}`).join('\n')}`;
+  return [...(paths.length ? paths : [tr('Filesystem: no additional access')]), network].join(
+    '\n\n',
+  );
 }
 
-export function interactionOutcomeSummary(outcome: InteractionOutcome): string {
+export function interactionOutcomeSummary(outcome: InteractionOutcome): UiText {
   if (outcome.kind === 'form_answer')
     return outcome.action === 'accept'
-      ? `Form submitted · ${Object.keys(outcome.values).length} fields`
+      ? uiMessage('Form submitted · {count} fields', { count: Object.keys(outcome.values).length })
       : outcome.action === 'decline'
-        ? 'Form declined'
-        : 'Form cancelled';
-  if (outcome.kind === 'question_answer') return 'Answers submitted';
+        ? uiMessage('Form declined')
+        : uiMessage('Form cancelled');
+  if (outcome.kind === 'question_answer') return uiMessage('Answers submitted');
   if (outcome.kind === 'permissions_decision')
     return outcome.decision.decision === 'allow'
-      ? `Access allowed · ${outcome.decision.scope === 'once' ? 'This call' : outcome.decision.scope === 'turn' ? 'This turn' : 'This session'}`
-      : 'Access denied';
+      ? uiMessage('Access allowed · {scope}', {
+          scope: uiMessage(
+            outcome.decision.scope === 'once'
+              ? 'This call'
+              : outcome.decision.scope === 'turn'
+                ? 'This turn'
+                : 'This session',
+          ),
+        })
+      : uiMessage('Access denied');
   if (outcome.kind === 'service_approval_decision')
-    return outcome.decision === 'allow' ? 'Tool call allowed' : 'Tool call denied';
+    return outcome.decision === 'allow'
+      ? uiMessage('Tool call allowed')
+      : uiMessage('Tool call denied');
   if (outcome.kind === 'client_capability_decision')
-    return outcome.decision === 'allow' ? 'Capability allowed' : 'Capability denied';
-  return `Request closed · ${outcome.reason.replaceAll('_', ' ')}`;
+    return outcome.decision === 'allow'
+      ? uiMessage('Capability allowed')
+      : uiMessage('Capability denied');
+  return uiMessage('Request closed · {reason}', { reason: outcome.reason.replaceAll('_', ' ') });
 }
 
 export function InteractionComposer({
@@ -174,7 +197,7 @@ export function InteractionComposer({
     busy = signal(false),
     uncertain = signal(false);
   const pending = signal(false),
-    error = signal('');
+    error = createText();
   const scope = signal<InteractionScope>('once');
   const answers = signal<Array<{ other: boolean; value: string | null | undefined }>>([]);
   const formDrafts = signal<FormDraft[]>([]);
@@ -182,7 +205,7 @@ export function InteractionComposer({
   const argumentsText = signal(''),
     argumentTotal = signal<number | null>(null);
   const argumentBusy = signal(false),
-    argumentError = signal('');
+    argumentError = createText();
   let argumentPosition: HistoryRowPosition | null = null;
   let alive = true;
   cleanup(() => {
@@ -361,7 +384,7 @@ export function InteractionComposer({
         end > source.totalBytes ||
         (end === offset && end !== source.totalBytes)
       ) {
-        throw new Error(
+        throw new UiError(
           'The original call arguments could not be verified. Allow remains disabled.',
         );
       }
@@ -369,7 +392,7 @@ export function InteractionComposer({
       argumentTotal.set(source.totalBytes);
       argumentsText.set(argumentsText() + source.text);
     } catch (reason) {
-      if (alive) argumentError.set(String(reason));
+      if (alive) argumentError.set(errorText(reason));
     } finally {
       if (alive) {
         argumentBusy.set(false);
@@ -393,7 +416,7 @@ export function InteractionComposer({
         originalPending(),
       ]);
       if (!alive) return;
-      if (!sameRecord(canonical)) throw new Error('The Host returned a different request.');
+      if (!sameRecord(canonical)) throw new UiError('The Host returned a different request.');
       record.set(canonical);
       uncertain.set(unresolved);
       pending.set(list.entries.some((entry) => entry.requestId === requestId));
@@ -420,7 +443,7 @@ export function InteractionComposer({
     } catch (reason) {
       if (alive) {
         uncertain.set(true);
-        error.set(String(reason));
+        error.set(errorText(reason));
       }
     } finally {
       if (alive) loading.set(false);
@@ -443,13 +466,17 @@ export function InteractionComposer({
         if (result.record.request.kind === 'form') formDrafts.set([]);
       } else if (result?.kind === 'rejected') {
         error.set(
-          `Answer was not accepted: ${result.reason}. Refresh the request before trying again.`,
+          uiMessage('Answer was not accepted: {reason}. Refresh the request before trying again.', {
+            reason: result.reason,
+          }),
         );
         pending.set(false);
       } else {
         uncertain.set(true);
         error.set(
-          'Answer status is unknown. Recover its original receipt in the main view; do not submit again.',
+          uiMessage(
+            'Answer status is unknown. Recover its original receipt in the main view; do not submit again.',
+          ),
         );
       }
     } catch (reason) {
@@ -463,8 +490,11 @@ export function InteractionComposer({
         uncertain.set(unresolved);
         error.set(
           unresolved
-            ? `Answer status is unknown. Recover its original receipt in the main view. ${String(reason)}`
-            : String(reason),
+            ? uiMessage(
+                'Answer status is unknown. Recover its original receipt in the main view. {reason}',
+                { reason: errorText(reason) },
+              )
+            : errorText(reason),
         );
       }
     } finally {
@@ -496,11 +526,11 @@ export function InteractionComposer({
   const submit = () => {
     if (blocked()) return;
     if (request()?.kind === 'question' && !questionReady()) {
-      error.set('Answer every question or explicitly choose Skip.');
+      error.set(uiMessage('Answer every question or explicitly choose Skip.'));
       return;
     }
     if (request()?.kind === 'form' && !form().answer) {
-      error.set('Complete the included fields before submitting.');
+      error.set(uiMessage('Complete the included fields before submitting.'));
       return;
     }
     const answer = submissionAnswer();
@@ -587,18 +617,18 @@ export function InteractionComposer({
     const current = request();
     return current
       ? {
-          service_approval: 'Review tool call',
-          permissions: 'Review additional access',
+          service_approval: tr('Review tool call'),
+          permissions: tr('Review additional access'),
           question: 'A question for you',
-          form: 'Form request',
-          client_capability: 'Capability request',
+          form: tr('Form request'),
+          client_capability: tr('Capability request'),
         }[current.kind]
-      : 'Review request';
+      : tr('Review request');
   };
   return (
     <View
       ref={attach}
-      accessibilityLabel="Pending request"
+      accessibilityLabel={tr('Pending request')}
       style={{
         minHeight: 0,
         flexShrink: 1,
@@ -635,13 +665,13 @@ export function InteractionComposer({
           </Text>
         </View>
         <Scroll
-          accessibilityLabel="Request content"
+          accessibilityLabel={tr('Request content')}
           style={{ flexShrink: 1, minHeight: 0, maxHeight: 336 }}
           contentStyle={{ padding: 16, gap: 16 }}
         >
           <If when={!record()}>
             <Text style={{ ...bodyTextStyle, color: C.muted }}>
-              {loading() ? 'Reading the original request…' : 'Request not available.'}
+              {loading() ? tr('Reading the original request…') : tr('Request not available.')}
             </Text>
           </If>
           <If
@@ -658,24 +688,31 @@ export function InteractionComposer({
                     </Text>
                   </View>
                   <Text style={{ ...bodyTextStyle, color: C.secondary }}>
-                    Approve this original call only. This does not grant access to future calls.
+                    {tr(
+                      'Approve this original call only. This does not grant access to future calls.',
+                    )}
                   </Text>
                   <View
                     style={{ gap: 8, padding: 12, backgroundColor: C.background, borderRadius: 8 }}
                   >
-                    <Text style={{ ...captionTextStyle, color: C.muted }}>Original arguments</Text>
+                    <Text style={{ ...captionTextStyle, color: C.muted }}>
+                      {tr('Original arguments')}
+                    </Text>
                     <Text selectable style={{ ...codeTextStyle, color: C.text }}>
                       {argumentsText()}
                     </Text>
                   </View>
                   <Text style={{ ...captionTextStyle, color: C.muted }}>
                     {completeArguments()
-                      ? 'Complete original arguments loaded.'
-                      : `${interactionBytes(argumentsText())} of ${argumentTotal() ?? '?'} argument bytes loaded. Read all before allowing.`}
+                      ? tr('Complete original arguments loaded.')
+                      : tr('{loaded} of {total} argument bytes loaded. Read all before allowing.', {
+                          loaded: interactionBytes(argumentsText()),
+                          total: argumentTotal() ?? '?',
+                        })}
                   </Text>
                   <If when={argumentError()}>
                     <InteractionAction
-                      label="Retry original arguments"
+                      label={tr('Retry original arguments')}
                       icon="refresh"
                       disabled={argumentBusy()}
                       onPress={inputAction(readRenderedArguments, {
@@ -704,12 +741,16 @@ export function InteractionComposer({
                         {permissionsRequest()?.request.command?.command}
                       </Text>
                       <Text selectable style={{ ...captionTextStyle, color: C.muted }}>
-                        {`Working directory: ${permissionsRequest()?.request.command?.cwd}`}
+                        {tr('Working directory: {path}', {
+                          path: permissionsRequest()?.request.command?.cwd ?? '',
+                        })}
                       </Text>
                     </View>
                   </If>
                   <View style={{ gap: 8 }}>
-                    <Text style={{ ...captionTextStyle, color: C.muted }}>Requested access</Text>
+                    <Text style={{ ...captionTextStyle, color: C.muted }}>
+                      {tr('Requested access')}
+                    </Text>
                     <Text selectable style={{ ...bodyTextStyle, color: C.text }}>
                       {permissionsRequest()
                         ? interactionPermissions(permissionsRequest()!.request.permissions)
@@ -718,7 +759,7 @@ export function InteractionComposer({
                   </View>
                   <View style={{ gap: 8 }}>
                     <Text style={{ ...bodyTextStyle, color: C.secondary }}>
-                      Allow exactly these paths and network destinations for:
+                      {tr('Allow exactly these paths and network destinations for:')}
                     </Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                       <Each
@@ -732,10 +773,10 @@ export function InteractionComposer({
                           <InteractionAction
                             label={
                               duration() === 'once'
-                                ? 'This call'
+                                ? tr('This call')
                                 : duration() === 'turn'
-                                  ? 'This turn'
-                                  : 'This session'
+                                  ? tr('This turn')
+                                  : tr('This session')
                             }
                             kind="radio"
                             disabled={blocked()}
@@ -810,7 +851,7 @@ export function InteractionComposer({
                         </Each>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           <InteractionAction
-                            label="Other answer"
+                            label={tr('Other answer')}
                             kind="radio"
                             disabled={blocked()}
                             selected={answers()[index()]?.other}
@@ -824,7 +865,7 @@ export function InteractionComposer({
                             })}
                           />
                           <InteractionAction
-                            label="Skip"
+                            label={tr('Skip')}
                             kind="radio"
                             disabled={blocked()}
                             selected={answers()[index()]?.value === null}
@@ -840,10 +881,12 @@ export function InteractionComposer({
                         </View>
                         <If when={answers()[index()]?.other}>
                           <Input
-                            accessibilityLabel={`Other answer ${index() + 1}`}
+                            accessibilityLabel={tr('Other answer {number}', {
+                              number: index() + 1,
+                            })}
                             value={String(answers()[index()]?.value ?? '')}
                             readonly={blocked()}
-                            placeholder="Your answer"
+                            placeholder={tr('Your answer')}
                             onChange={(value) => choose(index(), value, true)}
                             style={{
                               ...inputTextStyle,
@@ -893,7 +936,9 @@ export function InteractionComposer({
                     fontWeight: '600',
                   }}
                 >
-                  {record()?.outcome ? interactionOutcomeSummary(record()!.outcome!) : ''}
+                  {record()?.outcome
+                    ? renderText(interactionOutcomeSummary(record()!.outcome!))
+                    : ''}
                 </Text>
               </View>
             </View>
@@ -905,18 +950,21 @@ export function InteractionComposer({
           </If>
           <If when={uncertain() && !record()?.outcome}>
             <Text style={{ ...bodyTextStyle, color: C.warning }}>
-              An original answer receipt is unresolved. Refresh is read-only; further answers stay
-              disabled.
+              {tr(
+                'An original answer receipt is unresolved. Refresh is read-only; further answers stay disabled.',
+              )}
             </Text>
           </If>
           <If when={request()?.kind === 'question' && !record()?.outcome && !questionReady()}>
             <Text style={{ ...captionTextStyle, color: C.muted }}>
-              Choose an option, write another answer, or skip each question.
+              {tr('Choose an option, write another answer, or skip each question.')}
             </Text>
           </If>
           <If when={record() && !record()!.outcome && !pending() && !loading()}>
             <Text style={{ ...bodyTextStyle, color: C.warning }}>
-              This request is no longer listed as pending. Refresh to read its canonical outcome.
+              {tr(
+                'This request is no longer listed as pending. Refresh to read its canonical outcome.',
+              )}
             </Text>
           </If>
         </Scroll>
@@ -932,10 +980,10 @@ export function InteractionComposer({
           }}
         >
           <InteractionAction
-            label="Refresh status"
+            label={tr('Refresh status')}
             icon="refresh"
             iconOnly={windowSize().width < 720}
-            tooltip="Refresh status · Ctrl+R"
+            tooltip={tr('Refresh status · Ctrl+R')}
             disabled={loading() || busy()}
             onPress={inputAction(refreshRendered, { sessionId, requestId })}
           />
@@ -950,13 +998,13 @@ export function InteractionComposer({
           >
             <If when={request()?.kind === 'form' && !record()?.outcome}>
               <InteractionAction
-                label="Cancel request"
+                label={tr('Cancel request')}
                 disabled={blocked()}
                 onPress={answerBinding({ kind: 'form', action: 'cancel' })}
               />
               <InteractionAction
-                label="Decline"
-                tooltip="Decline · D"
+                label={tr('Decline')}
+                tooltip={tr('Decline · D')}
                 disabled={blocked()}
                 onPress={answerBinding(denialAnswer())}
               />
@@ -970,8 +1018,8 @@ export function InteractionComposer({
               }
             >
               <InteractionAction
-                label="Deny"
-                tooltip="Deny · D"
+                label={tr('Deny')}
+                tooltip={tr('Deny · D')}
                 disabled={blocked()}
                 onPress={answerBinding(denialAnswer())}
               />
@@ -990,19 +1038,19 @@ export function InteractionComposer({
                 primary
                 tooltip={
                   request()?.kind === 'form'
-                    ? 'Submit form · Ctrl+Enter'
+                    ? tr('Submit form · Ctrl+Enter')
                     : request()?.kind === 'question'
-                      ? 'Submit answers · Ctrl+Enter'
-                      : 'Allow · Ctrl+Enter'
+                      ? tr('Submit answers · Ctrl+Enter')
+                      : tr('Allow · Ctrl+Enter')
                 }
                 label={
                   busy()
-                    ? 'Recording answer…'
+                    ? tr('Recording answer…')
                     : request()?.kind === 'form'
-                      ? 'Submit form'
+                      ? tr('Submit form')
                       : request()?.kind === 'question'
-                        ? 'Submit answers'
-                        : 'Allow'
+                        ? tr('Submit answers')
+                        : tr('Allow')
                 }
                 disabled={
                   blocked() ||

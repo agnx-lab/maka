@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, errorText, UiError } from './text';
+import { tr } from './locale';
 import { batch, cleanup, effect, signal, untracked } from 'nsh';
 import { host } from './host';
 import type {
@@ -73,7 +75,6 @@ type DirectoryRead = {
 
 const samePath = (left: WorkspacePath | null, right: WorkspacePath | null) =>
   left?.bytesBase64 === right?.bytesBase64;
-const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
 
 // The owner survives presentation changes; each active directory owns one watch
 // and one list request. Directory identity is not a content revision.
@@ -82,11 +83,18 @@ export function createWorkspaceFiles(options: {
   active(): boolean;
   openFile(target: WorkspaceFileTarget): void;
 }): WorkspaceFilesModel {
-  const breadcrumbs = signal<WorkspaceDirectory[]>([{ path: null, title: 'Workspace' }]);
+  const breadcrumbs = signal<WorkspaceDirectory[]>([
+    {
+      path: null,
+      get title() {
+        return tr('Workspace');
+      },
+    },
+  ]);
   const entries = signal<AgentFileEntry[]>([]);
   const loading = signal(false);
   const busy = signal(false);
-  const error = signal('');
+  const error = createText();
   const position = { x: 0, y: 0 };
   let alive = true;
   let sessionId: string | null = null;
@@ -109,7 +117,7 @@ export function createWorkspaceFiles(options: {
     if (!owns(read)) return;
     stop();
     batch(() => {
-      error.set(message(reason));
+      error.set(errorText(reason));
       loading.set(false);
       busy.set(false);
     });
@@ -130,11 +138,11 @@ export function createWorkspaceFiles(options: {
           });
           if (!valid()) return null;
           if (page.directoryIdentity !== read.identity)
-            throw new Error('The directory changed. Refresh to reopen it.');
+            throw new UiError('The directory changed. Refresh to reopen it.');
           if (page.next && page.next.directoryIdentity !== read.identity)
-            throw new Error('The file cursor belongs to a different directory.');
+            throw new UiError('The file cursor belongs to a different directory.');
           if (page.next && samePath(page.next.after, after?.after ?? null))
-            throw new Error('File paging did not advance. Refresh to continue.');
+            throw new UiError('File paging did not advance. Refresh to continue.');
           return page;
         };
         try {
@@ -235,9 +243,9 @@ export function createWorkspaceFiles(options: {
       for (;;) {
         const change = await opened.next();
         if (!owns(read)) return;
-        if (change === null) throw new Error('File updates ended. Refresh to reconnect.');
+        if (change === null) throw new UiError('File updates ended. Refresh to reconnect.');
         if (change.kind === 'unavailable')
-          throw new Error('The directory changed or is unavailable. Refresh to reopen it.');
+          throw new UiError('The directory changed or is unavailable. Refresh to reopen it.');
         if (change.kind === 'ready') read.identity = change.directoryIdentity;
         invalidate(read);
       }
@@ -252,7 +260,14 @@ export function createWorkspaceFiles(options: {
         sessionId = selected;
         position.x = 0;
         position.y = 0;
-        breadcrumbs.set([{ path: null, title: 'Workspace' }]);
+        breadcrumbs.set([
+          {
+            path: null,
+            get title() {
+              return tr('Workspace');
+            },
+          },
+        ]);
       }
       start(changed);
     });

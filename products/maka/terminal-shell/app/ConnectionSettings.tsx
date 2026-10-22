@@ -25,6 +25,7 @@ import { ConnectionForm } from './ConnectionForm';
 import { ConnectionModel } from './ConnectionModel';
 import { ChoiceIndicator } from './ChoiceIndicator';
 import { Icon } from './Icon';
+import { tr } from './locale';
 import {
   C,
   bodyTextStyle,
@@ -55,21 +56,23 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
         >
           <Text style={{ ...bodyTextStyle, color: C.text }}>
             {owner.confirmation() === 'connection'
-              ? 'Delete this connection, its stored provider credential and model settings? Existing conversations keep their saved selection.'
+              ? tr(
+                  'Delete this connection, its stored provider credential and model settings? Existing conversations keep their saved selection.',
+                )
               : owner.confirmation() === 'key'
-                ? 'Remove the stored provider credential? This connection may stop working.'
-                : 'Remove this model from the connection?'}
+                ? tr('Remove the stored provider credential? This connection may stop working.')
+                : tr('Remove this model from the connection?')}
           </Text>
           <Button
             disabled={disabled()}
-            accessibilityLabel="Confirm removal"
+            accessibilityLabel={tr('Confirm removal')}
             onPress={inputAction(owner.remove, owner.removalAction())}
             style={controlStyle}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ ...captionTextStyle, color: C.danger }}>Confirm removal</Text>
+            <Text style={{ ...captionTextStyle, color: C.danger }}>{tr('Confirm removal')}</Text>
           </Button>
           <Button
             disabled={owner.busy()}
@@ -79,7 +82,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ ...captionTextStyle, color: C.muted }}>Cancel</Text>
+            <Text style={{ ...captionTextStyle, color: C.muted }}>{tr('Cancel')}</Text>
           </Button>
         </View>
       </If>
@@ -88,7 +91,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button
               disabled={disabled()}
-              accessibilityLabel="Add connection"
+              accessibilityLabel={tr('Add connection')}
               onPress={inputAction(owner.newConnection, null)}
               style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
               hoverStyle={controlHoverStyle}
@@ -96,7 +99,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
               disabledStyle={controlDisabledStyle}
             >
               <Icon name="plus" color={C.accent} />
-              <Text style={{ ...captionTextStyle, color: C.accent }}>Add connection</Text>
+              <Text style={{ ...captionTextStyle, color: C.accent }}>{tr('Add connection')}</Text>
             </Button>
             <Button
               disabled={owner.loading() || owner.busy()}
@@ -106,12 +109,14 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ ...captionTextStyle, color: C.muted }}>Refresh connections</Text>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>
+                {tr('Refresh connections')}
+              </Text>
             </Button>
           </View>
           <If when={!owner.loading() && !owner.connections().length}>
             <Text style={{ ...bodyTextStyle, color: C.muted }}>
-              Add your first connection, then fetch or add a model.
+              {tr('Add your first connection, then fetch or add a model.')}
             </Text>
           </If>
           <List
@@ -126,7 +131,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             {(item) => (
               <Button
                 disabled={disabled() || !item().editable}
-                accessibilityLabel={`Edit connection ${item().name}`}
+                accessibilityLabel={tr('Edit connection {name}', { name: item().name })}
                 onPress={inputAction(owner.openConnection, item().basis)}
                 style={{
                   height: 64,
@@ -152,7 +157,10 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                     {item().name}
                   </Text>
                   <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
-                    {item().enabled ? 'Enabled' : 'Disabled'} · {item().enabledModelCount} models
+                    {tr('{status} · {count} models', {
+                      status: item().enabled ? tr('Enabled') : tr('Disabled'),
+                      count: item().enabledModelCount,
+                    })}
                   </Text>
                 </View>
                 <Icon name="right" color={C.muted} />
@@ -162,7 +170,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
         </If>
         <If when={owner.page() === 'providers'}>
           <Text style={{ ...bodyTextStyle, color: C.muted }}>
-            Choose the API provider for this connection.
+            {tr('Choose the API provider for this connection.')}
           </Text>
           <List
             each={owner.providers()}
@@ -176,7 +184,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             {(item) => (
               <Button
                 disabled={disabled()}
-                accessibilityLabel={`Connect ${item().label}`}
+                accessibilityLabel={tr('Connect {name}', { name: item().label })}
                 onPress={inputAction(owner.chooseProvider, item().identity)}
                 style={{
                   height: 48,
@@ -209,7 +217,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
         <If when={owner.page() === 'models' && owner.editor()}>
           <Button
             disabled={disabled()}
-            accessibilityLabel="Add model manually"
+            accessibilityLabel={tr('Add model manually')}
             onPress={inputAction(owner.editModel, { ...owner.action(), id: null })}
             style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
             hoverStyle={controlHoverStyle}
@@ -217,7 +225,9 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             disabledStyle={controlDisabledStyle}
           >
             <Icon name="plus" color={C.secondary} />
-            <Text style={{ ...captionTextStyle, color: C.secondary }}>Add model manually</Text>
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>
+              {tr('Add model manually')}
+            </Text>
           </Button>
           <List
             each={models()}
@@ -245,7 +255,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                   <Button
                     disabled={disabled()}
                     style={{ ...controlStyle, height: 48, flex: 1, minWidth: 0 }}
-                    accessibilityLabel={`Edit model ${id()}`}
+                    accessibilityLabel={tr('Edit model {id}', { id: id() })}
                     onPress={inputAction(owner.editModel, { ...owner.action(), id: id() })}
                     hoverStyle={controlHoverStyle}
                     focusStyle={controlFocusStyle}
@@ -271,7 +281,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                               borderRadius: 4,
                             }}
                           >
-                            Default
+                            {tr('Default')}
                           </Text>
                         </If>
                       </View>
@@ -288,8 +298,8 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                   </Button>
                   <Button
                     disabled={disabled() || !owner.editor()?.enabled}
-                    accessibilityLabel={`Set default ${id()}`}
-                    tooltip={`Set default ${id()}`}
+                    accessibilityLabel={tr('Set default {id}', { id: id() })}
+                    tooltip={tr('Set default {id}', { id: id() })}
                     selected={isDefault()}
                     onPress={inputAction(owner.setDefault, { ...owner.action(), id: id() })}
                     style={{
@@ -317,7 +327,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
         </If>
       </If>
       <If when={owner.loading()}>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>Loading settings…</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>{tr('Loading settings…')}</Text>
       </If>
     </View>
   );

@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, errorText, message as uiMessage } from './text';
+import { tr } from './locale';
 import { cleanup, computed, effect, Input, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -73,7 +75,7 @@ export function QueueDock(props: { session: QueueSession }) {
   const editing = signal<Editing | null>(null);
   const review = signal<Review | null>(null);
   const busy = signal<{ through: number | null } | null>(null);
-  const error = signal('');
+  const error = createText();
   const copied = signal<string | null>(null);
   let alive = true;
   cleanup(() => {
@@ -90,16 +92,16 @@ export function QueueDock(props: { session: QueueSession }) {
   const entry = (messageId: string) => items().find((row) => row.messageId === messageId);
   const revision = () => session.snapshot()?.revision ?? -1;
   const report = (reason: unknown) => {
-    if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
+    if (alive) error.set(errorText(reason));
   };
   const changedMessage = () =>
     editing()
-      ? 'The queue changed. Your edit is kept; review the current message.'
-      : 'The queue changed. Select the current message again.';
+      ? uiMessage('The queue changed. Your edit is kept; review the current message.')
+      : uiMessage('The queue changed. Select the current message again.');
   const missingMessage = () =>
     editing()
-      ? 'This message is no longer queued. Your edit is kept.'
-      : 'This message is no longer queued.';
+      ? uiMessage('This message is no longer queued. Your edit is kept.')
+      : uiMessage('This message is no longer queued.');
   const change = async (
     expectedRevision: number,
     edit: Exclude<AgentQueueAction, { kind: 'reorder' }>,
@@ -125,12 +127,12 @@ export function QueueDock(props: { session: QueueSession }) {
         result.kind === 'revision_conflict'
           ? changedMessage()
           : result.reason === 'execution_changed'
-            ? 'This turn cannot accept this message right now. It remains queued.'
+            ? uiMessage('This turn cannot accept this message right now. It remains queued.')
             : result.reason === 'not_running'
-              ? 'No turn is running. This message remains queued.'
+              ? uiMessage('No turn is running. This message remains queued.')
               : result.reason === 'missing' || result.reason === 'in_flight'
                 ? missingMessage()
-                : 'The Host did not accept this queue change.',
+                : uiMessage('The Host did not accept this queue change.'),
       );
     } catch (reason) {
       if (alive) busy.set(null);
@@ -150,7 +152,7 @@ export function QueueDock(props: { session: QueueSession }) {
       error.set(
         result.kind === 'missing'
           ? missingMessage()
-          : 'The queue changed. Select Edit or Review again for its current message.',
+          : uiMessage('The queue changed. Select Edit or Review again for its current message.'),
       );
     } catch (reason) {
       report(reason);
@@ -163,7 +165,7 @@ export function QueueDock(props: { session: QueueSession }) {
     if (!alive || request.sessionId !== session.sessionId || busy()) return;
     const row = entry(request.messageId);
     if (!row || request.revision !== revision()) {
-      error.set('The queue changed before this action. Select the current row again.');
+      error.set(uiMessage('The queue changed before this action. Select the current row again.'));
       return;
     }
     if (request.kind === 'edit') {
@@ -210,7 +212,7 @@ export function QueueDock(props: { session: QueueSession }) {
     const edit = editing();
     const latest = review();
     if (!edit || !latest || latest.revision !== revision()) {
-      error.set('The queue changed again. Review its current message before saving.');
+      error.set(uiMessage('The queue changed again. Review its current message before saving.'));
       return;
     }
     editing.set({
@@ -247,8 +249,8 @@ export function QueueDock(props: { session: QueueSession }) {
       >
         <If when={items().length > 1}>
           <Button
-            accessibilityLabel="Queued messages"
-            tooltip="Messages waiting for a turn"
+            accessibilityLabel={tr('Queued messages')}
+            tooltip={tr('Messages waiting for a turn')}
             selected={expanded()}
             disabled={editing() !== null || busy() !== null}
             onPress={inputAction(() => collapsed.set(!collapsed()), null)}
@@ -258,14 +260,14 @@ export function QueueDock(props: { session: QueueSession }) {
           >
             <Icon name="queue" color={C.muted} />
             <Text style={{ ...captionTextStyle, color: C.secondary, flex: 1 }}>
-              {items().length} queued messages
+              {tr('{count} queued messages', { count: items().length })}
             </Text>
             <Icon name={expanded() ? 'down' : 'right'} color={C.muted} />
           </Button>
         </If>
         <If when={expanded() && editing() === null}>
           <List
-            accessibilityLabel="Message queue"
+            accessibilityLabel={tr('Message queue')}
             each={items()}
             keyExtractor={(row) => row.messageId}
             estimatedItemSize={rowHeight}
@@ -296,12 +298,12 @@ export function QueueDock(props: { session: QueueSession }) {
                     style={{ ...captionTextStyle, color: C.secondary, flex: 1 }}
                   >
                     {row().kind === 'steering'
-                      ? `Sending to current turn · ${row().preview}`
+                      ? tr('Sending to current turn · {preview}', { preview: row().preview })
                       : row().preview}
                   </Text>
                   <Button
-                    accessibilityLabel={`Edit queued message ${number()}`}
-                    tooltip="Edit message"
+                    accessibilityLabel={tr('Edit queued message {number}', { number: number() })}
+                    tooltip={tr('Edit message')}
                     disabled={busy() !== null || editing() !== null}
                     onPress={inputAction(act, request('edit'))}
                     style={actionStyle}
@@ -311,8 +313,8 @@ export function QueueDock(props: { session: QueueSession }) {
                     <Icon name="edit" color={C.muted} />
                   </Button>
                   <Button
-                    accessibilityLabel={`Remove queued message ${number()}`}
-                    tooltip="Remove message"
+                    accessibilityLabel={tr('Remove queued message {number}', { number: number() })}
+                    tooltip={tr('Remove message')}
                     disabled={busy() !== null || editing() !== null}
                     onPress={inputAction(act, request('retract'))}
                     style={actionStyle}
@@ -322,11 +324,13 @@ export function QueueDock(props: { session: QueueSession }) {
                     <Icon name="close" color={C.muted} />
                   </Button>
                   <Button
-                    accessibilityLabel={`Steer queued message ${number()} now`}
+                    accessibilityLabel={tr('Steer queued message {number} now', {
+                      number: number(),
+                    })}
                     tooltip={
                       row().kind === 'steering'
-                        ? 'Waiting for the next step'
-                        : 'Steer now · use in the current turn'
+                        ? tr('Waiting for the next step')
+                        : tr('Steer now · use in the current turn')
                     }
                     disabled={
                       busy() !== null ||
@@ -361,12 +365,12 @@ export function QueueDock(props: { session: QueueSession }) {
                 <View style={{ padding: 12, gap: 8 }}>
                   <Text style={{ ...captionTextStyle, color: C.muted }}>
                     {entry(edit().messageId)
-                      ? 'Edit queued message'
-                      : 'Message no longer queued · your edit is kept'}
+                      ? tr('Edit queued message')
+                      : tr('Message no longer queued · your edit is kept')}
                     {edit().hasAttachments ? ' · attachments kept' : ''}
                   </Text>
                   <Input
-                    accessibilityLabel="Queued message editor"
+                    accessibilityLabel={tr('Queued message editor')}
                     autoFocus
                     multiline
                     submitBehavior="submit"
@@ -386,7 +390,7 @@ export function QueueDock(props: { session: QueueSession }) {
                   />
                   <If when={review()}>
                     <Text style={{ ...captionTextStyle, color: C.muted }}>
-                      Current queued message
+                      {tr('Current queued message')}
                     </Text>
                     <Scroll style={{ maxHeight: readerHeight(), flexGrow: 0 }}>
                       <Text selectable style={{ ...bodyTextStyle, color: C.secondary }}>
@@ -395,26 +399,26 @@ export function QueueDock(props: { session: QueueSession }) {
                     </Scroll>
                     <View style={{ flexDirection: 'row', gap: 8 }}>
                       <Button
-                        accessibilityLabel="Keep my queued message edit"
+                        accessibilityLabel={tr('Keep my queued message edit')}
                         disabled={busy() !== null}
                         onPress={inputAction(resolveReview, false)}
                         style={controlStyle}
                       >
-                        <Text style={{ color: C.secondary }}>Keep my edit</Text>
+                        <Text style={{ color: C.secondary }}>{tr('Keep my edit')}</Text>
                       </Button>
                       <Button
-                        accessibilityLabel="Use current queued message"
+                        accessibilityLabel={tr('Use current queued message')}
                         disabled={busy() !== null}
                         onPress={inputAction(resolveReview, true)}
                         style={controlStyle}
                       >
-                        <Text style={{ color: C.secondary }}>Use current message</Text>
+                        <Text style={{ color: C.secondary }}>{tr('Use current message')}</Text>
                       </Button>
                     </View>
                   </If>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     <Button
-                      accessibilityLabel="Save queued message"
+                      accessibilityLabel={tr('Save queued message')}
                       disabled={
                         busy() !== null ||
                         !entry(edit().messageId) ||
@@ -426,36 +430,36 @@ export function QueueDock(props: { session: QueueSession }) {
                       hoverStyle={{ backgroundColor: C.raised }}
                       focusStyle={{ backgroundColor: C.line }}
                     >
-                      <Text style={{ color: C.accent }}>Save</Text>
+                      <Text style={{ color: C.accent }}>{tr('Save')}</Text>
                     </Button>
                     <If when={entry(edit().messageId) && edit().revision !== revision()}>
                       <Button
-                        accessibilityLabel="Review current queued message"
+                        accessibilityLabel={tr('Review current queued message')}
                         disabled={busy() !== null}
                         onPress={inputAction(reviewLatest, null)}
                         style={controlStyle}
                       >
-                        <Text style={{ color: C.secondary }}>Review current message</Text>
+                        <Text style={{ color: C.secondary }}>{tr('Review current message')}</Text>
                       </Button>
                     </If>
                     <If when={!entry(edit().messageId)}>
                       <Button
-                        accessibilityLabel="Copy queued message edit"
+                        accessibilityLabel={tr('Copy queued message edit')}
                         onPress={inputAction(copyEdit, null)}
                         style={controlStyle}
                       >
                         <Text style={{ color: C.secondary }}>
-                          {copied() === edit().text ? 'Edit copied' : 'Copy edit'}
+                          {copied() === edit().text ? tr('Edit copied') : tr('Copy edit')}
                         </Text>
                       </Button>
                     </If>
                     <Button
-                      accessibilityLabel="Cancel queued message edit"
+                      accessibilityLabel={tr('Cancel queued message edit')}
                       disabled={busy() !== null}
                       onPress={inputAction(cancel, null)}
                       style={controlStyle}
                     >
-                      <Text style={{ color: C.muted }}>Cancel</Text>
+                      <Text style={{ color: C.muted }}>{tr('Cancel')}</Text>
                     </Button>
                   </View>
                 </View>
@@ -465,7 +469,7 @@ export function QueueDock(props: { session: QueueSession }) {
         </Each>
         <If when={busy()}>
           <Text style={{ ...captionTextStyle, paddingHorizontal: 12, color: C.muted }}>
-            Updating queue…
+            {tr('Updating queue…')}
           </Text>
         </If>
         <If when={error()}>

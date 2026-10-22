@@ -17,10 +17,11 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { inputAction, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
-import type { TerminalsModel } from './terminalState';
+import { terminalStatus, type TerminalsModel } from './terminalState';
 import { Icon } from './Icon';
 import {
   C,
@@ -40,7 +41,7 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
         <Button
           onPress={inputAction(model.start, null)}
           disabled={model.starting() || !model.known() || !!model.pending().length}
-          accessibilityLabel="Start interactive terminal"
+          accessibilityLabel={tr('Start interactive terminal')}
           style={{
             ...controlStyle,
             flexDirection: 'row',
@@ -54,13 +55,13 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
         >
           <Icon name="plus" color={C.secondary} />
           <Text style={{ ...captionTextStyle, color: C.text }}>
-            {model.starting() ? 'Starting shell…' : 'New terminal'}
+            {model.starting() ? tr('Starting shell…') : tr('New terminal')}
           </Text>
         </Button>
         <Button
           onPress={inputAction(model.refresh, null)}
-          accessibilityLabel="Refresh terminals"
-          tooltip="Refresh terminals"
+          accessibilityLabel={tr('Refresh terminals')}
+          tooltip={tr('Refresh terminals')}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -77,7 +78,9 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
         {(operation) => (
           <View style={{ gap: 8, padding: 12, borderRadius: 8, backgroundColor: C.surface }}>
             <Text style={{ ...bodyTextStyle, color: C.warning }}>
-              Unresolved {operation().method} · input has not been repeated.
+              {tr('Unresolved {method} · input has not been repeated.', {
+                method: operation().method,
+              })}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Button
@@ -92,7 +95,7 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
                 focusStyle={controlFocusStyle}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text style={{ ...captionTextStyle, color: C.text }}>Recover original</Text>
+                <Text style={{ ...captionTextStyle, color: C.text }}>{tr('Recover original')}</Text>
               </Button>
               <If when={!operation().reference}>
                 <Button
@@ -108,7 +111,7 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
                   disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ ...captionTextStyle, color: C.secondary }}>
-                    Cancel undispatched action
+                    {tr('Cancel undispatched action')}
                   </Text>
                 </Button>
               </If>
@@ -117,24 +120,24 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
         )}
       </Each>
       <If when={model.loading() && !model.entries().length}>
-        <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading terminals…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Reading terminals…')}</Text>
       </If>
       <If when={!model.loading() && !model.error() && !model.entries().length}>
         <Text style={{ ...bodyTextStyle, color: C.muted }}>
-          Start a shell in this conversation’s workspace. Agent terminals also appear here.
+          {tr('Start a shell in this conversation’s workspace. Agent terminals also appear here.')}
         </Text>
       </If>
       <List
         each={model.entries()}
         keyExtractor={(entry) => entry.result.ref}
         estimatedItemSize={64}
-        accessibilityLabel="Conversation terminals"
+        accessibilityLabel={tr('Conversation terminals')}
         style={{ flex: 1, minHeight: 0 }}
       >
         {(entry) => (
           <Button
             onPress={inputAction(model.open, entry())}
-            accessibilityLabel={`Open terminal: ${entry().result.cmd}`}
+            accessibilityLabel={tr('Open terminal {name}', { name: entry().result.cmd })}
             style={{
               ...controlStyle,
               paddingHorizontal: 12,
@@ -152,11 +155,11 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
                 numberOfLines={1}
                 style={{ ...captionTextStyle, color: C.text, fontWeight: '500' }}
               >
-                {entry().result.cmd || 'Interactive shell'}
+                {entry().result.cmd || tr('Interactive shell')}
               </Text>
               <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
-                {entry().result.status} · {entry().result.mode} ·{' '}
-                {entry().ownership.kind === 'local' ? entry().result.cwd : 'shared · view only'}
+                {terminalStatus(entry().result.status)} · {entry().result.mode} ·{' '}
+                {entry().ownership.kind === 'local' ? entry().result.cwd : tr('shared · view only')}
               </Text>
             </View>
           </Button>

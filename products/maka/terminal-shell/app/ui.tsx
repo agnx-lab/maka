@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
@@ -74,7 +75,7 @@ export function Header(props: {
 }) {
   const workspaceName = () => {
     const path = props.workspace;
-    if (!path) return 'Files';
+    if (!path) return tr('Files');
     return (
       path
         .split(path.startsWith('/') ? '/' : /[\\/]/)
@@ -96,8 +97,8 @@ export function Header(props: {
     >
       <Button
         onPress={props.commands}
-        accessibilityLabel="Open commands"
-        tooltip="Search commands · Ctrl+P"
+        accessibilityLabel={tr('Open commands')}
+        tooltip={tr('Search commands · Ctrl+P')}
         style={{
           ...controlStyle,
           ...(platform.isTerminal
@@ -110,7 +111,7 @@ export function Header(props: {
       >
         <If when={platform.isTerminal} else={<Icon name="search" color={C.secondary} />}>
           <View pointerEvents="none" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ color: C.secondary, fontSize: 13 }}>Commands</Text>
+            <Text style={{ color: C.secondary, fontSize: 13 }}>{tr('Commands')}</Text>
             <Text style={{ color: C.muted, fontSize: 11 }}>Ctrl+P</Text>
           </View>
         </If>
@@ -118,8 +119,8 @@ export function Header(props: {
       <If when={props.browse}>
         <Button
           onPress={props.browse}
-          accessibilityLabel="Browse sessions"
-          tooltip="Browse sessions · Ctrl+O"
+          accessibilityLabel={tr('Browse sessions')}
+          tooltip={tr('Browse sessions · Ctrl+O')}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
@@ -132,8 +133,8 @@ export function Header(props: {
       </Text>
       <If when={props.files}>
         <Button
-          accessibilityLabel="Browse workspace files"
-          tooltip={props.workspace || 'Browse workspace files'}
+          accessibilityLabel={tr('Browse workspace files')}
+          tooltip={props.workspace || tr('Browse workspace files')}
           ref={props.filesOpener}
           onPress={props.files}
           style={{

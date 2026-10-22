@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, UiError, errorText, type UiText, message as uiMessage } from './text';
+import { tr } from './locale';
 import { batch, cleanup, computed, effect, inputAction, signal, Text, untracked, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
@@ -128,15 +130,17 @@ function indexRows(items: readonly Row[]) {
   }
   return { byId, byMessage };
 }
-function receiptMessage(reply: any): string {
+function receiptMessage(reply: any): UiText {
   const receipt = reply?.receipt;
   if (receipt?.kind === 'recorded' && receipt.outcome?.kind === 'returned') {
     const value = receipt.outcome.value;
     return value?.kind === 'rejected'
-      ? `Send rejected: ${value.reason}`
-      : 'Host returned an unexpected send result.';
+      ? uiMessage('Send rejected: {reason}', { reason: value.reason })
+      : uiMessage('Host returned an unexpected send result.');
   }
-  return 'The original send has no confirmed result. Recover its receipt before sending again.';
+  return uiMessage(
+    'The original send has no confirmed result. Recover its receipt before sending again.',
+  );
 }
 
 export function Conversation(props: ConversationProps) {
@@ -165,7 +169,7 @@ export function Conversation(props: ConversationProps) {
   const runTurn = signal<string | null>(null);
   const backend = signal<any>(null);
   const interactions = signal<AgentPendingInteractions>({ revision: -1, entries: [] });
-  const error = signal('');
+  const error = createText();
   const ready = signal(false);
   const transcriptStatus = signal<'loading' | 'live' | 'closing' | 'failed'>('loading');
   const before = signal<any>(null);
@@ -185,7 +189,7 @@ export function Conversation(props: ConversationProps) {
   const unresolved = signal<any[]>([]);
   const receiptsKnown = signal(false);
   const recovering = signal(false);
-  const notice = signal('');
+  const notice = createText();
   const reading = signal<'chat' | 'trajectory'>('chat');
   const readingSize = signal({ width: 640, height: 192 });
   const innerReader = signal<string | null>(null);
@@ -421,7 +425,7 @@ export function Conversation(props: ConversationProps) {
   });
 
   const report = (reason: unknown) => {
-    if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
+    if (alive) error.set(errorText(reason));
   };
   const publishHistory = (chunks: any[], through: number, older = false) => {
     batch(() => {
@@ -462,7 +466,7 @@ export function Conversation(props: ConversationProps) {
       includeThinking: true,
       view: 'conversation',
     });
-    if (page.through !== through) throw new Error('History changed its requested fence.');
+    if (page.through !== through) throw new UiError('History changed its requested fence.');
     return page;
   };
   const hydrateAttachmentMetadata = () => {
@@ -503,7 +507,7 @@ export function Conversation(props: ConversationProps) {
             first.messageId !== row.messageId ||
             first.role !== 'user'
           )
-            throw new Error('The original attachment metadata could not be verified.');
+            throw new UiError('The original attachment metadata could not be verified.');
           publishMetadata([first], through);
         })
         .catch((reason) => {
@@ -536,7 +540,7 @@ export function Conversation(props: ConversationProps) {
       .query('agent', 'historyLandmarks', { sessionId, through })
       .then((page) => {
         if (page.through !== through)
-          throw new Error('Turn landmarks changed their requested fence.');
+          throw new UiError('Turn landmarks changed their requested fence.');
         if (alive && page.through >= landmarks().through)
           landmarks.set({ through: page.through, items: page.landmarks });
       })
@@ -549,21 +553,13 @@ export function Conversation(props: ConversationProps) {
   const observe = async () => {
     const observed = await host.query('agent', 'observe', { sessionId });
     if (!alive) return observed;
-    if (observed.session.id !== sessionId) throw new Error('Host observed a different session.');
+    if (observed.session.id !== sessionId) throw new UiError('Host observed a different session.');
     latestKnown = Math.max(latestKnown, observed.through);
     readLandmarks(observed.through);
-    title.set(observed.session.title || 'Untitled conversation');
+    title.set(observed.session.title);
     archived.set(observed.session.archived);
     workspace.set(observed.session.workspace.path);
-    permissions.set(
-      (
-        {
-          read_only: 'Read only',
-          workspace_write: 'Workspace write',
-          danger_full_access: 'Full access',
-        } as any
-      )[observed.session.permissions.access],
-    );
+    permissions.set(observed.session.permissions.access);
     backend.set(observed.session.backend ?? observed.rememberedBackend ?? null);
     metrics.set(observed.metrics ?? null);
     if (observed.through >= runThrough) {
@@ -853,7 +849,7 @@ export function Conversation(props: ConversationProps) {
       for (;;) {
         const page = await stream.next();
         if (!alive) return;
-        if (page === null) throw new Error('Live updates ended.');
+        if (page === null) throw new UiError('Live updates ended.');
         batch(() => deliver(page));
       }
     } catch (reason) {
@@ -866,8 +862,12 @@ export function Conversation(props: ConversationProps) {
       try {
         await stream.close();
       } catch (reason) {
-        throw new Error(
-          `${failure ? String(failure.reason) : 'Observation stopped'}; original observation cleanup remains unconfirmed: ${String(reason)}`,
+        throw new UiError(
+          '{observation}; original observation cleanup remains unconfirmed: {reason}',
+          {
+            observation: failure ? errorText(failure.reason) : uiMessage('Observation stopped'),
+            reason: errorText(reason),
+          },
         );
       } finally {
         // This replaces only the read-only JS observer. Native Client retains
@@ -985,7 +985,7 @@ export function Conversation(props: ConversationProps) {
             before().field === previous.field &&
             before().offset === previous.offset
           ) {
-            notice.set('Older history did not advance. This turn could not be reached.');
+            notice.set(uiMessage('Older history did not advance. This turn could not be reached.'));
             return;
           }
         }
@@ -1015,7 +1015,7 @@ export function Conversation(props: ConversationProps) {
                     entry.group.rowIds.some((id) => targetRows.has(id)),
             );
       if (index < 0) {
-        notice.set('This turn has no visible messages in the current reading mode.');
+        notice.set(uiMessage('This turn has no visible messages in the current reading mode.'));
         return;
       }
       awayFromLatest.set(true);
@@ -1103,7 +1103,7 @@ export function Conversation(props: ConversationProps) {
     details: ModelDetails;
   }>({
     route: null,
-    details: { kind: 'unavailable', message: 'Choose a model.' },
+    details: { kind: 'unavailable', message: uiMessage('Choose a model.') },
   });
   let modelGeneration = 0;
   let modelRead: {
@@ -1124,7 +1124,7 @@ export function Conversation(props: ConversationProps) {
       modelRead = null;
       modelProjection.set({
         route: null,
-        details: { kind: 'unavailable', message: 'Choose a model.' },
+        details: { kind: 'unavailable', message: uiMessage('Choose a model.') },
       });
       return Promise.resolve();
     }
@@ -1147,14 +1147,14 @@ export function Conversation(props: ConversationProps) {
               ? { kind: 'ready', choice: result.choice }
               : {
                   kind: 'unavailable',
-                  message: `Model unavailable: ${captured.modelId}.`,
+                  message: uiMessage('Model unavailable: {model}.', { model: captured.modelId }),
                 },
         });
       } catch (reason) {
         if (current())
           modelProjection.set({
             route,
-            details: { kind: 'unavailable', message: String(reason) },
+            details: { kind: 'unavailable', message: errorText(reason) },
           });
       } finally {
         if (modelRead?.generation === generation) modelRead = null;
@@ -1172,15 +1172,17 @@ export function Conversation(props: ConversationProps) {
     if (!alive) return null;
     const backend = observed.session.backend ?? observed.rememberedBackend;
     if (expectedBackend !== undefined && !sameBackend(backendIdentity(backend), expectedBackend))
-      throw new Error('The model changed before confirmation. Send again to confirm it.');
-    if (backend?.kind !== 'model') throw new Error('Choose a model before sending.');
+      throw new UiError('The model changed before confirmation. Send again to confirm it.');
+    if (backend?.kind !== 'model') throw new UiError('Choose a model before sending.');
     const resolved = await host.query('settings', 'resolveModel', {
       connectionId: backend.connectionId,
       modelId: backend.modelId,
     });
     if (!alive) return null;
     if (resolved.kind !== 'ready')
-      throw new Error(`Model unavailable: ${backend.modelId}. Choose another model.`);
+      throw new UiError('Model unavailable: {model}. Choose another model.', {
+        model: backend.modelId,
+      });
     return { model: resolved.choice.selection, thinkingLevel: backend.thinkingLevel ?? null };
   };
 
@@ -1223,9 +1225,9 @@ export function Conversation(props: ConversationProps) {
     if (text !== undefined) attachments.sent(files.map((file) => file.id));
     notice.set(
       accepted.kind === 'queued'
-        ? 'Message queued.'
+        ? uiMessage('Message queued.')
         : text === undefined
-          ? 'Message accepted.'
+          ? uiMessage('Message accepted.')
           : '',
     );
     if (accepted.kind === 'queued') return;
@@ -1237,30 +1239,34 @@ export function Conversation(props: ConversationProps) {
 
   const sendBlockedReason = () => {
     if (transcriptStatus() === 'closing')
-      return 'Closing disconnected updates… Your draft is kept.';
+      return tr('Closing disconnected updates… Your draft is kept.');
     if (transcriptStatus() === 'failed')
       return ready()
-        ? 'Updates disconnected. Reconnecting automatically; your draft is kept.'
-        : 'History unavailable. Retrying automatically; your draft is kept.';
+        ? tr('Updates disconnected. Reconnecting automatically; your draft is kept.')
+        : tr('History unavailable. Retrying automatically; your draft is kept.');
     if (ready() && transcriptStatus() !== 'live')
-      return 'Reconnecting updates… Your draft is kept.';
-    if (!ready()) return 'Loading session history… Your draft is kept.';
+      return tr('Reconnecting updates… Your draft is kept.');
+    if (!ready()) return tr('Loading session history… Your draft is kept.');
     if (archived())
-      return 'This conversation is archived. Restore it in Sessions to send; your draft is kept.';
-    if (!draftReady()) return 'Loading the saved draft…';
-    if (savingFailed()) return 'The draft could not be saved. Sending is unavailable.';
+      return tr(
+        'This conversation is archived. Restore it in Sessions to send; your draft is kept.',
+      );
+    if (!draftReady()) return tr('Loading the saved draft…');
+    if (savingFailed()) return tr('The draft could not be saved. Sending is unavailable.');
     if (attachments.blocked()) return attachments.blocked();
-    if (sending()) return 'Confirming send… New typing is kept.';
-    if (recovering()) return 'Reading original receipts… New typing is kept.';
+    if (sending()) return tr('Confirming send… New typing is kept.');
+    if (recovering()) return tr('Reading original receipts… New typing is kept.');
     if (!receiptsKnown() || unresolved().length)
-      return 'Sending waits for the original receipt; it will not be replayed.';
+      return tr('Sending waits for the original receipt; it will not be replayed.');
     return '';
   };
   const send = async (text: string, expectedBackend?: BackendIdentity) => {
     if (!alive || (!text.trim() && attachments.files().length === 0)) return;
     if (sendBlockedReason()) {
       notice.set(
-        'This message was not sent. Your draft is kept; check the status below before trying again.',
+        uiMessage(
+          'This message was not sent. Your draft is kept; check the status below before trying again.',
+        ),
       );
       return;
     }
@@ -1274,14 +1280,14 @@ export function Conversation(props: ConversationProps) {
       if (!alive || model === null) return;
       await flushDraft();
       if (!alive) return;
-      if (savingFailed()) throw new Error('The draft could not be saved; it has not been sent.');
+      if (savingFailed()) throw new UiError('The draft could not be saved; it has not been sent.');
       if (editEpoch !== epoch)
-        throw new Error('The draft changed before confirmation. Send again to confirm it.');
+        throw new UiError('The draft changed before confirmation. Send again to confirm it.');
       if (
         expectedBackend !== undefined &&
         !sameBackend(backendIdentity(backend()), expectedBackend)
       )
-        throw new Error('The model changed before confirmation. Send again to confirm it.');
+        throw new UiError('The model changed before confirmation. Send again to confirm it.');
       // The native journal consumes only this exact revision. New edits keep
       // saving while confirmation waits and never inherit this send attempt.
       receiptsKnown.set(false);
@@ -1320,7 +1326,9 @@ export function Conversation(props: ConversationProps) {
       for (const original of originals) {
         if (!original.reference) {
           notice.set(
-            'An attempt was not confirmed. Explicitly abandon it below before starting a new send.',
+            uiMessage(
+              'An attempt was not confirmed. Explicitly abandon it below before starting a new send.',
+            ),
           );
           continue;
         }
@@ -1350,7 +1358,9 @@ export function Conversation(props: ConversationProps) {
       if (!alive) return;
       if (original.abandoned) {
         notice.set(
-          'Unconfirmed attempt abandoned. The draft is kept; press Enter explicitly to send a new attempt.',
+          uiMessage(
+            'Unconfirmed attempt abandoned. The draft is kept; press Enter explicitly to send a new attempt.',
+          ),
         );
       } else if (original.reference) {
         const reply = await recoverSend(client, operationId);
@@ -1411,11 +1421,11 @@ export function Conversation(props: ConversationProps) {
     snapshot: queued,
     running: () => invocation() !== null && !stopping(),
     async read(messageId, expectedRevision) {
-      if (!alive) throw new Error('This conversation is closed.');
+      if (!alive) throw new UiError('This conversation is closed.');
       return host.query('agent', 'queueMessage', { sessionId, messageId, expectedRevision });
     },
     async change(expectedRevision, edit) {
-      if (!alive) throw new Error('This conversation is closed.');
+      if (!alive) throw new UiError('This conversation is closed.');
       return props.control('editQueue', { sessionId, expectedRevision, edit });
     },
   };
@@ -1431,7 +1441,12 @@ export function Conversation(props: ConversationProps) {
     backend: () => backendIdentity(backend()),
     modelDetails,
     refreshModel,
-    permissions,
+    permissions: () =>
+      ({
+        read_only: tr('Read only'),
+        workspace_write: tr('Workspace write'),
+        danger_full_access: tr('Full access'),
+      })[permissions() as 'read_only' | 'workspace_write' | 'danger_full_access'] ?? permissions(),
     workspace,
     empty: () =>
       ready() &&
@@ -1466,7 +1481,7 @@ export function Conversation(props: ConversationProps) {
     },
     async flushDraft() {
       if (!draftReady()) {
-        notice.set('Wait for the saved draft before switching.');
+        notice.set(uiMessage('Wait for the saved draft before switching.'));
         return false;
       }
       await flushDraft();
@@ -1595,11 +1610,13 @@ export function Conversation(props: ConversationProps) {
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ ...captionTextStyle, color: C.accent }}>Retry attachment metadata</Text>
+          <Text style={{ ...captionTextStyle, color: C.accent }}>
+            {tr('Retry attachment metadata')}
+          </Text>
         </Button>
       </If>
       <Header
-        title={title()}
+        title={title() || tr('Untitled conversation')}
         workspace={workspace()}
         status={
           stopping()
@@ -1617,7 +1634,7 @@ export function Conversation(props: ConversationProps) {
       />
       <If when={transcriptStatus() === 'failed'}>
         <Button
-          accessibilityLabel={ready() ? 'Reconnect updates' : 'Retry loading conversation'}
+          accessibilityLabel={ready() ? tr('Reconnect updates') : tr('Retry loading conversation')}
           onPress={inputAction(retryTranscript, sessionId)}
           style={{
             ...controlStyle,
@@ -1628,7 +1645,7 @@ export function Conversation(props: ConversationProps) {
           focusStyle={{ backgroundColor: C.line }}
         >
           <Text style={{ ...captionTextStyle, color: C.accent }}>
-            {ready() ? 'Reconnect updates' : 'Retry loading conversation'}
+            {ready() ? tr('Reconnect updates') : tr('Retry loading conversation')}
           </Text>
         </Button>
       </If>
@@ -1646,7 +1663,7 @@ export function Conversation(props: ConversationProps) {
       >
         <Button
           role="tab"
-          accessibilityLabel="Chat"
+          accessibilityLabel={tr('Chat')}
           selected={reading() === 'chat'}
           style={controlStyle}
           onPress={inputAction(chooseReading, { owner: sessionId, mode: 'chat' })}
@@ -1660,12 +1677,12 @@ export function Conversation(props: ConversationProps) {
               fontWeight: reading() === 'chat' ? '700' : '400',
             }}
           >
-            Chat
+            {tr('Chat')}
           </Text>
         </Button>
         <Button
           role="tab"
-          accessibilityLabel="Trajectory"
+          accessibilityLabel={tr('Trajectory')}
           selected={reading() === 'trajectory'}
           style={controlStyle}
           onPress={inputAction(chooseReading, { owner: sessionId, mode: 'trajectory' })}
@@ -1679,7 +1696,7 @@ export function Conversation(props: ConversationProps) {
               fontWeight: reading() === 'trajectory' ? '700' : '400',
             }}
           >
-            Trajectory
+            {tr('Trajectory')}
           </Text>
         </Button>
       </View>
@@ -1730,7 +1747,9 @@ export function Conversation(props: ConversationProps) {
               if (event.offset.y <= 32) void loadOlder();
             }}
             empty={
-              <Text style={{ color: C.muted, paddingVertical: 32 }}>Loading session history…</Text>
+              <Text style={{ color: C.muted, paddingVertical: 32 }}>
+                {tr('Loading session history…')}
+              </Text>
             }
           >
             {(key) => (
@@ -1811,7 +1830,7 @@ export function Conversation(props: ConversationProps) {
                           !latestToolActivity(toolActivity(), invocation(), row().turnId ?? '')
                         }
                       >
-                        <ActivityStatus title={() => 'Writing response'} active={() => true} />
+                        <ActivityStatus title={() => tr('Writing response')} active={() => true} />
                       </If>
                       <MessageRow
                         item={row}
@@ -1873,7 +1892,9 @@ function metricText(value: any): string {
   const compact = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const parts: string[] = [];
   if (value.outputTokensPerSecond != null)
-    parts.push(`${value.outputTokensPerSecond.toFixed(1)} tok/s (last request)`);
+    parts.push(
+      tr('{speed} tok/s (last request)', { speed: value.outputTokensPerSecond.toFixed(1) }),
+    );
   if (value.contextTokens != null) {
     const context = `${value.approximate ? '≈' : ''}${compact(value.contextTokens)}`;
     const total = value.contextWindow != null ? ` / ${compact(value.contextWindow)}` : '';
@@ -1882,7 +1903,7 @@ function metricText(value: any): string {
         ? ` · ${Math.round((value.contextTokens / value.contextWindow) * 100)}%`
         : '';
     parts.push(
-      `Context${value.contextLastKnown ? ' (last known)' : ''} ${context}${total}${percent}`,
+      `${tr(value.contextLastKnown ? 'Context (last known)' : 'Context')} ${context}${total}${percent}`,
     );
   }
   return parts.join(' · ');

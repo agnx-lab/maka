@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, UiError, errorText, message as uiMessage } from './text';
+import { tr } from './locale';
 import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
@@ -51,7 +53,7 @@ export function MessageCopy(props: {
   through(): number;
 }) {
   const busy = signal(false);
-  const notice = signal('');
+  const notice = createText();
   const failed = signal(false);
   let alive = true;
   cleanup(() => {
@@ -110,7 +112,7 @@ export function MessageCopy(props: {
           end > source.totalBytes ||
           (end === offset && end !== source.totalBytes)
         ) {
-          throw new Error('The original message source could not be verified.');
+          throw new UiError('The original message source could not be verified.');
         }
         total = source.totalBytes;
         content += source.text;
@@ -120,11 +122,13 @@ export function MessageCopy(props: {
       if (!owns(original)) return;
       await Clipboard.writeText(content);
       if (owns(original))
-        notice.set(original.role === 'user' ? 'User message copied' : 'Message copied');
+        notice.set(
+          original.role === 'user' ? uiMessage('User message copied') : uiMessage('Message copied'),
+        );
     } catch (reason) {
       if (owns(original)) {
         failed.set(true);
-        notice.set(reason instanceof Error ? reason.message : String(reason));
+        notice.set(errorText(reason));
       }
     } finally {
       if (owns(original)) busy.set(false);
@@ -147,13 +151,15 @@ export function MessageCopy(props: {
         </Text>
       </If>
       <Button
-        accessibilityLabel={props.row().role === 'user' ? 'Copy user message' : 'Copy message'}
+        accessibilityLabel={
+          props.row().role === 'user' ? tr('Copy user message') : tr('Copy message')
+        }
         tooltip={
           busy()
-            ? 'Reading original message…'
+            ? tr('Reading original message…')
             : props.row().role === 'user'
-              ? 'Copy user message'
-              : 'Copy message'
+              ? tr('Copy user message')
+              : tr('Copy message')
         }
         disabled={target() === null}
         onPress={inputAction(copy, target())}

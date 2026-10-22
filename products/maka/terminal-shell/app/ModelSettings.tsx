@@ -40,15 +40,16 @@ import {
   controlDisabledStyle,
 } from './ui';
 import { Icon } from './Icon';
+import { tr } from './locale';
 
 type Section = 'general' | 'connections' | 'network' | 'plugins';
 type BackAction = { section: Section; identity: string };
-const sections: { id: Section; label: string }[] = [
+const sections = [
   { id: 'general', label: 'General' },
   { id: 'connections', label: 'Connections & models' },
   { id: 'network', label: 'Network' },
   { id: 'plugins', label: 'Plugins' },
-];
+] as const satisfies readonly { id: Section; label: string }[];
 
 // One native Dialog owns focus restoration. Forms keep their own canonical
 // snapshot and unsaved edits; all writes share the original native journal.
@@ -113,11 +114,11 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
     const current = section();
     return current === 'connections'
       ? {
-          connections: 'Connections & models',
-          providers: 'Add connection',
-          connection: 'Connection settings',
-          models: 'Connection models',
-          model: 'Model settings',
+          connections: tr('Connections & models'),
+          providers: tr('Add connection'),
+          connection: tr('Connection settings'),
+          models: tr('Connection models'),
+          model: tr('Model settings'),
         }[connections.page()]
       : pages[current].title();
   };
@@ -125,7 +126,7 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
     section() === 'connections'
       ? connections.page() !== 'connections' || !!connections.confirmation()
       : section() === 'general'
-        ? general.title() !== 'General settings'
+        ? general.editor() !== null
         : section() === 'plugins' && plugins.selected() !== null;
   return (
     <Dialog
@@ -171,10 +172,12 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
               disabled={operations.busy()}
               accessibilityLabel={
                 section() === 'connections'
-                  ? 'Back from connection settings'
-                  : `Back from ${section()} settings`
+                  ? tr('Back from connection settings')
+                  : section() === 'general'
+                    ? tr('Back from general settings')
+                    : tr('Back from plugin settings')
               }
-              tooltip="Back"
+              tooltip={tr('Back')}
               onPress={inputAction(back, backAction())}
               style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
               hoverStyle={controlHoverStyle}
@@ -189,8 +192,8 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
           </Text>
           <Button
             disabled={operations.busy()}
-            accessibilityLabel="Close settings"
-            tooltip="Close settings"
+            accessibilityLabel={tr('Close settings')}
+            tooltip={tr('Close settings')}
             onPress={inputAction(close, null)}
             style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
             hoverStyle={controlHoverStyle}
@@ -218,7 +221,9 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                 <Button
                   disabled={operations.busy()}
                   selected={section() === item().id}
-                  accessibilityLabel={`Settings section ${item().label}`}
+                  accessibilityLabel={tr('Settings section {section}', {
+                    section: tr(item().label),
+                  })}
                   onPress={inputAction(choose, { from: section(), to: item().id })}
                   style={{ ...controlStyle, minHeight: rail() ? 40 : 32 }}
                   selectedStyle={{ backgroundColor: C.raised }}
@@ -232,7 +237,7 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                       color: section() === item().id ? C.text : C.muted,
                     }}
                   >
-                    {item().label}
+                    {tr(item().label)}
                   </Text>
                 </Button>
               )}
@@ -254,11 +259,11 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                 style={{ gap: 8, padding: 12, backgroundColor: C.background, borderRadius: 12 }}
               >
                 <Text style={{ ...bodyTextStyle, color: C.warning }}>
-                  Earlier settings actions must be resolved before another change.
+                  {tr('Earlier settings actions must be resolved before another change.')}
                 </Text>
                 <Button
                   disabled={operations.busy()}
-                  accessibilityLabel="Recover settings actions"
+                  accessibilityLabel={tr('Recover settings actions')}
                   onPress={inputAction(recover, null)}
                   style={{ ...controlStyle, alignSelf: 'flex-start' }}
                   hoverStyle={controlHoverStyle}
@@ -266,7 +271,9 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                   disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ ...captionTextStyle, color: C.accent }}>
-                    {operations.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
+                    {operations.busy()
+                      ? tr('Checking receipts…')
+                      : tr('Recover original settings actions')}
                   </Text>
                 </Button>
                 <Each
@@ -283,7 +290,7 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                       disabledStyle={controlDisabledStyle}
                     >
                       <Text style={{ ...captionTextStyle, color: C.warning }}>
-                        Abandon unconfirmed {item().method}
+                        {tr('Abandon unconfirmed {method}', { method: item().method })}
                       </Text>
                     </Button>
                   )}

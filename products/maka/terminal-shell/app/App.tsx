@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, UiError, errorText, message as uiMessage } from './text';
+import { applyLanguagePreference, tr } from './locale';
 import { cleanup, effect, inputAction, mount, signal, Scroll, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
@@ -55,8 +57,8 @@ function App() {
   const resources = createResources({ selected, blocked: () => overlay() !== null });
   const sidebarExpanded = signal(true);
   const browserFocus = signal(false);
-  const error = signal('');
-  const status = signal('');
+  const error = createText();
+  const status = createText();
   const switching = signal(false);
   const busy = signal(false);
   const controls = signal<any[]>([]);
@@ -74,7 +76,7 @@ function App() {
     alive = false;
   });
   const report = (reason: unknown) => {
-    if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
+    if (alive) error.set(errorText(reason));
   };
   const presentInteraction = (
     original: { sessionId: string; requestId: string },
@@ -92,9 +94,13 @@ function App() {
         status.set(interactionOutcomeSummary(record.outcome));
         return true;
       }
-      report('The Host returned a different or incomplete original request outcome.');
+      report(new UiError('The Host returned a different or incomplete original request outcome.'));
     } else {
-      report(`Answer was not accepted: ${result.reason}. Refresh the request before trying again.`);
+      report(
+        new UiError('Answer was not accepted: {reason}. Refresh the request before trying again.', {
+          reason: result.reason,
+        }),
+      );
     }
     return false;
   };
@@ -125,13 +131,13 @@ function App() {
   const returned = (reply: any) => {
     const receipt = reply?.receipt;
     if (receipt?.kind !== 'recorded' || receipt.outcome?.kind !== 'returned')
-      throw new Error('Confirmation is still unknown. Recover the original action below.');
+      throw new UiError('Confirmation is still unknown. Recover the original action below.');
     const value = receipt.outcome.value;
     return value;
   };
   const control: Control = async (method, input) => {
     if (method !== 'stop' && !controlsKnown())
-      throw new Error('Checking earlier actions. Try again in a moment.');
+      throw new UiError('Checking earlier actions. Try again in a moment.');
     const originals: any[] = method === 'stop' ? await host.pendingControls() : controls();
     const pending = originals.find(
       (original) =>
@@ -143,11 +149,11 @@ function App() {
         (method !== 'respond' || original.correlation.requestId === input.requestId),
     );
     if (pending)
-      throw new Error(
+      throw new UiError(
         'This action has an unresolved original. Recover it below before trying again.',
       );
     if (method !== 'stop' && busy())
-      throw new Error('An action is being confirmed. Try again in a moment.');
+      throw new UiError('An action is being confirmed. Try again in a moment.');
     if (method !== 'stop') busy.set(true);
     try {
       const result = returned((await host.control(method, input)).reply);
@@ -226,13 +232,15 @@ function App() {
       handle() !== owner ||
       overlay()?.instance !== instance
     )
-      throw new Error('This model selection is no longer open.');
+      throw new UiError('This model selection is no longer open.');
     const result = await control('selectBackend', {
       sessionId: owner.sessionId,
       backend: { kind: 'model', ...backend },
     });
     if (result.kind !== 'committed')
-      throw new Error(`Model selection rejected: ${result.reason ?? result.kind}`);
+      throw new UiError('Model selection rejected: {reason}', {
+        reason: result.reason ?? result.kind,
+      });
     await owner.refresh();
   };
   const create = async (workspace: BrowserWorkspace, expectedSessionId = selected()) => {
@@ -240,14 +248,16 @@ function App() {
     try {
       error.set('');
       const result = await control('create', {
-        title: 'New conversation',
+        title: tr('New conversation'),
         automaticTitle: true,
         labels: [],
         workspace,
       });
       if (!alive) return;
       if (result.kind !== 'created')
-        throw new Error(`Conversation creation rejected: ${result.reason ?? result.kind}`);
+        throw new UiError('Conversation creation rejected: {reason}', {
+          reason: result.reason ?? result.kind,
+        });
       await switchSession(result.session.id, expectedSessionId);
       if (selected() === result.session.id) open({ kind: 'models', sessionId: result.session.id });
       await browsing.refresh();
@@ -267,7 +277,7 @@ function App() {
     const owner = handle();
     if (!alive || selected() !== sessionId || owner?.sessionId !== sessionId) return;
     if (!(await owner.flushDraft()))
-      throw new Error(
+      throw new UiError(
         'The conversation was deleted, but its latest draft is not saved. Return to the draft to check its status.',
       );
     if (alive && selected() === sessionId && handle() === owner) {
@@ -277,18 +287,18 @@ function App() {
   };
   const changeBrowsedSession = async (action: SessionAction, origin: string | null) => {
     if (!alive || selected() !== origin || switching() || busy())
-      throw new Error('This conversation action is no longer current.');
+      throw new UiError('This conversation action is no longer current.');
     const owner = handle();
     if (
       action.kind === 'remove' &&
       owner?.sessionId === action.session.id &&
       !(await owner.flushDraft())
     )
-      throw new Error(
+      throw new UiError(
         'The draft is not ready to save. Return to the conversation before deleting it.',
       );
     if (!alive || selected() !== origin || handle() !== owner)
-      throw new Error('This conversation action is no longer current.');
+      throw new UiError('This conversation action is no longer current.');
     const result = await performSessionAction(control, action);
     if (!alive) return;
     if (result.kind === 'removed') await removeSelected(result.sessionId);
@@ -359,51 +369,51 @@ function App() {
   const commands = (context: CommandContext): PaletteEntry[] => [
     {
       id: 'sessions',
-      title: 'Sessions',
-      detail: 'Resume a conversation',
+      title: tr('Sessions'),
+      detail: tr('Resume a conversation'),
       hint: 'Ctrl+O',
       run: inputAction(commandSessions, context),
     },
     {
       id: 'new',
-      title: 'New conversation',
-      detail: 'A fresh start in your workspace',
+      title: tr('New conversation'),
+      detail: tr('A fresh start in your workspace'),
       hint: 'Ctrl+N',
       run: inputAction(commandNew, context),
     },
     {
       id: 'workspace',
-      title: 'Choose workspace',
-      detail: 'Start a conversation in another folder',
+      title: tr('Choose workspace'),
+      detail: tr('Start a conversation in another folder'),
       run: inputAction(commandWorkspace, context),
     },
     {
       id: 'models',
-      title: 'Models',
-      detail: 'Choose the model for this conversation',
+      title: tr('Models'),
+      detail: tr('Choose the model for this conversation'),
       hint: 'Ctrl+G',
       run: inputAction(commandModels, context),
     },
     {
       id: 'settings',
-      title: 'Connections & models',
-      detail: 'Add connections, API keys and models',
+      title: tr('Connections & models'),
+      detail: tr('Add connections, API keys and models'),
       run: inputAction(commandSettings, context),
     },
     ...(context.sessionId
       ? [
           {
             id: 'files',
-            title: 'Files',
-            detail: 'Browse workspace files and current changes',
+            title: tr('Files'),
+            detail: tr('Browse workspace files and current changes'),
             run: inputAction(commandFiles, context),
           },
         ]
       : []),
     {
       id: 'latest',
-      title: 'Jump to latest',
-      detail: 'Return to the newest messages',
+      title: tr('Jump to latest'),
+      detail: tr('Return to the newest messages'),
       run: inputAction(commandLatest, {
         instance: context.instance,
         sessionId: context.sessionId,
@@ -412,15 +422,15 @@ function App() {
     },
     {
       id: 'history-focus',
-      title: 'Focus conversation',
-      detail: 'Scroll the whole conversation',
+      title: tr('Focus conversation'),
+      detail: tr('Scroll the whole conversation'),
       hint: 'Alt+↑',
       run: inputAction(commandHistory, context),
     },
     {
       id: 'activity-focus',
-      title: 'Focus activity',
-      detail: 'Read this turn’s independent activity panel',
+      title: tr('Focus activity'),
+      detail: tr('Read this turn’s independent activity panel'),
       hint: 'Alt+↓',
       run: inputAction(commandActivity, {
         instance: context.instance,
@@ -430,8 +440,8 @@ function App() {
     },
     {
       id: 'stop',
-      title: 'Stop',
-      detail: 'Cancel the current run',
+      title: tr('Stop'),
+      detail: tr('Cancel the current run'),
       hint: 'Esc',
       run: inputAction(commandStop, {
         instance: context.instance,
@@ -508,7 +518,7 @@ function App() {
       const owner = handle();
       if (owner && selected() === owner.sessionId) await owner.refresh();
       await browsing.refresh();
-      if (!responseConfirmed) status.set('Original actions checked.');
+      if (!responseConfirmed) status.set(uiMessage('Original actions checked.'));
     } catch (reason) {
       report(reason);
     } finally {
@@ -583,6 +593,12 @@ function App() {
     }
     wasDocked = docked;
   });
+  void host
+    .query('settings', 'assistantPreferences', {})
+    .then((preferences) => {
+      if (alive) applyLanguagePreference(preferences.language ?? 'auto', preferences.revision);
+    })
+    .catch(report);
   void refreshControls().catch(report);
   return (
     <View style={{ flex: 1, backgroundColor: C.background }}>
@@ -662,7 +678,7 @@ function App() {
                 }
               >
                 <Scroll
-                  accessibilityLabel="Action feedback"
+                  accessibilityLabel={tr('Action feedback')}
                   style={{
                     minHeight: bodyTextStyle.lineHeight + 16,
                     flexShrink: 1,
@@ -677,7 +693,9 @@ function App() {
                   </If>
                   <If when={switching() || busy()}>
                     <Text style={{ ...bodyTextStyle, color: C.muted }}>
-                      {switching() ? 'Saving draft before switching…' : 'Confirming action…'}
+                      {switching()
+                        ? tr('Saving draft before switching…')
+                        : tr('Confirming action…')}
                     </Text>
                   </If>
                   <If when={status()}>
@@ -695,10 +713,10 @@ function App() {
                     >
                       <Text style={{ ...bodyTextStyle, color: C.warning }}>
                         {recovering()
-                          ? 'Reading original action receipts…'
+                          ? tr('Reading original action receipts…')
                           : controlsKnown()
-                            ? `Recover original actions (${controls().length})`
-                            : 'Recheck original actions'}
+                            ? tr('Recover original actions ({count})', { count: controls().length })
+                            : tr('Recheck original actions')}
                       </Text>
                     </Button>
                     <Each
@@ -713,7 +731,8 @@ function App() {
                           focusStyle={controlFocusStyle}
                         >
                           <Text style={{ ...bodyTextStyle, color: C.warning }}>
-                            Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
+                            {tr('Abandon unconfirmed {method}', { method: original().method })} ·{' '}
+                            {original().id.slice(0, 8)}
                           </Text>
                         </Button>
                       )}
@@ -764,7 +783,9 @@ function App() {
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: C.accent }}>Open recovered fork · {recoveredFork()!.title}</Text>
+          <Text style={{ color: C.accent }}>
+            {tr('Open recovered fork')} · {recoveredFork()!.title}
+          </Text>
         </Button>
       </If>
       <Each

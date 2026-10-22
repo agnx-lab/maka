@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { renderText } from './text';
+import { tr } from './locale';
 import { inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { AttachmentPicker } from 'maka/host';
@@ -72,14 +74,14 @@ export function DraftAttachments(props: {
       <If when={owner.picker()}>
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
           <Button
-            accessibilityLabel="Close attachment picker"
+            accessibilityLabel={tr('Close attachment picker')}
             onPress={inputAction(owner.open, { owner: owner.sessionId, value: false })}
             style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
             hoverStyle={{ backgroundColor: C.line }}
             focusStyle={{ backgroundColor: C.line }}
           >
             <Icon name="close" color={C.secondary} />
-            <Text style={{ color: C.secondary }}>Close picker</Text>
+            <Text style={{ color: C.secondary }}>{tr('Close picker')}</Text>
           </Button>
         </View>
       </If>
@@ -87,12 +89,17 @@ export function DraftAttachments(props: {
         the original selected path and in-flight resource retain their owner. */}
       <AttachmentPicker
         client={owner.client}
+        pathLabel={tr('Attachment path')}
+        pathPlaceholder={tr('Absolute file path…')}
+        uploadLabel={tr('Upload selected file')}
+        uploadingLabel={tr('Uploading…')}
+        selectedFileLabel={tr('Selected file')}
         visible={owner.picker()}
         disabled={owner.restoring()}
         onStatus={owner.status}
       />
       <If when={owner.files().length > 0}>
-        <Scroll horizontal accessibilityLabel="Draft attachments" style={{ flexShrink: 0 }}>
+        <Scroll horizontal accessibilityLabel={tr('Draft attachments')} style={{ flexShrink: 0 }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
             <Each of={owner.files()} key={(file) => file.id}>
               {(file) => {
@@ -128,14 +135,14 @@ export function DraftAttachments(props: {
                             offset: 0,
                           },
                         }}
-                        label={`Open attachment ${original.name}`}
+                        label={tr('Open attachment {name}', { name: original.name })}
                         tooltip={`${original.name}\n${size(original.bytes)}`}
                         preview={props.preview}
                       />
                     </If>
                     <Button
-                      accessibilityLabel={`Remove attachment ${original.name}`}
-                      tooltip={`Remove ${original.name}`}
+                      accessibilityLabel={tr('Remove attachment {name}', { name: original.name })}
+                      tooltip={tr('Remove {name}', { name: original.name })}
                       onPress={inputAction(owner.remove, {
                         owner: owner.sessionId,
                         id: original.id,
@@ -173,16 +180,16 @@ export function DraftAttachments(props: {
               }}
             >
               {row().kind === 'reading'
-                ? 'Reading selected file…'
+                ? tr('Reading selected file…')
                 : row().kind === 'uploading'
-                  ? 'Confirming upload…'
+                  ? tr('Confirming upload…')
                   : row().kind === 'unknown'
-                    ? 'Original upload needs confirmation'
-                    : 'Upload failed'}
+                    ? tr('Original upload needs confirmation')
+                    : tr('Upload failed')}
             </Text>
             <If when={row().error}>
               <Text selectable style={{ color: C.danger }}>
-                {row().error}
+                {renderText(row().error!)}
               </Text>
             </If>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -190,7 +197,7 @@ export function DraftAttachments(props: {
                 <Button
                   disabled={owner.recovering() !== null}
                   accessibilityLabel={
-                    row().original ? 'Recover original upload' : 'Check original upload'
+                    row().original ? tr('Recover original upload') : tr('Check original upload')
                   }
                   onPress={inputAction(row().original ? owner.recover : owner.inspect, {
                     owner: owner.sessionId,
@@ -201,7 +208,7 @@ export function DraftAttachments(props: {
                   focusStyle={{ backgroundColor: C.line }}
                 >
                   <Text style={{ color: C.accent }}>
-                    {row().original ? 'Recover original upload' : 'Check original upload'}
+                    {row().original ? tr('Recover original upload') : tr('Check original upload')}
                   </Text>
                 </Button>
                 <If when={row().original && !row().original.reference}>
@@ -215,13 +222,13 @@ export function DraftAttachments(props: {
                     hoverStyle={{ backgroundColor: C.line }}
                     focusStyle={{ backgroundColor: C.line }}
                   >
-                    <Text style={{ color: C.warning }}>Abandon unconfirmed upload</Text>
+                    <Text style={{ color: C.warning }}>{tr('Abandon unconfirmed upload')}</Text>
                   </Button>
                 </If>
               </If>
               <If when={row().kind === 'failed'}>
                 <Button
-                  accessibilityLabel={`Remove failed attachment ${row().name}`}
+                  accessibilityLabel={tr('Remove failed attachment {name}', { name: row().name })}
                   onPress={inputAction(owner.remove, {
                     owner: owner.sessionId,
                     id: row().id,
@@ -230,7 +237,7 @@ export function DraftAttachments(props: {
                   hoverStyle={{ backgroundColor: C.line }}
                   focusStyle={{ backgroundColor: C.line }}
                 >
-                  <Text style={{ color: C.muted }}>Remove</Text>
+                  <Text style={{ color: C.muted }}>{tr('Remove')}</Text>
                 </Button>
               </If>
             </View>
@@ -247,7 +254,7 @@ export function DraftAttachments(props: {
           hoverStyle={{ backgroundColor: C.line }}
           focusStyle={{ backgroundColor: C.line }}
         >
-          <Text style={{ color: C.accent }}>Retry attachment updates</Text>
+          <Text style={{ color: C.accent }}>{tr('Retry attachment updates')}</Text>
         </Button>
       </If>
     </View>
@@ -262,7 +269,7 @@ export function HistoryAttachments(props: {
   preview(image: ImagePreview): void;
 }) {
   return (
-    <Scroll horizontal accessibilityLabel="Message attachments" style={{ flexShrink: 0 }}>
+    <Scroll horizontal accessibilityLabel={tr('Message attachments')} style={{ flexShrink: 0 }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
         <Each
           of={props.attachments.map((attachment, index) => ({ ...attachment, index }))}
@@ -305,7 +312,7 @@ export function HistoryAttachments(props: {
                       },
                     },
                   }}
-                  label={`Open attachment ${original.name}`}
+                  label={tr('Open attachment {name}', { name: original.name })}
                   tooltip={`${original.name}\n${size(original.bytes)} · ${original.kind}`}
                   preview={props.preview}
                 />

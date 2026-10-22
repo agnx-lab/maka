@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { effect, inputAction, signal, View, type JSX } from 'nsh';
 import { windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
@@ -113,7 +114,7 @@ export function Workbench(props: {
           <WorkspaceBrowser {...props.browser} docked resize={resize} />
         </View>
         <View
-          accessibilityLabel="Resize session browser"
+          accessibilityLabel={tr('Resize session browser')}
           onStartShouldSetResponder={() => true}
           onResponderGrant={(event) => {
             drag = {
@@ -150,7 +151,7 @@ export function Workbench(props: {
       <View style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{props.children}</View>
       <If when={preview()}>
         <View
-          accessibilityLabel="Resize workspace preview"
+          accessibilityLabel={tr('Resize workspace preview')}
           onStartShouldSetResponder={() => true}
           onResponderGrant={(event) => {
             drag = {

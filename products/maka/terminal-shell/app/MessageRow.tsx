@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { computed, inputAction, signal, Text, View } from 'nsh';
 import type { JSX } from 'nsh';
 import { Button } from 'nsh/base';
@@ -87,7 +88,7 @@ export function MessageRow({
           row().tool != null || row().role === 'tool_call' || row().role === 'tool_result';
         const compact = () => thinking() || isTool();
         const user = () => row().role === 'user';
-        const summary = () => `Thinking${preview() ? ` · ${preview()}` : ''}`;
+        const summary = () => `${tr('Thinking')}${preview() ? ` · ${preview()}` : ''}`;
         const timestamp = () => {
           const value = (row() as Row & { timestamp?: number }).timestamp;
           if (typeof value !== 'number') return '';
@@ -159,9 +160,11 @@ export function MessageRow({
                         </If>
                         <Button
                           accessibilityLabel={
-                            sourceMode() ? 'Show formatted message' : 'Show message source'
+                            sourceMode() ? tr('Show formatted message') : tr('Show message source')
                           }
-                          tooltip={sourceMode() ? 'Show formatted message' : 'Show message source'}
+                          tooltip={
+                            sourceMode() ? tr('Show formatted message') : tr('Show message source')
+                          }
                           selected={sourceMode()}
                           onPress={inputAction(setSourceMode, {
                             sessionId,
@@ -220,10 +223,14 @@ export function MessageRow({
                           <If when={expanded()}>
                             <Button
                               accessibilityLabel={
-                                sourceMode() ? 'Show formatted thinking' : 'Show thinking source'
+                                sourceMode()
+                                  ? tr('Show formatted thinking')
+                                  : tr('Show thinking source')
                               }
                               tooltip={
-                                sourceMode() ? 'Show formatted thinking' : 'Show thinking source'
+                                sourceMode()
+                                  ? tr('Show formatted thinking')
+                                  : tr('Show thinking source')
                               }
                               selected={sourceMode()}
                               onPress={inputAction(setSourceMode, {

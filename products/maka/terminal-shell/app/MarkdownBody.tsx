@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { errorText, renderText, type UiText } from './text';
+import { tr } from './locale';
 import { cleanup, computed, effect, signal, Text, View } from 'nsh';
 import { markdown } from 'maka/markdown';
 import type { MarkdownBlock } from 'maka/markdown';
@@ -36,7 +38,7 @@ const sameInput = (left: Input | null, right: Input | null) =>
 
 export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
   const projection = signal<Projection | null>(null);
-  const failure = signal<{ input: Input; message: string } | null>(null);
+  const failure = signal<{ input: Input; message: UiText } | null>(null);
   let wanted: Input | null = null;
   let preparing = false;
   let alive = true;
@@ -75,7 +77,7 @@ export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
     } catch (reason) {
       if (alive && sameInput(captured, wanted)) {
         projection.set(null);
-        failure.set({ input: captured, message: String(reason) });
+        failure.set({ input: captured, message: errorText(reason) });
       }
     } finally {
       preparing = false;
@@ -117,7 +119,7 @@ export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
           </Text>
           <If when={failure()}>
             <Text style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.danger }}>
-              Formatting unavailable: {failure()!.message}
+              {tr('Formatting unavailable: {reason}', { reason: renderText(failure()!.message) })}
             </Text>
           </If>
         </View>

@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, UiError, errorText, message as uiMessage } from './text';
+import { tr } from './locale';
 import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
@@ -55,7 +57,7 @@ export function FinalActions(props: {
   fork(action: Extract<SessionAction, { kind: 'fork' }>): Promise<void>;
 }) {
   const pending = signal(false);
-  const notice = signal('');
+  const notice = createText();
   const usage = signal<Target | null>(null);
   let usageButton: YNode | undefined;
   let alive = true;
@@ -90,16 +92,16 @@ export function FinalActions(props: {
       });
       if (!owns(original)) return;
       if (observed.session.id !== original.sessionId)
-        throw new Error('The Host observed a different conversation.');
+        throw new UiError('The Host observed a different conversation.');
       await props.fork({
         kind: 'fork',
         session: observed.session,
         title: forkTitle(observed.session.title),
         turnId: original.turnId,
       });
-      if (owns(original)) notice.set('Fork created. Open it in Sessions.');
+      if (owns(original)) notice.set(uiMessage('Fork created. Open it in Sessions.'));
     } catch (reason) {
-      if (owns(original)) notice.set(reason instanceof Error ? reason.message : String(reason));
+      if (owns(original)) notice.set(errorText(reason));
     } finally {
       if (alive) pending.set(false);
     }
@@ -148,8 +150,8 @@ export function FinalActions(props: {
         />
         <Button
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
-          accessibilityLabel="Fork from this turn"
-          tooltip={pending() ? 'Creating fork…' : 'Fork from this turn'}
+          accessibilityLabel={tr('Fork from this turn')}
+          tooltip={pending() ? tr('Creating fork…') : tr('Fork from this turn')}
           disabled={pending() || target() === null}
           onPress={inputAction(fork, target())}
           hoverStyle={{ backgroundColor: C.surface }}
@@ -162,8 +164,8 @@ export function FinalActions(props: {
             usageButton = node;
           }}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
-          accessibilityLabel="View this turn's model usage"
-          tooltip="View this turn's model usage"
+          accessibilityLabel={tr("View this turn's model usage")}
+          tooltip={tr("View this turn's model usage")}
           disabled={target() === null}
           onPress={inputAction(showUsage, target())}
           hoverStyle={{ backgroundColor: C.surface }}

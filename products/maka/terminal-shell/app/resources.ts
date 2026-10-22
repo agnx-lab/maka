@@ -17,11 +17,17 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { cleanup, effect, signal, untracked } from 'nsh';
 import type { YNode } from 'nsh';
 import { createWorkspaceFiles, type WorkspaceFileTarget } from './workspaceFileState';
 import { createCurrentFile, type CurrentFileModel } from './CurrentFile';
-import { createCurrentDiff, type CurrentDiffTarget, type CurrentDiffModel } from './CurrentDiff';
+import {
+  createCurrentDiff,
+  gitAreaLabel,
+  type CurrentDiffTarget,
+  type CurrentDiffModel,
+} from './CurrentDiff';
 import type { ImagePreview } from './ImageThumbnail';
 import type { ViewerImage } from './ImageViewer';
 import { createTerminals, type TerminalModel } from './terminalState';
@@ -124,7 +130,12 @@ export function createResources(options: { selected(): string | null; blocked():
       instance,
       identity: `diff:${target.area}:${target.path.bytesBase64}`,
       sessionId: target.sessionId,
-      title: `${target.title} · ${target.area}`,
+      get title() {
+        return tr('{title} · {area}', {
+          title: target.title,
+          area: gitAreaLabel[target.area].toLowerCase(),
+        });
+      },
       model: createCurrentDiff(target),
     }));
   const headerOpener = (sessionId: string) => {
@@ -151,7 +162,9 @@ export function createResources(options: { selected(): string | null; blocked():
       instance,
       identity,
       sessionId,
-      title: 'Original image',
+      get title() {
+        return tr('Original image');
+      },
       image,
     }));
     const fallback = headerOpener(sessionId);
@@ -224,7 +237,9 @@ export function createResources(options: { selected(): string | null; blocked():
         instance,
         identity: `terminal:${entry.result.ref}`,
         sessionId: entry.sessionId,
-        title: entry.result.cmd || 'Terminal',
+        get title() {
+          return entry.result.cmd || tr('Terminal');
+        },
         model,
       }));
     },

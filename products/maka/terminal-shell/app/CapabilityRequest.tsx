@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { Text, View } from 'nsh';
 import type { InteractionRequest } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { Icon } from './Icon';
@@ -55,48 +56,56 @@ export function CapabilityRequest(props: { request: Request; sessionId: string }
         <View style={{ flex: 1, minWidth: 0, gap: 8 }}>
           <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}>
             {computerCapability(props.request)
-              ? 'Computer access for this session'
-              : 'Requested client capability'}
+              ? tr('Computer access for this session')
+              : tr('Requested client capability')}
           </Text>
           <Text selectable style={{ ...codeTextStyle, color: C.secondary }}>
-            {`${props.request.target.toolName} · Permission boundary: ${props.request.baseRevision ?? 'unavailable'}`}
+            {tr('{tool} · Permission boundary: {revision}', {
+              tool: props.request.target.toolName,
+              revision: props.request.baseRevision ?? tr('unavailable'),
+            })}
           </Text>
           <If when={computerCapability(props.request)}>
             <Text selectable style={{ ...bodyTextStyle, color: C.secondary }}>
-              This allows the requesting tool to inspect and control the local computer, including
-              screenshots, keyboard and pointer actions. The grant lasts for this session's current
-              permission boundary.
+              {tr(
+                "This allows the requesting tool to inspect and control the local computer, including screenshots, keyboard and pointer actions. The grant lasts for this session's current permission boundary.",
+              )}
             </Text>
           </If>
         </View>
       </View>
       <View style={{ gap: 8 }}>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>Scope</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>{tr('Scope')}</Text>
         <Text selectable style={{ ...bodyTextStyle, color: C.secondary }}>
           {props.request.target.scope.kind === 'browser_origin'
-            ? `Browser origin: ${props.request.target.scope.origin}`
+            ? tr('Browser origin: {origin}', { origin: props.request.target.scope.origin })
             : props.request.target.scope.kind === 'mcp_tool'
-              ? `Only ${props.request.target.scope.serverId} · ${props.request.target.scope.toolName}`
-              : 'Applies to this capability within the current permission boundary.'}
+              ? tr('Only {server} · {tool}', {
+                  server: props.request.target.scope.serverId,
+                  tool: props.request.target.scope.toolName,
+                })
+              : tr('Applies to this capability within the current permission boundary.')}
         </Text>
       </View>
       <If when={!computerCapability(props.request)}>
         <Text style={{ ...bodyTextStyle, color: C.warning }}>
-          This Host cannot answer the requested capability. The original request remains pending.
+          {tr(
+            'This Host cannot answer the requested capability. The original request remains pending.',
+          )}
         </Text>
       </If>
       <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 16 }}>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>Request details</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>{tr('Request details')}</Text>
         <Each
           of={[
-            ['Session', props.sessionId],
-            ['Provider', props.request.target.providerId],
-            ['Contract', props.request.target.contractId],
-            ['Server', props.request.target.serverId],
-            ['Tool', props.request.target.toolName],
-            ['Capability', props.request.target.capability],
-            ['Scope', JSON.stringify(props.request.target.scope)],
-            ['Permission boundary', String(props.request.baseRevision ?? 'unavailable')],
+            [tr('Session'), props.sessionId],
+            [tr('Provider'), props.request.target.providerId],
+            [tr('Contract'), props.request.target.contractId],
+            [tr('Server'), props.request.target.serverId],
+            [tr('Tool'), props.request.target.toolName],
+            [tr('Capability'), props.request.target.capability],
+            [tr('Scope'), JSON.stringify(props.request.target.scope)],
+            [tr('Permission boundary'), String(props.request.baseRevision ?? tr('unavailable'))],
           ]}
         >
           {(detail) => (

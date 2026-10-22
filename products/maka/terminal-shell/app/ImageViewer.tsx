@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { createText } from './text';
 import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { createAnimatedValue } from 'nsh/animated';
@@ -24,6 +25,7 @@ import { Button, Dialog } from 'nsh/base';
 import { Image } from 'nsh/image';
 import { keymap } from 'nsh/keymap';
 import { Icon } from './Icon';
+import { tr } from './locale';
 import { C, captionTextStyle, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
 
 export type ViewerImage = { uri: string; width: number; height: number; title: string };
@@ -53,8 +55,8 @@ export function ImageViewerButton(props: { image: ViewerImage; open: OpenImageVi
       ref={(node) => {
         button = node;
       }}
-      accessibilityLabel="Open image full screen"
-      tooltip="Open full screen"
+      accessibilityLabel={tr('Open image full screen')}
+      tooltip={tr('Open full screen')}
       onPress={inputAction(show, image)}
       style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
       hoverStyle={controlHoverStyle}
@@ -68,7 +70,7 @@ export function ImageViewerButton(props: { image: ViewerImage; open: OpenImageVi
 export function ImageViewer(props: { image: ViewerImage; close(): void }) {
   const image = props.image;
   const viewport = signal({ width: 0, height: 0 });
-  const error = signal('');
+  const error = createText();
   const scale = createAnimatedValue(1);
   const x = createAnimatedValue(0);
   const y = createAnimatedValue(0);
@@ -122,11 +124,11 @@ export function ImageViewer(props: { image: ViewerImage; close(): void }) {
     <Dialog animation="none" onOpenChange={props.close} style={{ flex: 1 }}>
       <View
         ref={bind}
-        accessibilityLabel="Full screen image viewer"
+        accessibilityLabel={tr('Full screen image viewer')}
         style={{ flex: 1, minWidth: 0, minHeight: 0, backgroundColor: '#000000b3' }}
       >
         <View
-          accessibilityLabel="Image viewport"
+          accessibilityLabel={tr('Image viewport')}
           pan={{ x, y }}
           pinch={{ scale }}
           onLayout={(event) => {
@@ -189,8 +191,8 @@ export function ImageViewer(props: { image: ViewerImage; close(): void }) {
             </If>
           </View>
           <Button
-            accessibilityLabel="Close full screen image"
-            tooltip="Close · Esc"
+            accessibilityLabel={tr('Close full screen image')}
+            tooltip={tr('Close · Esc')}
             onPress={props.close}
             style={{
               ...controlStyle,
@@ -224,17 +226,25 @@ export function ImageViewer(props: { image: ViewerImage; close(): void }) {
           >
             <Each
               of={[
-                { kind: 'fit' as const, label: 'Fit image to window', caption: 'Fit' },
-                { kind: 'actual' as const, label: 'Show image at actual size', caption: '100%' },
-                { kind: 'out' as const, label: 'Zoom image out', caption: '−' },
-                { kind: 'in' as const, label: 'Zoom image in', caption: '+' },
+                {
+                  kind: 'fit' as const,
+                  label: () => tr('Fit image to window'),
+                  caption: () => tr('Fit'),
+                },
+                {
+                  kind: 'actual' as const,
+                  label: () => tr('Show image at actual size'),
+                  caption: () => '100%',
+                },
+                { kind: 'out' as const, label: () => tr('Zoom image out'), caption: () => '−' },
+                { kind: 'in' as const, label: () => tr('Zoom image in'), caption: () => '+' },
               ]}
               key={(item) => item.kind}
             >
               {(item) => (
                 <Button
-                  accessibilityLabel={item().label}
-                  tooltip={item().label}
+                  accessibilityLabel={item().label()}
+                  tooltip={item().label()}
                   onPress={inputAction(control, { uri: image.uri, kind: item().kind })}
                   style={{
                     ...controlStyle,
@@ -247,7 +257,7 @@ export function ImageViewer(props: { image: ViewerImage; close(): void }) {
                   hoverStyle={controlHoverStyle}
                   focusStyle={controlFocusStyle}
                 >
-                  <Text style={{ ...captionTextStyle, color: C.text }}>{item().caption}</Text>
+                  <Text style={{ ...captionTextStyle, color: C.text }}>{item().caption()}</Text>
                 </Button>
               )}
             </Each>

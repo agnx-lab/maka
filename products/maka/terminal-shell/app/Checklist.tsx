@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, UiError, errorText } from './text';
+import { tr } from './locale';
 import { batch, cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -35,7 +37,7 @@ export function Checklist(props: { sessionId: string }) {
   const nextOffset = signal<AgentChecklist['nextOffset']>(null);
   const expanded = signal(false);
   const loading = signal(false);
-  const error = signal('');
+  const error = createText();
   let alive = true;
   let generation = 0;
   let stream: Subscription | null = null;
@@ -61,7 +63,7 @@ export function Checklist(props: { sessionId: string }) {
         nextOffset.set(next.nextOffset);
       });
     } catch (reason) {
-      if (alive && currentGeneration === generation) error.set(String(reason));
+      if (alive && currentGeneration === generation) error.set(errorText(reason));
     } finally {
       if (alive && currentGeneration === generation) loading.set(false);
     }
@@ -83,7 +85,7 @@ export function Checklist(props: { sessionId: string }) {
       for (;;) {
         const page: AgentChecklist | null = await opened.next();
         if (!alive) return;
-        if (page === null) throw new Error('Checklist updates ended. Reopen the conversation.');
+        if (page === null) throw new UiError('Checklist updates ended. Reopen the conversation.');
         if (snapshot() && page.revision === snapshot()!.revision) continue;
         generation += 1;
         batch(() => {
@@ -101,16 +103,16 @@ export function Checklist(props: { sessionId: string }) {
       }
     }
   })().catch((reason) => {
-    if (alive) error.set(String(reason));
+    if (alive) error.set(errorText(reason));
   });
   return (
     <If when={snapshot()?.enabled && snapshot()!.total > 0}>
       <View
-        accessibilityLabel="Conversation todo dock"
+        accessibilityLabel={tr('Conversation todo dock')}
         style={{ backgroundColor: C.surface, borderRadius: 8 }}
       >
         <Button
-          accessibilityLabel="Toggle conversation todo"
+          accessibilityLabel={tr('Toggle conversation todo')}
           selected={expanded()}
           onPress={inputAction(setExpanded, { sessionId, open: !expanded() })}
           style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
@@ -120,13 +122,13 @@ export function Checklist(props: { sessionId: string }) {
         >
           <Icon name={expanded() ? 'down' : 'right'} color={C.secondary} />
           <Text style={{ ...captionTextStyle, color: C.text }}>
-            Todo {snapshot()!.completed}/{snapshot()!.total}
+            {tr('Todo')} {snapshot()!.completed}/{snapshot()!.total}
           </Text>
           <Text numberOfLines={1} style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
             {snapshot()!.current?.content ??
               (snapshot()!.completed === snapshot()!.total
-                ? 'All items complete'
-                : 'No active item')}
+                ? tr('All items complete')
+                : tr('No active item'))}
           </Text>
         </Button>
         <If when={expanded()}>

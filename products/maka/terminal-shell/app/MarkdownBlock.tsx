@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import { cleanup, computed, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
@@ -163,7 +164,7 @@ function TableBlock(props: { table(): MarkdownTable; compact?: boolean }) {
     );
   });
   return (
-    <Scroll horizontal accessibilityLabel="Markdown table" style={{ flexGrow: 0 }}>
+    <Scroll horizontal accessibilityLabel={tr('Markdown table')} style={{ flexGrow: 0 }}>
       <View
         style={{
           display: 'grid',
@@ -275,11 +276,11 @@ function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
         <Text style={{ ...captionTextStyle, color: C.muted, flex: 1 }}>
           {block().language || 'code'}
         </Text>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>{copied() ? 'Copied' : ''}</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>{copied() ? tr('Copied') : ''}</Text>
         <Button
-          accessibilityLabel="Wrap code"
+          accessibilityLabel={tr('Wrap code')}
           selected={wrapped()}
-          tooltip={wrapped() ? 'Show original columns' : 'Wrap long lines'}
+          tooltip={wrapped() ? tr('Show original columns') : tr('Wrap long lines')}
           onPress={inputAction(toggleWrapped, { key: key(), wrapped: wrapped() })}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={{ backgroundColor: C.line }}
@@ -288,8 +289,8 @@ function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
           <Icon name={wrapped() ? 'nowrap' : 'wrap'} color={C.secondary} />
         </Button>
         <Button
-          accessibilityLabel="Copy code"
-          tooltip={copied() ? 'Code copied' : 'Copy code'}
+          accessibilityLabel={tr('Copy code block')}
+          tooltip={copied() ? tr('Code copied') : tr('Copy code block')}
           onPress={action()}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={{ backgroundColor: C.line }}

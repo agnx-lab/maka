@@ -20,6 +20,7 @@
 import { inputAction, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { ModelSettingsOwner } from './settings';
+import { tr } from './locale';
 import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: boolean }) {
@@ -30,15 +31,17 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
   return (
     <If when={methods().length > 0}>
       <View style={{ gap: 8 }}>
-        <Text style={{ color: C.text, fontWeight: '700' }}>Provider sign-in</Text>
+        <Text style={{ color: C.text, fontWeight: '700' }}>{tr('Provider sign-in')}</Text>
         <If when={!owner.editor()!.baseline}>
-          <Text style={{ color: C.muted }}>Save this connection before starting sign-in.</Text>
+          <Text style={{ color: C.muted }}>
+            {tr('Save this connection before starting sign-in.')}
+          </Text>
         </If>
         <If when={owner.editor()!.baseline && !login()}>
           <Text style={{ color: C.muted }}>
             {owner.credential()?.configured
-              ? 'A provider credential is stored. Sign in again to replace it.'
-              : 'Complete sign-in with your provider. Credentials stay in the Host vault.'}
+              ? tr('A provider credential is stored. Sign in again to replace it.')
+              : tr('Complete sign-in with your provider. Credentials stay in the Host vault.')}
           </Text>
           <Each of={methods()} key={(method) => method.id}>
             {(method) => (
@@ -57,19 +60,19 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
           </Each>
           <If when={owner.dirty()}>
             <Text style={{ color: C.muted }}>
-              Save or discard connection edits before signing in.
+              {tr('Save or discard connection edits before signing in.')}
             </Text>
           </If>
         </If>
         <If when={login()}>
           <Text style={{ color: C.muted }}>
             {login()!.cancelling
-              ? 'Cancelling sign-in; waiting for the original result…'
+              ? tr('Cancelling sign-in; waiting for the original result…')
               : login()!.prompt
                 ? login()!.prompt!.userCode
-                  ? 'Open this URL in your browser and enter the code. Waiting for sign-in…'
-                  : 'Open this URL in your browser. Waiting for sign-in…'
-                : 'Starting sign-in…'}
+                  ? tr('Open this URL in your browser and enter the code. Waiting for sign-in…')
+                  : tr('Open this URL in your browser. Waiting for sign-in…')
+                : tr('Starting sign-in…')}
           </Text>
           <If when={login()!.prompt}>
             <Text selectable style={{ color: C.text }}>
@@ -82,7 +85,7 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
             </If>
             <View style={{ flexDirection: 'row', gap: 16 }}>
               <Button
-                accessibilityLabel="Copy sign-in URL"
+                accessibilityLabel={tr('Copy sign-in URL')}
                 onPress={inputAction(owner.login.copy, {
                   occurrence: login()!.occurrence,
                   field: 'url',
@@ -93,11 +96,11 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
                 focusStyle={controlFocusStyle}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text style={{ color: C.accent }}>Copy URL</Text>
+                <Text style={{ color: C.accent }}>{tr('Copy URL')}</Text>
               </Button>
               <If when={login()!.prompt!.userCode}>
                 <Button
-                  accessibilityLabel="Copy sign-in code"
+                  accessibilityLabel={tr('Copy sign-in code')}
                   onPress={inputAction(owner.login.copy, {
                     occurrence: login()!.occurrence,
                     field: 'userCode',
@@ -108,13 +111,13 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>Copy code</Text>
+                  <Text style={{ color: C.accent }}>{tr('Copy code')}</Text>
                 </Button>
               </If>
             </View>
           </If>
           <Button
-            accessibilityLabel="Cancel provider sign-in"
+            accessibilityLabel={tr('Cancel provider sign-in')}
             disabled={login()!.cancelling}
             onPress={inputAction(owner.login.cancel, login()!.occurrence)}
             style={controlStyle}
@@ -122,7 +125,7 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.warning }}>Cancel sign-in</Text>
+            <Text style={{ color: C.warning }}>{tr('Cancel sign-in')}</Text>
           </Button>
         </If>
       </View>

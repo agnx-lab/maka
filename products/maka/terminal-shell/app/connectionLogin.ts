@@ -25,6 +25,7 @@ import type {
   SettingsLoginPrompt,
 } from '../../../../packages/plugin-sdk/src/index.js';
 import { host } from './host';
+import { errorText, message, UiError } from './text';
 import { settingsRejection, settingsValue, type SettingsOperations } from './settingsOperations';
 
 export type LoginAction = { editor: number; input: SettingsCredentialLogin };
@@ -68,9 +69,11 @@ export function createConnectionLogin(
         for (;;) {
           const event = await mutation.next();
           if (!event)
-            throw new Error('Sign-in ended without a final receipt. Recover the original action.');
+            throw new UiError(
+              'Sign-in ended without a final receipt. Recover the original action.',
+            );
           if (event.kind === 'not_dispatched') {
-            if (alive) operations.notice.set('Sign-in cancelled before it started.');
+            if (alive) operations.notice.set(message('Sign-in cancelled before it started.'));
             return;
           }
           if (event.kind === 'progress') {
@@ -81,14 +84,15 @@ export function createConnectionLogin(
             continue;
           }
           const result = settingsValue(event.reply) as SettingsCredentialLoginResult;
-          let failure: Error | null = null;
+          let failure: UiError | null = null;
           if (result.kind === 'saved') {
             // A saved business receipt remains saved if cleanup fails. Retire
             // its old editable basis before reporting that independent error.
             await owner.saved(action, result);
-            if (alive) operations.notice.set('Sign-in saved in the Host credential vault.');
+            if (alive)
+              operations.notice.set(message('Sign-in saved in the Host credential vault.'));
           } else if (result.kind === 'failed') {
-            failure = new Error(
+            failure = new UiError(
               result.reason === 'cancelled'
                 ? 'Sign-in cancelled.'
                 : result.reason === 'expired'
@@ -97,8 +101,9 @@ export function createConnectionLogin(
             );
           } else failure = settingsRejection(result);
           if (event.cleanupError)
-            throw new Error(
-              `${failure?.message ?? 'Sign-in was saved.'} Its original request could not finish its resource cleanup.`,
+            throw new UiError(
+              '{result} Its original request could not finish its resource cleanup.',
+              { result: failure ? errorText(failure) : message('Sign-in was saved.') },
             );
           if (failure) throw failure;
           return;
@@ -129,7 +134,7 @@ export function createConnectionLogin(
       await Clipboard.writeText(action.value);
       if (alive && state()?.occurrence === action.occurrence)
         operations.notice.set(
-          action.field === 'url' ? 'Sign-in URL copied.' : 'Sign-in code copied.',
+          action.field === 'url' ? message('Sign-in URL copied.') : message('Sign-in code copied.'),
         );
     } catch (reason) {
       if (alive && state()?.occurrence === action.occurrence) operations.report(reason);

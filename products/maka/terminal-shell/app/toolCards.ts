@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { tr } from './locale';
 import {
   toolPresentation,
   webPresentation,
@@ -111,21 +112,26 @@ export function toolArguments(kind: ToolFamily, input: unknown): ToolProjection 
       ? {
           kind: 'sections',
           sections: [
-            { label: kind === 'execute' ? 'Requested command' : 'Process reference', text: value },
+            {
+              label: kind === 'execute' ? tr('Requested command') : tr('Process reference'),
+              text: value,
+            },
           ],
         }
       : null;
   }
   if (kind === 'fetch')
     return typeof args.url === 'string'
-      ? { kind: 'sections', sections: [{ label: 'Requested URL', text: args.url }] }
+      ? { kind: 'sections', sections: [{ label: tr('Requested URL'), text: args.url }] }
       : null;
   if (kind === 'webSearch' || kind === 'glob' || kind === 'grep') {
     const value = kind === 'webSearch' ? args.query : args.pattern;
     return typeof value === 'string'
       ? {
           kind: 'sections',
-          sections: [{ label: kind === 'webSearch' ? 'Web query' : 'Search pattern', text: value }],
+          sections: [
+            { label: kind === 'webSearch' ? tr('Web query') : tr('Search pattern'), text: value },
+          ],
         }
       : null;
   }
@@ -164,7 +170,7 @@ export function toolArguments(kind: ToolFamily, input: unknown): ToolProjection 
       },
     };
   }
-  return { kind: 'sections', sections: [{ label: 'File', text: path }] };
+  return { kind: 'sections', sections: [{ label: tr('File'), text: path }] };
 }
 
 // Only complete originals under the explicitly recorded display contract are
@@ -275,14 +281,14 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolProjection | n
       kind: 'sections',
       sections: [
         {
-          label: kind === 'glob' ? 'Matching files' : 'Matching lines',
-          text: matches.length ? matches.join('\n') : 'No matches.',
+          label: kind === 'glob' ? tr('Matching files') : tr('Matching lines'),
+          text: matches.length ? matches.join('\n') : tr('No matches.'),
         },
         ...(!value.complete
           ? [
               {
-                label: 'Search notice',
-                text: 'The tool reported an incomplete search result.',
+                label: tr('Search notice'),
+                text: tr('The tool reported an incomplete search result.'),
                 tone: 'warning' as const,
               },
             ]
@@ -349,15 +355,15 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolProjection | n
       kind: 'sections',
       sections: [
         {
-          label: typeof value.title === 'string' && value.title ? value.title : 'Web page',
+          label: typeof value.title === 'string' && value.title ? value.title : tr('Web page'),
           text: value.url,
         },
-        { label: 'Recorded page content', text: value.content },
+        { label: tr('Recorded page content'), text: value.content },
         ...(value.truncated
           ? [
               {
-                label: 'Web notice',
-                text: 'The extracted page content is truncated.',
+                label: tr('Web notice'),
+                text: tr('The extracted page content is truncated.'),
                 tone: 'warning' as const,
               },
             ]
@@ -385,15 +391,17 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolProjection | n
       )
         return null;
       sections.push({
-        label: row.title || 'Web result',
-        text: `${row.url}\n${row.snippet}${row.truncated ? '\n[Snippet truncated by the Host]' : ''}`,
+        label: row.title || tr('Web result'),
+        text: `${row.url}\n${row.snippet}${row.truncated ? `\n${tr('[Snippet truncated by the Host]')}` : ''}`,
       });
     }
-    if (!sections.length) sections.push({ label: 'Web results', text: 'No results.' });
+    if (!sections.length) sections.push({ label: tr('Web results'), text: tr('No results.') });
     if (value.truncated)
       sections.push({
-        label: 'Web notice',
-        text: `The search result is truncated · ${value.omittedResults} omitted results.`,
+        label: tr('Web notice'),
+        text: tr('The search result is truncated · {count} omitted results.', {
+          count: value.omittedResults,
+        }),
         tone: 'warning',
       });
     return { kind: 'sections', sections };

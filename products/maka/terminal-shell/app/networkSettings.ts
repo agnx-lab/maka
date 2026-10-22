@@ -19,6 +19,8 @@
 
 import { cleanup, signal } from 'nsh';
 import { host } from './host';
+import { tr } from './locale';
+import { message, UiError } from './text';
 import type {
   NetworkProxy,
   ProxyProtocol,
@@ -142,13 +144,14 @@ export function createNetworkSettings(operations: SettingsOperations, active: ()
         port > 65535 ||
         (value.proxy.enabled && port === 0)
       )
-        throw new Error('Enter a proxy port from 1 to 65535, or turn off the proxy.');
-      if (value.proxy.enabled && !value.proxy.host.trim()) throw new Error('Enter the proxy host.');
+        throw new UiError('Enter a proxy port from 1 to 65535, or turn off the proxy.');
+      if (value.proxy.enabled && !value.proxy.host.trim())
+        throw new UiError('Enter the proxy host.');
       const credential = value.proxy.authEnabled ? value.credential : 'delete';
       if (credential === 'replace' && !value.secret)
-        throw new Error('Enter the replacement proxy password.');
+        throw new UiError('Enter the replacement proxy password.');
       if (value.proxy.authEnabled && credential === 'keep' && !original.credential.configured)
-        throw new Error('No proxy password is stored. Choose Replace password and enter one.');
+        throw new UiError('No proxy password is stored. Choose Replace password and enter one.');
       const input: SettingsNetworkUpdate = {
         expectedPolicyRevision: original.revision,
         expectedCredential: credentialBasis(original.credential),
@@ -170,7 +173,7 @@ export function createNetworkSettings(operations: SettingsOperations, active: ()
       );
       if (result.kind !== 'applied') throw settingsRejection(result);
       if (result.result.kind === 'proxy_target_mismatch')
-        throw new Error(
+        throw new UiError(
           'The stored password belongs to another proxy. Replace the password for this proxy or reload the original settings.',
         );
       if (result.result.kind !== 'committed') throw settingsRejection(result.result);
@@ -180,7 +183,7 @@ export function createNetworkSettings(operations: SettingsOperations, active: ()
       view += 1;
       snapshot.set(null);
       draft.set(null);
-      operations.notice.set('Network settings saved.');
+      operations.notice.set(message('Network settings saved.'));
       await load();
     });
   };
@@ -213,7 +216,7 @@ export function createNetworkSettings(operations: SettingsOperations, active: ()
     deactivate,
     reset,
     back: () => true,
-    title: () => 'Network settings',
+    title: () => tr('Network settings'),
   };
 }
 export type NetworkSettingsOwner = ReturnType<typeof createNetworkSettings>;

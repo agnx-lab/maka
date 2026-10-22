@@ -19,6 +19,7 @@
 
 import { Input, inputAction, List, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
+import { tr } from './locale';
 import type { SettingValue } from '../../../../packages/plugin-sdk/src/index.js';
 import { sameValue } from '../../../../plugins/shared/value';
 import { pluginTitle, settingCaption } from './pluginSettings.ts';
@@ -44,7 +45,7 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <Button
         disabled={owner.loading() || owner.busy()}
-        accessibilityLabel="Refresh plugin configuration"
+        accessibilityLabel={tr('Refresh plugin configuration')}
         onPress={inputAction(owner.reload, owner.action())}
         style={{ ...controlStyle, alignSelf: 'flex-start' }}
         hoverStyle={controlHoverStyle}
@@ -52,15 +53,15 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
         disabledStyle={controlDisabledStyle}
       >
         <Text style={{ ...bodyTextStyle, color: C.secondary }}>
-          {owner.editor() ? 'Discard edit and refresh plugins' : 'Refresh plugins'}
+          {owner.editor() ? tr('Discard edit and refresh plugins') : tr('Refresh plugins')}
         </Text>
       </Button>
       <If when={owner.loading()}>
-        <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading plugins…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Reading plugins…')}</Text>
       </If>
       <If when={!owner.loading() && !owner.inventory()}>
         <Text style={{ ...bodyTextStyle, color: C.warning }}>
-          Plugin settings are unavailable on this connection.
+          {tr('Plugin settings are unavailable on this connection.')}
         </Text>
       </If>
       <If when={owner.inventory()}>
@@ -72,13 +73,15 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                 <If when={!owner.selected()}>
                   <View style={{ flex: 1, minHeight: 0, padding: 8, gap: 12 }}>
                     <Text style={{ ...captionTextStyle, color: C.muted }}>
-                      Manage plugins for this connection. Your conversation and draft stay open.
+                      {tr(
+                        'Manage plugins for this connection. Your conversation and draft stay open.',
+                      )}
                     </Text>
                     <Input
-                      accessibilityLabel="Search Host plugins"
+                      accessibilityLabel={tr('Search Host plugins')}
                       value={owner.query()}
                       onChange={(value) => owner.query.set(value)}
-                      placeholder="Search plugins…"
+                      placeholder={tr('Search plugins…')}
                       style={{
                         ...inputTextStyle,
                         color: C.text,
@@ -96,7 +99,7 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                       separator={() => <View style={{ height: 12 }} />}
                       empty={
                         <Text style={{ ...bodyTextStyle, color: C.muted }}>
-                          No matching plugins.
+                          {tr('No matching plugins.')}
                         </Text>
                       }
                       style={{ flex: 1, minHeight: 0 }}
@@ -104,7 +107,9 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                       {(instance) => (
                         <Button
                           disabled={owner.disabled()}
-                          accessibilityLabel={`Open plugin ${instance().path.join(' / ')}`}
+                          accessibilityLabel={tr('Open plugin {name}', {
+                            name: instance().path.join(' / '),
+                          })}
                           onPress={inputAction(owner.open, {
                             request,
                             instance: instance().instance,
@@ -127,8 +132,8 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                             </Text>
                             <Text style={{ ...captionTextStyle, color: C.muted }}>
                               {instance().path.join(' / ')} ·{' '}
-                              {instance().disabled ? 'Disabled' : 'Enabled'}
-                              {instance().parentDisabled ? ' · Parent disabled' : ''}
+                              {instance().disabled ? tr('Disabled') : tr('Enabled')}
+                              {instance().parentDisabled ? ` · ${tr('Parent disabled')}` : ''}
                             </Text>
                           </View>
                           <Icon name="right" color={C.muted} />
@@ -153,8 +158,10 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                         {owner.selected()!.presentation?.description}
                       </Text>
                       <Text style={{ ...captionTextStyle, color: C.muted }}>
-                        Saved configuration · revision {owner.inventory()!.source.revision}. Enabled
-                        shows the saved setting. Changes may take a moment to apply.
+                        {tr(
+                          'Saved configuration · revision {revision}. Enabled shows the saved setting. Changes may take a moment to apply.',
+                          { revision: owner.inventory()!.source.revision },
+                        )}
                       </Text>
                       <If when={!owner.editor()}>
                         <Button
@@ -164,8 +171,8 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                           }
                           accessibilityLabel={
                             owner.selected()!.disabled
-                              ? 'Enable Host plugin'
-                              : 'Disable Host plugin'
+                              ? tr('Enable Host plugin')
+                              : tr('Disable Host plugin')
                           }
                           onPress={inputAction(owner.toggle, {
                             request,
@@ -182,7 +189,9 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                           focusStyle={controlFocusStyle}
                           disabledStyle={controlDisabledStyle}
                         >
-                          <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>Enabled</Text>
+                          <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>
+                            {tr('Enabled')}
+                          </Text>
                           <ChoiceIndicator
                             kind="switch"
                             checked={!owner.selected()!.disabled}
@@ -194,17 +203,17 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                         </Button>
                         <If when={owner.selected()!.parentDisabled}>
                           <Text style={{ ...bodyTextStyle, color: C.warning }}>
-                            Enable the parent plugin before enabling this child.
+                            {tr('Enable the parent plugin before enabling this child.')}
                           </Text>
                         </If>
                         <If when={owner.selected()!.structural}>
                           <Text style={{ ...captionTextStyle, color: C.muted }}>
-                            Open a plugin in this group to edit its settings.
+                            {tr('Open a plugin in this group to edit its settings.')}
                           </Text>
                         </If>
                         <If when={owner.fields()}>
                           <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}>
-                            Configuration
+                            {tr('Configuration')}
                             {owner.fields()!.path.length
                               ? ` / ${owner.fields()!.path.join(' / ')}`
                               : ''}
@@ -215,7 +224,11 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                               return (
                                 <Button
                                   disabled={owner.disabled() || !field().editable}
-                                  accessibilityLabel={`${group() ? 'Open plugin group' : 'Edit plugin setting'} ${field().label}`}
+                                  accessibilityLabel={
+                                    group()
+                                      ? tr('Open plugin group {name}', { name: field().label })
+                                      : tr('Edit plugin setting {name}', { name: field().label })
+                                  }
                                   onPress={
                                     group()
                                       ? inputAction(owner.group, { request, key: field().key })
@@ -246,11 +259,11 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                                     >
                                       {group()
                                         ? field().kind === 'array'
-                                          ? 'List'
-                                          : 'Group'
+                                          ? tr('List')
+                                          : tr('Group')
                                         : field().editable
                                           ? settingCaption(field().value)
-                                          : 'Read only or private'}
+                                          : tr('Read only or private')}
                                     </Text>
                                   </View>
                                   <Icon name="right" color={C.muted} />
@@ -260,7 +273,7 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                           </Each>
                           <If when={!owner.fields()!.fields.length}>
                             <Text style={{ ...bodyTextStyle, color: C.muted }}>
-                              No editable fields in this group.
+                              {tr('No editable fields in this group.')}
                             </Text>
                           </If>
                         </If>
@@ -298,7 +311,9 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
             <Button
               disabled={owner.disabled()}
               selected={sameValue(value(), choice())}
-              accessibilityLabel={`Choose plugin setting ${settingCaption(choice())}`}
+              accessibilityLabel={tr('Choose plugin setting {value}', {
+                value: settingCaption(choice()),
+              })}
               onPress={inputAction(owner.change, { request, value: choice() })}
               style={{
                 ...controlStyle,
@@ -326,7 +341,7 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
       </If>
       <If when={field.options.length === 0 && (field.kind === 'text' || field.kind === 'number')}>
         <SettingsField
-          label={`Plugin value ${field.label}`}
+          label={tr('Plugin value {name}', { name: field.label })}
           value={
             value()?.kind === 'text' || value()?.kind === 'number'
               ? (value() as { text: string }).text
@@ -337,7 +352,9 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
             change(field.kind === 'number' ? { kind: 'number', text } : { kind: 'text', text })
           }
           hint={
-            field.kind === 'number' ? 'Enter a number. Decimal text is kept exactly.' : undefined
+            field.kind === 'number'
+              ? tr('Enter a number. Decimal text is kept exactly.')
+              : undefined
           }
         />
       </If>
@@ -372,7 +389,9 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
                 }
                 disabled={owner.disabled()}
               />
-              <Text style={{ ...bodyTextStyle, color: C.text }}>{choice() ? 'On' : 'Off'}</Text>
+              <Text style={{ ...bodyTextStyle, color: C.text }}>
+                {choice() ? tr('On') : tr('Off')}
+              </Text>
             </Button>
           )}
         </Each>
@@ -399,7 +418,7 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
             checked={value()?.kind === 'null'}
             disabled={owner.disabled()}
           />
-          <Text style={{ ...bodyTextStyle, color: C.text }}>Set null</Text>
+          <Text style={{ ...bodyTextStyle, color: C.text }}>{tr('Set null')}</Text>
         </Button>
       </If>
       <If when={!field.required}>
@@ -420,12 +439,12 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
           disabledStyle={controlDisabledStyle}
         >
           <ChoiceIndicator kind="radio" checked={value() === null} disabled={owner.disabled()} />
-          <Text style={{ ...bodyTextStyle, color: C.text }}>Remove explicit value</Text>
+          <Text style={{ ...bodyTextStyle, color: C.text }}>{tr('Remove explicit value')}</Text>
         </Button>
       </If>
       <Button
         disabled={owner.disabled()}
-        accessibilityLabel="Save Host plugin setting"
+        accessibilityLabel={tr('Save Host plugin setting')}
         onPress={inputAction(owner.save, { request, value: value() })}
         style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
         hoverStyle={{ backgroundColor: C.accentHover }}
@@ -433,7 +452,7 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
         disabledStyle={controlDisabledStyle}
       >
         <Text style={{ ...bodyTextStyle, color: C.background, fontWeight: '500' }}>
-          Save plugin setting
+          {tr('Save plugin setting')}
         </Text>
       </Button>
     </View>

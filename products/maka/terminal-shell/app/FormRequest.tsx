@@ -22,6 +22,8 @@ import { Button } from 'nsh/base';
 import type { FormField } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import type { FormDraft, FormRequest as Request } from './interaction-form';
 import { ChoiceIndicator } from './ChoiceIndicator';
+import { tr } from './locale';
+import { renderText, type UiText } from './text';
 import {
   bodyTextStyle,
   C,
@@ -75,7 +77,7 @@ function Choice(props: {
 export function FormRequest(props: {
   request: Request;
   drafts: FormDraft[];
-  problems: Array<string | null>;
+  problems: Array<UiText | null>;
   blocked: boolean;
   action: (index: number, change: Change) => () => void;
   edit: (index: number, original: string, value: string) => void;
@@ -105,10 +107,10 @@ export function FormRequest(props: {
           const placeholder = () => {
             const current = field();
             return current.kind === 'string'
-              ? (current.format ?? 'Text')
+              ? (current.format ?? tr('Text'))
               : current.kind === 'integer'
-                ? 'Whole number'
-                : 'Number';
+                ? tr('Whole number')
+                : tr('Number');
           };
           const options = () => {
             const current = field();
@@ -124,13 +126,17 @@ export function FormRequest(props: {
                     {field().label}
                   </Text>
                   <Text style={{ ...captionTextStyle, color: C.muted }}>
-                    {field().required ? 'Required' : 'Optional'}
+                    {field().required ? tr('Required') : tr('Optional')}
                   </Text>
                 </View>
                 <If when={!field().required}>
                   <Choice
-                    label={draft()?.included ? `Omit ${field().label}` : `Include ${field().label}`}
-                    text={draft()?.included ? 'Included' : 'Include'}
+                    label={
+                      draft()?.included
+                        ? tr('Omit {label}', { label: field().label })
+                        : tr('Include {label}', { label: field().label })
+                    }
+                    text={draft()?.included ? tr('Included') : tr('Include')}
                     kind="switch"
                     disabled={props.blocked}
                     selected={draft()?.included}
@@ -170,8 +176,12 @@ export function FormRequest(props: {
                   <If when={field().kind === 'string'}>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Choice
-                        label={`${draft()?.hidden ? 'Reveal' : 'Hide'} ${field().label}`}
-                        text={draft()?.hidden ? 'Reveal value' : 'Hide value'}
+                        label={
+                          draft()?.hidden
+                            ? tr('Reveal {label}', { label: field().label })
+                            : tr('Hide {label}', { label: field().label })
+                        }
+                        text={draft()?.hidden ? tr('Reveal value') : tr('Hide value')}
                         disabled={props.blocked}
                         onPress={props.action(index(), { hidden: !draft()?.hidden })}
                       />
@@ -183,8 +193,11 @@ export function FormRequest(props: {
                     <Each of={[true, false]}>
                       {(value) => (
                         <Choice
-                          label={`${value() ? 'Yes' : 'No'} · ${field().label}`}
-                          text={value() ? 'Yes' : 'No'}
+                          label={tr('{answer} · {label}', {
+                            answer: value() ? tr('Yes') : tr('No'),
+                            label: field().label,
+                          })}
+                          text={value() ? tr('Yes') : tr('No')}
                           kind="radio"
                           disabled={disabled()}
                           selected={draft()?.value === value()}
@@ -227,7 +240,7 @@ export function FormRequest(props: {
                 </If>
                 <If when={props.problems[index()]}>
                   <Text style={{ ...bodyTextStyle, color: C.warning }}>
-                    {props.problems[index()]}
+                    {renderText(props.problems[index()]!)}
                   </Text>
                 </If>
               </If>

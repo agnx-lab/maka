@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { message as uiMessage, type UiText } from './text';
 import type {
   FormField,
   FormValue,
@@ -81,21 +82,22 @@ function calendar(value: string, time: boolean): boolean {
     (!time || (n(4) <= 23 && n(5) <= 59 && n(6) <= 59 && n(7) <= 23 && n(8) <= 59))
   );
 }
-function problem(field: FormField, value: FormValue | undefined): string | null {
+function problem(field: FormField, value: FormValue | undefined): UiText | null {
   switch (field.kind) {
     case 'string': {
-      if (typeof value !== 'string') return 'Enter text.';
+      if (typeof value !== 'string') return uiMessage('Enter text.');
       const length = [...value].length;
-      if (length < (field.minLength ?? 0)) return `Use at least ${field.minLength} characters.`;
+      if (length < (field.minLength ?? 0))
+        return uiMessage('Use at least {count} characters.', { count: field.minLength! });
       if (field.maxLength !== undefined && field.maxLength !== null && length > field.maxLength)
-        return `Use at most ${field.maxLength} characters.`;
+        return uiMessage('Use at most {count} characters.', { count: field.maxLength! });
       if (field.format === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
-        return 'Enter an email address.';
+        return uiMessage('Enter an email address.');
       if (field.format === 'uri') {
         try {
           new URL(value);
         } catch {
-          return 'Enter a complete URI, including its scheme.';
+          return uiMessage('Enter a complete URI, including its scheme.');
         }
       }
       if (
@@ -103,8 +105,8 @@ function problem(field: FormField, value: FormValue | undefined): string | null 
         !calendar(value, field.format === 'date-time')
       )
         return field.format === 'date'
-          ? 'Enter a valid date: YYYY-MM-DD.'
-          : 'Enter a valid date and time, including seconds and a timezone.';
+          ? uiMessage('Enter a valid date: YYYY-MM-DD.')
+          : uiMessage('Enter a valid date and time, including seconds and a timezone.');
       return null;
     }
     case 'number':
@@ -114,16 +116,21 @@ function problem(field: FormField, value: FormValue | undefined): string | null 
         !Number.isFinite(value) ||
         (field.kind === 'integer' && !Number.isSafeInteger(value))
       )
-        return field.kind === 'integer' ? 'Enter a whole, safe integer.' : 'Enter a finite number.';
+        return field.kind === 'integer'
+          ? uiMessage('Enter a whole, safe integer.')
+          : uiMessage('Enter a finite number.');
       if (value < (field.minimum ?? -Infinity) || value > (field.maximum ?? Infinity))
-        return `Use a number from ${field.minimum ?? '−∞'} to ${field.maximum ?? '∞'}.`;
+        return uiMessage('Use a number from {minimum} to {maximum}.', {
+          minimum: field.minimum ?? '−∞',
+          maximum: field.maximum ?? '∞',
+        });
       return null;
     case 'boolean':
-      return typeof value === 'boolean' ? null : 'Choose Yes or No.';
+      return typeof value === 'boolean' ? null : uiMessage('Choose Yes or No.');
     case 'single_select':
       return typeof value === 'string' && field.options.some((option) => option.value === value)
         ? null
-        : 'Choose one option.';
+        : uiMessage('Choose one option.');
     case 'multi_select':
       return Array.isArray(value) &&
         value.length >= (field.minItems ?? 0) &&
@@ -131,7 +138,10 @@ function problem(field: FormField, value: FormValue | undefined): string | null 
         new Set(value).size === value.length &&
         value.every((part) => field.options.some((option) => option.value === part))
         ? null
-        : `Choose ${field.minItems ?? 0}–${field.maxItems ?? field.options.length} options.`;
+        : uiMessage('Choose {minimum}–{maximum} options.', {
+            minimum: field.minItems ?? 0,
+            maximum: field.maxItems ?? field.options.length,
+          });
   }
 }
 export function formSubmission(
@@ -139,12 +149,12 @@ export function formSubmission(
   drafts: FormDraft[],
 ): {
   answer: Extract<InteractionAnswer, { kind: 'form'; action: 'accept' }> | null;
-  problems: Array<string | null>;
+  problems: Array<UiText | null>;
 } {
   const values: Record<string, FormValue> = Object.create(null);
   const problems = fields.map((field, index) => {
     const draft = drafts[index];
-    if (!draft || (!draft.included && field.required)) return 'This field is required.';
+    if (!draft || (!draft.included && field.required)) return uiMessage('This field is required.');
     if (!draft.included) return null;
     const raw = draft.value;
     const value =

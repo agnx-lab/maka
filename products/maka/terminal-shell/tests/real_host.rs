@@ -575,12 +575,25 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         fill(&mut view, "Assistant tone", "请用简洁清楚的方式回答").await;
         activate(&mut view, "Save this preference").await;
         wait_view(&mut view, |screen| screen.contains("General settings") && screen.contains("Preferences saved.")).await;
-        activate(&mut view, "Assistant language: 简体中文").await;
-        wait_view_state(&mut view, |view, screen| screen.contains("General settings") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Assistant language: 简体中文" && node.state.selected)).await;
+        let settings_close = support::wait_enabled_button(&mut view, "Close settings").await.id;
+        activate(&mut view, "Language: 简体中文").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("常规设置") && screen.contains("偏好已保存。") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "语言：简体中文" && node.state.selected) && view.accessibility_snapshot().iter().any(|node| node.id == settings_close && node.label == "关闭设置")).await;
         let saved_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
         assert_eq!(saved_preferences["displayName"], "已保存的中文用户");
         assert_eq!(saved_preferences["assistantTone"], "请用简洁清楚的方式回答");
-        assert_eq!(saved_preferences["language"], "zh-CN", "assistant language changes Host prompts while the terminal interface stays English");
+        assert_eq!(saved_preferences["language"], "zh-CN", "the interface and assistant must share the committed Host language");
+        activate(&mut view, "语言：繁體中文").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("一般設定") && screen.contains("偏好已儲存。") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "語言：繁體中文" && node.state.selected) && view.accessibility_snapshot().iter().any(|node| node.id == settings_close && node.label == "關閉設定")).await;
+        let traditional_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
+        assert_eq!(traditional_preferences["language"], "zh-TW");
+        assert!(traditional_preferences["revision"].as_u64().unwrap() > saved_preferences["revision"].as_u64().unwrap());
+        assert_eq!(traditional_preferences["displayName"], saved_preferences["displayName"]);
+        assert_eq!(traditional_preferences["assistantTone"], saved_preferences["assistantTone"]);
+        activate(&mut view, "語言：English").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("General settings") && screen.contains("Preferences saved.") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Language: English" && node.state.selected) && view.accessibility_snapshot().iter().any(|node| node.id == settings_close && node.label == "Close settings")).await;
+        let saved_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
+        assert_eq!(saved_preferences["language"], "en");
+        assert!(saved_preferences["revision"].as_u64().unwrap() > traditional_preferences["revision"].as_u64().unwrap());
         let final_network = client.query("settings", "network", json!({})).await.unwrap();
         assert_eq!(final_network["proxy"], saved_network["proxy"]);
         assert_eq!(final_network["credential"], saved_network["credential"]);
@@ -610,6 +623,25 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         support::evidence_cells("settings-empty-to-real-provider", &view);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         assert_eq!(fixture.discovery_count.load(Ordering::SeqCst), 1);
+        // This copy notice belongs to the still-mounted conversation. Changing
+        // language must translate it without replacing the resident composer.
+        support::click_button(&mut view, "Copy message").await;
+        wait_view(&mut view, |screen| screen.contains("Message copied")).await;
+        shortcut(&mut view, 'p');
+        select_palette(&mut view, "Search commands…", "Connections & models", "Connections & models").await;
+        activate(&mut view, "Settings section General").await;
+        wait_view(&mut view, |screen| screen.contains("General settings") && !screen.contains("Reading preferences…")).await;
+        activate(&mut view, "Language: 简体中文").await;
+        wait_view(&mut view, |screen| screen.contains("常规设置") && screen.contains("偏好已保存。")).await;
+        support::click_button(&mut view, "关闭设置").await;
+        wait_view(&mut view, |screen| screen.contains("消息已复制") && screen.contains("发送消息，或开始一项任务…")).await;
+        editable(&mut view, "消息输入区").await;
+        assert_eq!(view.surface().focused(), Some(composer), "language changes replaced the resident composer");
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
+        let startup_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
+        assert_eq!(startup_preferences["language"], "zh-CN");
+        assert_eq!(startup_preferences["displayName"], saved_preferences["displayName"]);
+        assert_eq!(startup_preferences["assistantTone"], saved_preferences["assistantTone"]);
         drop(view);
         bindings.close().await.unwrap();
         drop(client);
@@ -617,11 +649,12 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         {
             let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&session));
             terminal.wait_for("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
-            let restored = terminal.wait_for("Manual UI Agent · Default · high").await;
+            terminal.wait_for("发送消息，或开始一项任务…").await;
+            let restored = terminal.wait_for("Manual UI Agent · 默认 · high").await;
             assert!(!restored.contains(support::PROVIDER_KEY));
             assert!(!restored.contains(proxy_secret));
             let restarted = fixture.client().await;
-            assert_eq!(restarted.query("settings", "assistantPreferences", json!({})).await.unwrap(), saved_preferences);
+            assert_eq!(restarted.query("settings", "assistantPreferences", json!({})).await.unwrap(), startup_preferences);
             let persisted_network = restarted.query("settings", "network", json!({})).await.unwrap();
             assert_eq!(persisted_network, final_network);
             assert!(!persisted_network.to_string().contains(proxy_secret));
@@ -2147,7 +2180,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
             let nodes = view.accessibility_snapshot();
             let Some(chat) = nodes.iter().find(|node| node.role == nsh_core::AccessibilityRole::Tab && node.label == "Chat") else { return false; };
             let Some(composer) = nodes.iter().find(|node| node.label == "Conversation composer") else { return false; };
-            nodes.iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Copy code" && !node.state.disabled
+            nodes.iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Copy code block" && !node.state.disabled
                 && node.frame.origin.y.0 >= chat.frame.origin.y.0 + chat.frame.size.height.0
                 && node.frame.origin.y.0 + node.frame.size.height.0 <= composer.frame.origin.y.0)
         };
@@ -2169,7 +2202,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         wait_view_state(&mut view, |view, screen| code_readable(view, screen) && screen.contains("keep trailing")
             && view.accessibility_snapshot().iter().any(|node| node.id == wrap.id && node.label == "Wrap code" && !node.state.selected)).await;
         view.drain_service_output().for_each(drop);
-        support::click_button(&mut view, "Copy code").await;
+        support::click_button(&mut view, "Copy code block").await;
         let copied_code = wait_view(&mut view, |screen| screen.contains("Copied") && screen.contains("RICH_CODE_BLOCK")).await;
         let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
         assert_eq!(clipboard.len(), 1, "one code copy must emit exactly one native clipboard effect");

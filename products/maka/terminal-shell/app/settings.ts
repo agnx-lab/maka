@@ -19,6 +19,7 @@
 
 import { cleanup, signal } from 'nsh';
 import { host } from './host';
+import { message, UiError } from './text';
 import type {
   CatalogMutationResult,
   ConnectionVersionBasis,
@@ -85,10 +86,10 @@ function overlay(text: string): Record<string, unknown> | null {
   try {
     value = JSON.parse(text);
   } catch {
-    throw new Error('Advanced request JSON must be valid JSON.');
+    throw new UiError('Advanced request JSON must be valid JSON.');
   }
   if (value !== null && (typeof value !== 'object' || Array.isArray(value)))
-    throw new Error('Advanced request JSON must be an object or null.');
+    throw new UiError('Advanced request JSON must be an object or null.');
   return value as Record<string, unknown> | null;
 }
 
@@ -154,14 +155,14 @@ export function createModelSettings(
       for (;;) {
         let request: SettingsConnectionsRead = { kind: 'start' };
         if (cursor !== null) {
-          if (version === null) throw new Error('The connection catalog revision is missing.');
+          if (version === null) throw new UiError('The connection catalog revision is missing.');
           request = { kind: 'continue', revision: version, offset: cursor };
         }
         const result = await host.query('settings', 'connections', request);
         if (!alive || !active() || generation !== read) return;
         if (result.kind === 'changed') {
           if (restarted)
-            throw new Error('The connection catalog keeps changing. Refresh to try again.');
+            throw new UiError('The connection catalog keeps changing. Refresh to try again.');
           restarted = true;
           rows = [];
           cursor = null;
@@ -169,7 +170,7 @@ export function createModelSettings(
           continue;
         }
         if (cursor !== null && result.next !== null && result.next <= cursor)
-          throw new Error('The connection catalog did not advance.');
+          throw new UiError('The connection catalog did not advance.');
         rows = [...rows, ...result.connections];
         cursor = result.next;
         version = result.revision;
@@ -228,7 +229,7 @@ export function createModelSettings(
           (method) => (method.id === 'api-key' && !method.interactive) || method.interactive,
         )
       )
-        throw new Error(
+        throw new UiError(
           'This provider does not offer an API key or interactive sign-in supported here.',
         );
       const configuration = provider.descriptor.configurationDefaults as Record<
@@ -276,14 +277,14 @@ export function createModelSettings(
     }
     if (detail.kind !== 'ready') throw rejection({ kind: 'connection_stale' });
     if (!detail.editing)
-      throw new Error('Editable connection facts are unavailable. Editing is disabled.');
+      throw new UiError('Editable connection facts are unavailable. Editing is disabled.');
     return detail;
   };
   const readCredential = async (detail: Detail) => {
     const result = await host.query('settings', 'credentialStatus', {
       locator: { scope: 'connection', connectionId: detail.target.connectionId, kind: 'provider' },
     });
-    if (result.kind !== 'status') throw new Error('This connection is no longer available.');
+    if (result.kind !== 'status') throw new UiError('This connection is no longer available.');
     return result.status as CredentialStatus;
   };
   const openConnection = async (target: ConnectionVersionBasis) => {
@@ -371,7 +372,9 @@ export function createModelSettings(
         model.set(null);
         page.set('connections');
         notice.set(
-          'The change was committed. Its editable snapshot could not be reopened; no further changes can be saved here.',
+          message(
+            'The change was committed. Its editable snapshot could not be reopened; no further changes can be saved here.',
+          ),
         );
       }
       throw reason;
@@ -403,7 +406,7 @@ export function createModelSettings(
     return run(async () => {
       const form = editor();
       if (!form) return;
-      if (!form.name.trim()) throw new Error('Enter a connection name.');
+      if (!form.name.trim()) throw new UiError('Enter a connection name.');
       const body = overlay(form.overlay);
       const config = configuration(form);
       let result: CatalogMutationResult | null = null;
@@ -411,11 +414,11 @@ export function createModelSettings(
       const expectedCredential = credentialBasis(credential());
       if (!original) {
         if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(form.slug))
-          throw new Error(
+          throw new UiError(
             'Use lowercase letters, numbers, dashes or underscores for the connection ID.',
           );
         if (revision() === null)
-          throw new Error('Refresh the connection catalog before creating a connection.');
+          throw new UiError('Refresh the connection catalog before creating a connection.');
         result = await mutate('settings', 'create', {
           expectedCatalogRevision: revision(),
           connection: {
@@ -452,12 +455,12 @@ export function createModelSettings(
           form.apiKey ? 'unchanged' : 'refresh',
         );
         if (!detail) return;
-        notice.set('Connection saved.');
+        notice.set(message('Connection saved.'));
       }
       if (form.apiKey) {
         if (!alive || editor()?.instance !== form.instance) return;
-        if (!detail) throw new Error('Save the connection before saving its API key.');
-        if (alive) notice.set('Connection saved; saving API key…');
+        if (!detail) throw new UiError('Save the connection before saving its API key.');
+        if (alive) notice.set(message('Connection saved; saving API key…'));
         const saved = await mutate(
           'settings',
           'saveCredential',
@@ -473,9 +476,9 @@ export function createModelSettings(
         // Reauthentication advances the connection revision independently.
         // Read the actual new basis; never guess a revision or reuse the old one.
         if (!(await adopt(basis(detail), form.instance, 'committed'))) return;
-        notice.set('Connection and API key saved.');
+        notice.set(message('Connection and API key saved.'));
         changed();
-      } else if (alive && !result) notice.set('No connection changes.');
+      } else if (alive && !result) notice.set(message('No connection changes.'));
       await loadConnections();
     });
   };
@@ -501,7 +504,7 @@ export function createModelSettings(
         result.connection.slug !== target.slug ||
         JSON.stringify(result.connection.provider) !== JSON.stringify(target.provider)
       )
-        throw new Error(
+        throw new UiError(
           'The sign-in receipt refers to another connection. Reload before continuing.',
         );
       if (
@@ -534,18 +537,18 @@ export function createModelSettings(
     return run(async () => {
       const form = editor();
       if (!form?.baseline || dirty())
-        throw new Error('Save the connection changes before fetching models.');
+        throw new UiError('Save the connection changes before fetching models.');
       if (!form.provider.descriptor.anonymous && !credential()?.configured)
-        throw new Error('Add an API key or finish provider sign-in before fetching models.');
+        throw new UiError('Add an API key or finish provider sign-in before fetching models.');
       const result = await mutate('setup', 'discoverModels', form.baseline.target);
       if (result.kind === 'failed')
-        throw new Error(
+        throw new UiError(
           'Could not fetch models. Check the provider credential, endpoint and network, or add a model manually.',
         );
       if (result.kind !== 'ready') throw rejection(result);
       await adopt(result.connection, form.instance);
       await loadConnections();
-      if (alive) notice.set('Models fetched and enabled.');
+      if (alive) notice.set(message('Models fetched and enabled.'));
     });
   };
   const editModel = (request: ConnectionAction & { id: string | null }) => {
@@ -554,7 +557,7 @@ export function createModelSettings(
     const form = editor();
     if (busy() || !form?.baseline?.editing) return;
     if (dirty()) {
-      error.set('Save or discard the connection changes before editing models.');
+      error.set(message('Save or discard the connection changes before editing models.'));
       return;
     }
     const raw = id ? form.baseline.editing.modelOverrides?.[id] : undefined;
@@ -612,12 +615,13 @@ export function createModelSettings(
       const form = editor(),
         current = model();
       if (!form?.baseline?.editing || !current) return;
-      if (dirty()) throw new Error('Save or discard the connection changes before editing models.');
+      if (dirty())
+        throw new UiError('Save or discard the connection changes before editing models.');
       const id = current.id.trim();
-      if (!id) throw new Error('Enter the exact model ID accepted by the provider.');
+      if (!id) throw new UiError('Enter the exact model ID accepted by the provider.');
       const facts = form.baseline.editing;
       if (current.originalId === null && facts.enabledModelIds.includes(id))
-        throw new Error('That model is already enabled.');
+        throw new UiError('That model is already enabled.');
       const overrides = { ...(facts.modelOverrides ?? {}) };
       const value: ModelOverride = { ...(overrides[id] ?? {}) };
       if (current.label) value.displayName = current.label;
@@ -642,7 +646,7 @@ export function createModelSettings(
       if (alive) {
         model.set(null);
         page.set('models');
-        notice.set('Model saved.');
+        notice.set(message('Model saved.'));
       }
     });
   };
@@ -660,7 +664,8 @@ export function createModelSettings(
       if (result.kind !== 'committed') throw rejection(result);
       await loadConnections();
       changed();
-      if (alive) notice.set(id ? 'Default model saved.' : 'Default model cleared.');
+      if (alive)
+        notice.set(id ? message('Default model saved.') : message('Default model cleared.'));
     });
   };
   const confirm = (request: RemovalAction) => {
@@ -697,7 +702,7 @@ export function createModelSettings(
           editor.set(null);
           model.set(null);
           page.set('connections');
-          notice.set('Connection removed.');
+          notice.set(message('Connection removed.'));
         }
       } else if (kind === 'key') {
         const expected = credentialBasis(credential());
@@ -708,7 +713,7 @@ export function createModelSettings(
         });
         if (result.kind !== 'committed') throw rejection(result);
         if (!(await adopt(basis(form.baseline), form.instance, 'committed'))) return;
-        if (alive) notice.set('Stored provider credential removed.');
+        if (alive) notice.set(message('Stored provider credential removed.'));
       } else if (kind === 'model') {
         const current = model();
         if (!current?.originalId) return;
@@ -729,7 +734,7 @@ export function createModelSettings(
         if (alive) {
           model.set(null);
           page.set('models');
-          notice.set('Model removed from this connection.');
+          notice.set(message('Model removed from this connection.'));
         }
       }
       await loadConnections();

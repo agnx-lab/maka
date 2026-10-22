@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { UiError } from './text';
+import { tr } from './locale';
 import { host as nativeHost } from 'maka/host';
 import type { CapturedFile, ScopedHost } from 'maka/host';
 import type {
@@ -87,7 +89,7 @@ const count = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 function fileView(capture: CapturedFile): FileView {
   const value: unknown = capture.metadata();
-  if (!object(value)) throw new Error('Invalid native file presentation.');
+  if (!object(value)) throw new UiError('Invalid native file presentation.');
   const { version, digest, bytes } = value;
   if (
     value.kind === 'text' &&
@@ -110,7 +112,7 @@ function fileView(capture: CapturedFile): FileView {
       captured() &&
       typeof value.uri === 'string' &&
       typeof value.mimeType === 'string');
-  if (!valid) throw new Error('Invalid native file presentation.');
+  if (!valid) throw new UiError('Invalid native file presentation.');
   return value as FileView;
 }
 
@@ -126,7 +128,7 @@ export type OriginalMutation = {
 };
 function attempt(value: unknown): Attempt {
   if (!object(value) || typeof value.operationId !== 'string' || !('reply' in value))
-    throw new Error('Invalid native operation observation.');
+    throw new UiError('Invalid native operation observation.');
   return { operationId: value.operationId, reply: value.reply };
 }
 
@@ -232,13 +234,16 @@ export async function terminalMutation<M extends Method<'terminal', 'mutation'>>
   input: Input<'terminal', M>,
 ): Promise<Output<'terminal', M>> {
   const observed = await scope.terminal(method, input);
-  if (!object(observed) || !object(observed.reply)) throw new Error('Invalid terminal receipt.');
+  if (!object(observed) || !object(observed.reply)) throw new UiError('Invalid terminal receipt.');
   const reply = observed.reply as unknown as OperationReply;
   if (reply.receipt.kind !== 'recorded' || reply.receipt.outcome.kind !== 'returned')
-    throw new Error('Terminal result is unknown. Recover the original action before trying again.');
+    throw new UiError(
+      'Terminal result is unknown. Recover the original action before trying again.',
+    );
   if (observed.cleanupError)
-    throw new Error(
-      `Terminal result was recorded, but its original call did not finish cleanup: ${String(observed.cleanupError)}. Do not repeat this action.`,
+    throw new UiError(
+      'Terminal result was recorded, but its original call did not finish cleanup: {reason}. Do not repeat this action.',
+      { reason: String(observed.cleanupError) },
     );
   return reply.receipt.outcome.value as Output<'terminal', M>;
 }

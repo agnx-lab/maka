@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { errorText, renderText, type UiText } from './text';
+import { tr } from './locale';
 import { cleanup, effect, inputAction, signal, Text, untracked, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -33,10 +35,28 @@ import {
   controlFocusStyle,
 } from './ui';
 
+const changeKindLabel: Record<GitStatusEntry['kind'], string> = {
+  get added() {
+    return tr('added');
+  },
+  get modified() {
+    return tr('modified');
+  },
+  get deleted() {
+    return tr('deleted');
+  },
+  get type_changed() {
+    return tr('type changed');
+  },
+  get conflicted() {
+    return tr('conflicted');
+  },
+};
+
 type ChangesState =
   | { kind: 'loading' }
   | { kind: 'ready'; status: GitStatus | null }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: UiText };
 
 export function WorkspaceChanges(props: {
   sessionId: string;
@@ -59,7 +79,7 @@ export function WorkspaceChanges(props: {
         state.set({ kind: 'ready', status });
     } catch (reason) {
       if (alive && generation === reading && props.sessionId === sessionId)
-        state.set({ kind: 'error', message: String(reason) });
+        state.set({ kind: 'error', message: errorText(reason) });
     }
   };
   effect(() => {
@@ -85,12 +105,14 @@ export function WorkspaceChanges(props: {
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Text style={{ ...captionTextStyle, flex: 1, color: C.secondary, fontWeight: '500' }}>
-          Current changes
+          {tr('Current changes')}
         </Text>
         <Button
-          accessibilityLabel="Refresh current changes"
+          accessibilityLabel={tr('Refresh current changes')}
           onPress={inputAction(refresh, props.sessionId)}
-          tooltip={state().kind === 'error' ? 'Retry current changes' : 'Refresh current changes'}
+          tooltip={
+            state().kind === 'error' ? tr('Retry current changes') : tr('Refresh current changes')
+          }
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -99,32 +121,42 @@ export function WorkspaceChanges(props: {
         </Button>
       </View>
       <If when={state().kind === 'loading'}>
-        <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading current changes…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Reading current changes…')}</Text>
       </If>
       <If when={state().kind === 'error'}>
         <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
-          {(state() as Extract<ChangesState, { kind: 'error' }>).message}
+          {renderText((state() as Extract<ChangesState, { kind: 'error' }>).message)}
         </Text>
       </If>
       <If when={state().kind === 'ready'}>
         <If
           when={status() !== null}
-          else={<Text style={{ ...bodyTextStyle, color: C.muted }}>Not a Git workspace.</Text>}
+          else={
+            <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Not a Git workspace.')}</Text>
+          }
         >
           <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
-            {status()?.head ?? 'No commits yet'} · {entries().length} changes
+            {tr('{head} · {count} changes', {
+              head: status()?.head ?? tr('No commits yet'),
+              count: entries().length,
+            })}
           </Text>
           <List
-            accessibilityLabel="Current workspace changes"
+            accessibilityLabel={tr('Current workspace changes')}
             each={entries()}
             keyExtractor={(entry: GitStatusEntry) => `${entry.area}/${entry.path.bytesBase64}`}
             estimatedItemSize={48}
             style={{ flex: 1, minHeight: 0 }}
-            empty={<Text style={{ ...bodyTextStyle, color: C.muted }}>No current changes.</Text>}
+            empty={
+              <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('No current changes.')}</Text>
+            }
           >
             {(entry) => (
               <Button
-                accessibilityLabel={`Open ${gitAreaLabel[entry().area]} diff: ${host.pathLabel(entry().path)}`}
+                accessibilityLabel={tr('Open {area} diff: {path}', {
+                  area: gitAreaLabel[entry().area],
+                  path: host.pathLabel(entry().path),
+                })}
                 onPress={inputAction(open, {
                   sessionId: props.sessionId,
                   area: entry().area,
@@ -148,7 +180,7 @@ export function WorkspaceChanges(props: {
                     {host.pathLabel(entry().path)}
                   </Text>
                   <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
-                    {gitAreaLabel[entry().area]} · {entry().kind.replace('_', ' ')}
+                    {gitAreaLabel[entry().area]} · {changeKindLabel[entry().kind]}
                   </Text>
                 </View>
               </Button>

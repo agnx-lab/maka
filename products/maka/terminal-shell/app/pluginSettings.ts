@@ -19,6 +19,8 @@
 
 import { batch, cleanup, computed, signal } from 'nsh';
 import { host } from './host';
+import { tr } from './locale';
+import { message, UiError } from './text';
 import { sameValue as same } from '../../../../plugins/shared/value';
 import type {
   DeploymentRef,
@@ -54,7 +56,7 @@ export const settingCaption = (value: SettingValue | null | undefined) =>
       ? String(value.value)
       : value?.kind === 'null'
         ? 'null'
-        : 'Not set';
+        : tr('Not set');
 
 // This is a read projection and an unsaved field, never another deployment
 // manager. The original Host source and Settings journal own every change.
@@ -107,7 +109,7 @@ export function createPluginSettings(operations: SettingsOperations, active: () 
         !same(result.instance, instance.instance) ||
         !same(result.path, path)
       )
-        throw new Error('Plugin settings returned a different target.');
+        throw new UiError('Plugin settings returned a different target.');
       const values = [...result.fields];
       let after = result.next ?? null;
       while (after !== null) {
@@ -123,10 +125,10 @@ export function createPluginSettings(operations: SettingsOperations, active: () 
           !same(next.instance, instance.instance) ||
           !same(next.path, path)
         )
-          throw new Error(
+          throw new UiError(
             'Plugin settings changed their source while reading. Refresh to continue.',
           );
-        if (next.next === after) throw new Error('Plugin settings paging did not advance.');
+        if (next.next === after) throw new UiError('Plugin settings paging did not advance.');
         values.push(...next.fields);
         after = next.next ?? null;
       }
@@ -164,8 +166,8 @@ export function createPluginSettings(operations: SettingsOperations, active: () 
         });
         if (!visible() || reading !== generation) return;
         if (!same(next.source, first.source))
-          throw new Error('Plugin inventory changed its source while reading.');
-        if (same(next.next, after)) throw new Error('Plugin inventory paging did not advance.');
+          throw new UiError('Plugin inventory changed its source while reading.');
+        if (same(next.next, after)) throw new UiError('Plugin inventory paging did not advance.');
         instances.push(...next.instances);
         after = next.next ?? null;
       }
@@ -187,11 +189,13 @@ export function createPluginSettings(operations: SettingsOperations, active: () 
   };
   const settle = async (result: ManagementResultForDeploymentRef) => {
     if (result.status === 'conflict')
-      throw new Error(
+      throw new UiError(
         'Plugin configuration changed elsewhere. Discard this edit and refresh before trying again.',
       );
     if (result.status === 'rejected')
-      throw new Error(`Plugin change rejected: ${result.diagnostic ?? result.reason}`);
+      throw new UiError('Plugin change rejected: {reason}', {
+        reason: result.diagnostic ?? result.reason,
+      });
     // Retire the original editor before IO. Read failure cannot expose an
     // already committed value as another new save.
     const keep = selected()?.instance ?? null;
@@ -202,7 +206,9 @@ export function createPluginSettings(operations: SettingsOperations, active: () 
       fields.set(null);
     });
     operations.notice.set(
-      'Plugin configuration saved. Enabled is the desired state; services may still be reconciling.',
+      message(
+        'Plugin configuration saved. Enabled is the desired state; services may still be reconciling.',
+      ),
     );
     if (visible()) await load(keep);
   };
@@ -241,7 +247,8 @@ export function createPluginSettings(operations: SettingsOperations, active: () 
     disabled,
     action,
     navigation: () => JSON.stringify(action()),
-    title: () => (editor() ? 'Plugin setting' : selected() ? pluginTitle(selected()!) : 'Plugins'),
+    title: () =>
+      editor() ? tr('Plugin setting') : selected() ? pluginTitle(selected()!) : tr('Plugins'),
     filtered: computed(
       () =>
         inventory()?.instances.filter((instance) =>

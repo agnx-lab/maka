@@ -19,6 +19,8 @@
 
 import { batch, cleanup, signal } from 'nsh';
 import { host } from './host';
+import { applyLanguagePreference, tr } from './locale';
+import { message, UiError } from './text';
 import type {
   LanguagePreference,
   SettingsAssistantPreferences,
@@ -47,8 +49,8 @@ export type GeneralAction = {
   revision: number | null;
   kind: 'root' | Editor['kind'];
 };
-export const assistantLanguages: { value: LanguagePreference; label: string }[] = [
-  { value: 'auto', label: 'Automatic' },
+export const assistantLanguages = (): { value: LanguagePreference; label: string }[] => [
+  { value: 'auto', label: tr('Automatic') },
   { value: 'en', label: 'English' },
   { value: 'zh-CN', label: '简体中文' },
   { value: 'zh-TW', label: '繁體中文' },
@@ -104,6 +106,7 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
         'assistantPreferences',
         {},
       );
+      applyLanguagePreference(result.language ?? 'auto', result.revision);
       if (owns()) facts.set(result);
     } catch (reason) {
       if (owns()) operations.report(reason);
@@ -128,6 +131,8 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
       if (!alive) return;
       switch (result.kind) {
         case 'committed':
+          if (mutation.kind === 'language')
+            applyLanguagePreference(mutation.preference, result.revision);
           // Retire the submitted editor before reading new facts. A failed read
           // cannot leave a committed draft available to submit a second time.
           batch(() => {
@@ -135,16 +140,16 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
             if (submitted && editor()?.id === submitted.id) editor.set(null);
             cancelRead();
           });
-          operations.notice.set('Preferences saved.');
           if (visible()) await load();
+          operations.notice.set(message('Preferences saved.'));
           break;
         case 'revision_conflict':
           facts.set(null);
-          throw new Error(
+          throw new UiError(
             'Preferences changed elsewhere. Cancel this edit and refresh before saving again.',
           );
         case 'rejected':
-          throw new Error('The Host rejected these preferences. Check the values before saving.');
+          throw new UiError('The Host rejected these preferences. Check the values before saving.');
       }
     });
   };
@@ -214,10 +219,10 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
     back,
     title: () =>
       editor()?.kind === 'personalization'
-        ? 'Personalization'
+        ? tr('Personalization')
         : editor()?.kind === 'compaction'
-          ? 'Compaction prompt'
-          : 'General settings',
+          ? tr('Compaction prompt')
+          : tr('General settings'),
     open: ({ request, kind }: { request: GeneralAction; kind: Editor['kind'] }) =>
       open(request, kind),
     reload(request: GeneralAction) {
@@ -280,7 +285,7 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
         );
       }
       if (!form.useDefault && !form.prompt.trim()) {
-        operations.report(new Error('Enter a compaction prompt or choose the Host default.'));
+        operations.report(new UiError('Enter a compaction prompt or choose the Host default.'));
         return;
       }
       return mutate(

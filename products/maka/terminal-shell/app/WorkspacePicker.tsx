@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, errorText, UiError } from './text';
+import { tr } from './locale';
 import { batch, cleanup, computed, effect, Input, inputAction, signal, Text, View } from 'nsh';
 import type { Signal, YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
@@ -61,7 +63,7 @@ export function WorkspacePicker(props: {
   const query = signal('');
   const selected = signal(0);
   const loading = signal(false);
-  const error = signal('');
+  const error = createText();
   const viewportHeight = signal(0);
   let alive = true;
   let serial = 0;
@@ -109,9 +111,9 @@ export function WorkspacePicker(props: {
       );
       if (!owns(read)) return;
       if ((directory && page.kind !== 'children') || (!directory && page.kind !== 'roots'))
-        throw new Error('The Host returned a different directory view. Reopen the folder.');
+        throw new UiError('The Host returned a different directory view. Reopen the folder.');
       if (page.kind === 'children' && page.after !== null && page.after === after)
-        throw new Error('Folder paging did not advance. Reopen the folder.');
+        throw new UiError('Folder paging did not advance. Reopen the folder.');
       const rows = new Map(read.entries().map((entry) => [selectionKey(entry.selection), entry]));
       for (const entry of page.kind === 'roots' ? page.roots : page.children)
         rows.set(selectionKey(entry.selection), entry);
@@ -120,7 +122,7 @@ export function WorkspacePicker(props: {
         read.entries.set([...rows.values()]);
       });
     } catch (reason) {
-      if (owns(read)) error.set(reason instanceof Error ? reason.message : String(reason));
+      if (owns(read)) error.set(errorText(reason));
     } finally {
       read.reading = false;
       if (owns(read)) loading.set(false);
@@ -214,16 +216,16 @@ export function WorkspacePicker(props: {
             <View style={{ gap: 8, padding: 12 }}>
               <If when={loading()}>
                 <Text style={{ color: C.muted, fontSize: 13, lineHeight: 16 }}>
-                  Loading folders…
+                  {tr('Loading folders…')}
                 </Text>
               </If>
               <If when={!loading() && !error() && !matches().length}>
                 <Text style={{ color: C.muted, fontSize: 13, lineHeight: 16 }}>
                   {query()
-                    ? 'No matching folders.'
+                    ? tr('No matching folders.')
                     : read.trail.length
-                      ? 'This folder has no subfolders.'
-                      : 'No workspace locations are published by this Host.'}
+                      ? tr('This folder has no subfolders.')
+                      : tr('No workspace locations are published by this Host.')}
                 </Text>
               </If>
               <If when={error()}>
@@ -231,7 +233,7 @@ export function WorkspacePicker(props: {
                   {error()}
                 </Text>
                 <Button
-                  accessibilityLabel="Retry folder"
+                  accessibilityLabel={tr('Retry folder')}
                   onPress={inputAction(retry, { location: read.id })}
                   style={{
                     ...controlStyle,
@@ -245,7 +247,7 @@ export function WorkspacePicker(props: {
                   disabledStyle={controlDisabledStyle}
                 >
                   <Icon name="refresh" color={C.secondary} />
-                  <Text style={{ color: C.secondary, fontSize: 13 }}>Retry folder</Text>
+                  <Text style={{ color: C.secondary, fontSize: 13 }}>{tr('Retry folder')}</Text>
                 </Button>
               </If>
             </View>
@@ -297,11 +299,11 @@ export function WorkspacePicker(props: {
                     fontWeight: '600',
                   }}
                 >
-                  Choose workspace
+                  {tr('Choose workspace')}
                 </Text>
                 <Button
-                  accessibilityLabel="Close workspace picker"
-                  tooltip="Close · Esc"
+                  accessibilityLabel={tr('Close workspace picker')}
+                  tooltip={tr('Close · Esc')}
                   onPress={inputAction(props.close, props.instance)}
                   style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
                   hoverStyle={controlHoverStyle}
@@ -316,8 +318,8 @@ export function WorkspacePicker(props: {
               >
                 <Button
                   disabled={!read.trail.length}
-                  accessibilityLabel="Parent workspace folder"
-                  tooltip="Parent folder · Alt+Up"
+                  accessibilityLabel={tr('Parent workspace folder')}
+                  tooltip={tr('Parent folder · Alt+Up')}
                   onPress={inputAction(back, { location: read.id })}
                   style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                   hoverStyle={controlHoverStyle}
@@ -325,11 +327,11 @@ export function WorkspacePicker(props: {
                   disabledStyle={controlDisabledStyle}
                 >
                   <Icon name="back" color={C.secondary} />
-                  <Text style={{ color: C.secondary, fontSize: 13 }}>Parent</Text>
+                  <Text style={{ color: C.secondary, fontSize: 13 }}>{tr('Parent')}</Text>
                 </Button>
                 <Button
                   disabled={!read.trail.length}
-                  accessibilityLabel="Workspace locations"
+                  accessibilityLabel={tr('Workspace locations')}
                   onPress={inputAction(back, { location: read.id, roots: true })}
                   style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                   hoverStyle={controlHoverStyle}
@@ -337,7 +339,7 @@ export function WorkspacePicker(props: {
                   disabledStyle={controlDisabledStyle}
                 >
                   <Icon name="folder" color={C.secondary} />
-                  <Text style={{ color: C.secondary, fontSize: 13 }}>Locations</Text>
+                  <Text style={{ color: C.secondary, fontSize: 13 }}>{tr('Locations')}</Text>
                 </Button>
               </View>
               <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
@@ -360,7 +362,7 @@ export function WorkspacePicker(props: {
                     removeSearchKeys = () => unbind.forEach((remove) => remove());
                   }}
                   autoFocus
-                  accessibilityLabel="Search workspace folders"
+                  accessibilityLabel={tr('Search workspace folders')}
                   value={query()}
                   onChange={(text) => {
                     if (!owns(read)) return;
@@ -368,7 +370,7 @@ export function WorkspacePicker(props: {
                     query.set(text);
                     list?.scrollToIndex({ index: 0, animated: false });
                   }}
-                  placeholder="Search workspaces…"
+                  placeholder={tr('Search workspaces…')}
                   style={{
                     placeholderColor: C.muted,
                     color: C.text,
@@ -393,13 +395,15 @@ export function WorkspacePicker(props: {
                       style={{ color: C.text, fontSize: 13, lineHeight: 16, fontWeight: '600' }}
                     >
                       {read.trail.length
-                        ? `Folder · ${read.trail.at(-1)!.name}`
-                        : 'Workspace locations'}
+                        ? tr('Folder · {name}', { name: read.trail.at(-1)!.name })
+                        : tr('Workspace locations')}
                     </Text>
                     <Text selectable style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
                       {currentDirectory(read)?.path ??
                         read.trail.at(-1)?.path ??
-                        'Open a location, then choose the folder where the conversation can work.'}
+                        tr(
+                          'Open a location, then choose the folder where the conversation can work.',
+                        )}
                     </Text>
                   </View>
                 )}
@@ -413,13 +417,13 @@ export function WorkspacePicker(props: {
                 onLoadMore={() => {
                   void load(read);
                 }}
-                accessibilityLabel="Workspace folders"
+                accessibilityLabel={tr('Workspace folders')}
                 style={{ flex: 1, minHeight: 32 }}
               >
                 {(entry) => (
                   <Button
                     disabled={!!error()}
-                    accessibilityLabel={`Browse folder ${entry().name}`}
+                    accessibilityLabel={tr('Browse folder {name}', { name: entry().name })}
                     tooltip={entry().path}
                     selected={isSelected(entry())}
                     onPress={inputAction(browse, {
@@ -458,8 +462,8 @@ export function WorkspacePicker(props: {
               >
                 <Button
                   disabled={!currentDirectory(read) || !!error()}
-                  accessibilityLabel="Use this workspace folder"
-                  tooltip="Use this folder · Ctrl+Enter"
+                  accessibilityLabel={tr('Use this workspace folder')}
+                  tooltip={tr('Use this folder · Ctrl+Enter')}
                   onPress={
                     currentDirectory(read)
                       ? inputAction(choose, {
@@ -481,7 +485,7 @@ export function WorkspacePicker(props: {
                       fontWeight: '600',
                     }}
                   >
-                    Use this folder
+                    {tr('Use this folder')}
                   </Text>
                 </Button>
               </View>

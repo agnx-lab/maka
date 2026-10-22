@@ -202,6 +202,12 @@ impl ApplicationHost {
         path.validate().map_err(|_| "Invalid workspace path")?;
         files::path_label(&path)
     }
+    /// The native startup language, using the same resolver as the desktop.
+    #[getter]
+    pub fn system_locale(&self) -> String {
+        maka_ui_runtime::locale::system()
+    }
+
     /// The optional session initially requested by the launcher.
     #[getter]
     pub fn initial_session(&self) -> Option<String> {

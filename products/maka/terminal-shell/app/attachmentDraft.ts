@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, UiError, errorText, type UiText, message as uiMessage } from './text';
+import { tr } from './locale';
 import { cleanup, signal } from 'nsh';
 import { findUpload, recoverUpload, abandonUpload, watchUploads, type ScopedHost } from './host';
 import type { ClientDraftAttachment } from '../../../../packages/plugin-sdk/src/index.js';
@@ -33,12 +35,11 @@ export type UploadRow = {
   id: string;
   name: string;
   kind: 'reading' | 'uploading' | 'failed' | 'unknown';
-  error?: string;
+  error?: UiText;
   original?: any;
 };
 export type AttachmentEdit = { attachments: DraftAttachment[]; settledUploads: string[] };
 type UploadSubscription = { next(): Promise<any[] | null>; close(): void };
-const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
 
 // Native status is only progress. The original Journal receipt is the sole
 // authority for readiness, recovery and whether an attempt exists at all.
@@ -66,7 +67,7 @@ export function createAttachmentDraft(options: {
   const selecting = signal<UploadRow[]>([]);
   const picker = signal(false);
   const restoring = signal(true);
-  const error = signal('');
+  const error = createText();
   const recovering = signal<string | null>(null);
   // Keep adopted IDs for this observer's lifetime: a Journal read that began
   // before CAS must not resurrect a file after removal or a successful send.
@@ -153,7 +154,10 @@ export function createAttachmentDraft(options: {
             result?.kind === 'rejected' || original.abandoned
               ? ('failed' as const)
               : ('unknown' as const),
-          error: result?.kind === 'rejected' ? `Upload rejected: ${result.reason}` : undefined,
+          error:
+            result?.kind === 'rejected'
+              ? uiMessage('Upload rejected: {reason}', { reason: result.reason })
+              : undefined,
           original,
         };
       }),
@@ -171,13 +175,13 @@ export function createAttachmentDraft(options: {
       while (alive && subscription === stream) {
         const operations = await stream!.next();
         if (!alive || subscription !== stream) return;
-        if (operations === null) throw new Error('Attachment updates ended.');
+        if (operations === null) throw new UiError('Attachment updates ended.');
         receive(operations);
       }
     } catch (reason) {
       if (alive) {
         watchFailed = true;
-        error.set(message(reason));
+        error.set(errorText(reason));
       }
     } finally {
       stream?.close();
@@ -209,7 +213,7 @@ export function createAttachmentDraft(options: {
       if (alive)
         selecting.set(
           selecting().map((item) =>
-            item.id === target.id ? { ...item, kind: 'unknown', error: message(reason) } : item,
+            item.id === target.id ? { ...item, kind: 'unknown', error: errorText(reason) } : item,
           ),
         );
     } finally {
@@ -261,7 +265,7 @@ export function createAttachmentDraft(options: {
       const original = await recoverUpload(options.client, target.id);
       if (alive) receiveOne(original);
     } catch (reason) {
-      if (alive) error.set(message(reason));
+      if (alive) error.set(errorText(reason));
     } finally {
       if (alive) recovering.set(null);
     }
@@ -274,12 +278,12 @@ export function createAttachmentDraft(options: {
       const original = await abandonUpload(options.client, target.id);
       if (!alive) return;
       if (!original.abandoned)
-        throw new Error('This upload is prepared. Recover its original receipt.');
+        throw new UiError('This upload is prepared. Recover its original receipt.');
       receiveOne(original);
       settled.set(original.id, 'pending');
       options.changed();
     } catch (reason) {
-      if (alive) error.set(message(reason));
+      if (alive) error.set(errorText(reason));
     } finally {
       if (alive) recovering.set(null);
     }
@@ -328,13 +332,13 @@ export function createAttachmentDraft(options: {
       }
     },
     blocked() {
-      if (restoring()) return 'Restoring attachment drafts…';
-      if (error()) return 'Attachment state needs attention. Your draft is kept.';
+      if (restoring()) return tr('Restoring attachment drafts…');
+      if (error()) return tr('Attachment state needs attention. Your draft is kept.');
       if (rows().some((row) => row.kind === 'unknown'))
-        return 'Recover the original upload receipt before sending.';
+        return tr('Recover the original upload receipt before sending.');
       if (rows().some((row) => row.kind === 'reading' || row.kind === 'uploading'))
-        return 'Uploading attachments… Your typing is kept.';
-      if (rows().length) return 'Remove the failed attachment or choose it again.';
+        return tr('Uploading attachments… Your typing is kept.');
+      if (rows().length) return tr('Remove the failed attachment or choose it again.');
       return '';
     },
   };

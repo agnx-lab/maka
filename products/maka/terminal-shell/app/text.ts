@@ -1,0 +1,69 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { signal } from 'nsh';
+import { tr, type MessageKey } from './locale';
+
+type Values = Readonly<Record<string, UiText | number>>;
+export type UiText = string | { readonly key: MessageKey; readonly values?: Values };
+
+/** Authored interface text keeps its identity; external text remains opaque. */
+export const message = (key: MessageKey, values?: Values): Exclude<UiText, string> => ({
+  key,
+  values,
+});
+
+export function renderText(value: UiText): string {
+  if (typeof value === 'string') return value;
+  return tr(
+    value.key,
+    value.values &&
+      Object.fromEntries(
+        Object.entries(value.values).map(([key, part]) => [
+          key,
+          typeof part === 'number' ? part : renderText(part),
+        ]),
+      ),
+  );
+}
+
+/** One text owner; its public read tracks both the original value and current locale. */
+export function createText() {
+  const value = signal<UiText>('');
+  const read = () => renderText(value());
+  read.set = (text: UiText) => value.set(text);
+  return read;
+}
+
+export class UiError extends Error {
+  readonly text: UiText;
+  constructor(key: MessageKey, values?: Values) {
+    const text = message(key, values);
+    super(renderText(text));
+    this.text = text;
+  }
+}
+
+export function errorText(reason: unknown): UiText {
+  return reason instanceof UiError
+    ? reason.text
+    : reason instanceof Error
+      ? reason.message
+      : String(reason);
+}

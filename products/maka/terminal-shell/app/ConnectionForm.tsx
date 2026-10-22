@@ -24,6 +24,7 @@ import { SettingsField } from './SettingsField';
 import { ConnectionLogin } from './ConnectionLogin';
 import { ChoiceIndicator } from './ChoiceIndicator';
 import { Icon } from './Icon';
+import { tr } from './locale';
 import {
   C,
   bodyTextStyle,
@@ -47,32 +48,34 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           {form().provider.descriptor.label}
         </Text>
         <SettingsField
-          label="Connection name"
+          label={tr('Connection name')}
           value={form().name}
           change={(text) => owner.edit('name', text)}
           disabled={disabled()}
         />
         <SettingsField
-          label="Connection ID"
+          label={tr('Connection ID')}
           value={form().slug}
           change={(text) => owner.edit('slug', text)}
           disabled={disabled()}
           readonly={!!form().baseline}
-          hint="A unique lowercase name, such as openrouter-work. It stays fixed after creation."
+          hint={tr(
+            'A unique lowercase name, such as openrouter-work. It stays fixed after creation.',
+          )}
         />
         <If when={owner.editableBaseUrl()}>
           <SettingsField
-            label="Base URL"
+            label={tr('Base URL')}
             value={form().baseUrl}
             change={(text) => owner.edit('baseUrl', text)}
             disabled={disabled()}
-            hint="Use the API endpoint supplied by your provider."
+            hint={tr('Use the API endpoint supplied by your provider.')}
           />
         </If>
         <Button
           disabled={disabled()}
           selected={form().enabled}
-          accessibilityLabel="Enable connection"
+          accessibilityLabel={tr('Enable connection')}
           onPress={inputAction(owner.toggleEnabled, {
             ...owner.action(),
             enabled: !form().enabled,
@@ -82,7 +85,9 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...captionTextStyle, color: C.text, flex: 1 }}>Connection enabled</Text>
+          <Text style={{ ...captionTextStyle, color: C.text, flex: 1 }}>
+            {tr('Connection enabled')}
+          </Text>
           <ChoiceIndicator kind="switch" checked={form().enabled} disabled={disabled()} />
         </Button>
         <If
@@ -91,15 +96,17 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           )}
         >
           <SettingsField
-            label="API key"
+            label={tr('API key')}
             value={form().apiKey}
             masked
             change={(text) => owner.edit('apiKey', text)}
             disabled={disabled()}
             hint={
               owner.credential()?.configured
-                ? 'A provider credential is stored. Leave blank to keep it; enter a key to replace it.'
-                : 'Your key is stored securely and is never displayed again.'
+                ? tr(
+                    'A provider credential is stored. Leave blank to keep it; enter a key to replace it.',
+                  )
+                : tr('Your key is stored securely and is never displayed again.')
             }
           />
         </If>
@@ -107,7 +114,7 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
         <If when={owner.credential()?.configured}>
           <Button
             disabled={disabled() || owner.dirty()}
-            accessibilityLabel="Remove stored provider credential"
+            accessibilityLabel={tr('Remove stored provider credential')}
             onPress={inputAction(owner.confirm, {
               ...owner.action(),
               kind: 'key',
@@ -119,28 +126,28 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             disabledStyle={controlDisabledStyle}
           >
             <Text style={{ ...captionTextStyle, color: C.danger }}>
-              Remove stored provider credential
+              {tr('Remove stored provider credential')}
             </Text>
           </Button>
           <If when={owner.dirty()}>
             <Text style={{ ...bodyTextStyle, color: C.muted }}>
-              Save or discard connection edits before removing the stored credential.
+              {tr('Save or discard connection edits before removing the stored credential.')}
             </Text>
           </If>
         </If>
         <SettingsField
-          label="Advanced request JSON"
+          label={tr('Advanced request JSON')}
           value={form().overlay}
           multiline
           change={(text) => owner.edit('overlay', text)}
           disabled={disabled()}
-          hint={
-            'Merged into model requests. For OpenRouter: {"provider":{"only":["openrouter","deepseek"]}}. Use null to clear.'
-          }
+          hint={tr(
+            'Merged into model requests. For OpenRouter: {"provider":{"only":["openrouter","deepseek"]}}. Use null to clear.',
+          )}
         />
         <Button
           disabled={disabled()}
-          accessibilityLabel="Save connection"
+          accessibilityLabel={tr('Save connection')}
           onPress={inputAction(owner.saveConnection, owner.action())}
           style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
           hoverStyle={{ backgroundColor: C.accentHover }}
@@ -148,18 +155,18 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           disabledStyle={controlDisabledStyle}
         >
           <Text style={{ ...captionTextStyle, color: C.background, fontWeight: '500' }}>
-            {owner.busy() ? 'Saving…' : 'Save connection'}
+            {owner.busy() ? tr('Saving…') : tr('Save connection')}
           </Text>
         </Button>
         <If when={form().baseline}>
           <View style={{ height: 1, backgroundColor: C.line }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <Text style={{ ...bodyTextStyle, color: C.text, flex: 1, fontWeight: '500' }}>
-              Models · {models().length}
+              {tr('Models · {count}', { count: models().length })}
             </Text>
             <Button
               disabled={disabled() || owner.dirty()}
-              accessibilityLabel="Add model manually"
+              accessibilityLabel={tr('Add model manually')}
               onPress={inputAction(owner.editModel, { ...owner.action(), id: null })}
               style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
               hoverStyle={controlHoverStyle}
@@ -167,30 +174,30 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               disabledStyle={controlDisabledStyle}
             >
               <Icon name="plus" color={C.accent} />
-              <Text style={{ ...captionTextStyle, color: C.accent }}>Add model</Text>
+              <Text style={{ ...captionTextStyle, color: C.accent }}>{tr('Add model')}</Text>
             </Button>
             <If when={form().provider.descriptor.discovery}>
               <Button
                 disabled={disabled() || owner.dirty()}
-                accessibilityLabel="Fetch models"
+                accessibilityLabel={tr('Fetch models')}
                 onPress={inputAction(owner.discover, owner.action())}
                 style={controlStyle}
                 hoverStyle={controlHoverStyle}
                 focusStyle={controlFocusStyle}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text style={{ ...captionTextStyle, color: C.accent }}>Fetch models</Text>
+                <Text style={{ ...captionTextStyle, color: C.accent }}>{tr('Fetch models')}</Text>
               </Button>
             </If>
           </View>
           <If when={!models().length}>
             <Text style={{ ...bodyTextStyle, color: C.muted }}>
-              Fetch the provider’s catalog or add its exact model ID.
+              {tr('Fetch the provider’s catalog or add its exact model ID.')}
             </Text>
           </If>
           <Button
             disabled={disabled() || owner.dirty()}
-            accessibilityLabel="Manage models"
+            accessibilityLabel={tr('Manage models')}
             onPress={inputAction(owner.showModels, owner.action())}
             style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
             hoverStyle={controlHoverStyle}
@@ -198,13 +205,13 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             disabledStyle={controlDisabledStyle}
           >
             <Text style={{ ...captionTextStyle, color: C.accent, flex: 1 }}>
-              Manage models · {models().length}
+              {tr('Manage models · {count}', { count: models().length })}
             </Text>
             <Icon name="right" color={C.muted} />
           </Button>
           <If when={owner.dirty()}>
             <Text style={{ ...bodyTextStyle, color: C.muted }}>
-              Save changes before fetching or editing models.
+              {tr('Save changes before fetching or editing models.')}
             </Text>
           </If>
           <If when={owner.defaultTarget()?.connectionId === form().baseline?.target.connectionId}>
@@ -216,7 +223,9 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ ...captionTextStyle, color: C.muted }}>Clear default model</Text>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>
+                {tr('Clear default model')}
+              </Text>
             </Button>
           </If>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -232,7 +241,7 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               disabledStyle={controlDisabledStyle}
             >
               <Text style={{ ...captionTextStyle, color: C.muted }}>
-                Discard changes and reload
+                {tr('Discard changes and reload')}
               </Text>
             </Button>
             <Button
@@ -247,7 +256,9 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ ...captionTextStyle, color: C.danger }}>Delete connection</Text>
+              <Text style={{ ...captionTextStyle, color: C.danger }}>
+                {tr('Delete connection')}
+              </Text>
             </Button>
           </View>
         </If>

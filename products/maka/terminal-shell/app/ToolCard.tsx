@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { displayText, tr } from './locale';
 import { computed, inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { HistoryTool } from '../../../../packages/plugin-sdk/src/index.js';
@@ -76,7 +77,7 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
     'status',
   ]);
   return (
-    <If when={status.complete() && !status.error()} else={<Status label="Recorded" />}>
+    <If when={status.complete() && !status.error()} else={<Status label={tr('Recorded')} />}>
       <Each of={[status.content()]}>
         {(value) => {
           const phase = value();
@@ -92,16 +93,16 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
             ['failed', 'timed_out', 'orphaned'].includes(phase) ||
             (typeof code() === 'number' && code() !== 0);
           const label = () => {
-            if (phase === 'cancelled') return 'Stopped';
-            if (phase === 'orphaned') return 'Unknown';
-            if (failed()) return 'Error';
-            if (phase === 'completed') return 'Completed';
-            if (phase === 'starting') return 'Preparing at capture';
-            return phase === 'running' ? 'Running at capture' : 'Recorded';
+            if (phase === 'cancelled') return tr('Stopped');
+            if (phase === 'orphaned') return tr('Unknown');
+            if (failed()) return tr('Error');
+            if (phase === 'completed') return tr('Completed');
+            if (phase === 'starting') return tr('Preparing at capture');
+            return phase === 'running' ? tr('Running at capture') : tr('Recorded');
           };
           return (
             <Status
-              label={`${label()}${typeof code() === 'number' ? ` · Exit ${code()}` : ''}`}
+              label={`${label()}${typeof code() === 'number' ? ` · ${tr('Exit {code}', { code: String(code()) })}` : ''}`}
               success={phase === 'completed' && !failed()}
               error={phase !== 'cancelled' && failed()}
               warning={phase === 'cancelled'}
@@ -116,19 +117,19 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
 function Outcome(props: { reference: ToolSourceRef; sessionId: string; through: number }) {
   const kind = createToolSource(props.reference, props.sessionId, props.through, ['kind']);
   return (
-    <If when={kind.complete() && !kind.error()} else={<Status label="Recorded" />}>
+    <If when={kind.complete() && !kind.error()} else={<Status label={tr('Recorded')} />}>
       <If
         when={kind.content() === 'completed'}
         else={
           <Status
-            label={kind.content() === 'failed' ? 'Error' : 'Recorded'}
+            label={kind.content() === 'failed' ? tr('Error') : tr('Recorded')}
             error={kind.content() === 'failed'}
           />
         }
       >
         <If
           when={processFamily(cardFamily(props.reference.presentation))}
-          else={<Status label="Completed" success />}
+          else={<Status label={tr('Completed')} success />}
         >
           <ProcessOutcome
             reference={props.reference}
@@ -160,7 +161,9 @@ function Field(props: {
       else={
         <OriginalToolSource
           source={source}
-          label={props.reference.field === 'arguments' ? 'Original arguments' : 'Original result'}
+          label={
+            props.reference.field === 'arguments' ? tr('Original arguments') : tr('Original result')
+          }
         />
       }
     >
@@ -185,35 +188,35 @@ export function ToolCard(props: {
   const tool = (): HistoryTool | null => props.row().tool ?? null;
   const family = () => cardFamily(tool()?.call?.presentation);
   const title = () => {
-    const supplied = tool()?.call?.title?.fallback;
-    if (supplied) return supplied;
+    const supplied = tool()?.call?.title;
+    if (supplied) return displayText(supplied);
     switch (family()) {
       case 'read':
-        return 'Read file';
+        return tr('Read file');
       case 'write':
-        return 'Write file';
+        return tr('Write file');
       case 'edit':
-        return 'Edit file';
+        return tr('Edit file');
       case 'patch':
-        return 'Patch file';
+        return tr('Patch file');
       case 'glob':
-        return 'Find files';
+        return tr('Find files');
       case 'grep':
-        return 'Search files';
+        return tr('Search files');
       case 'execute':
-        return 'Run command';
+        return tr('Run command');
       case 'processRead':
-        return 'Read process output';
+        return tr('Read process output');
       case 'stdin':
-        return 'Send process input';
+        return tr('Send process input');
       case 'stop':
-        return 'Stop process';
+        return tr('Stop process');
       case 'fetch':
-        return 'Read web page';
+        return tr('Read web page');
       case 'webSearch':
-        return 'Search the web';
+        return tr('Search the web');
       default:
-        return tool()?.call?.name ?? 'Tool';
+        return tool()?.call?.name ?? tr('Tool');
     }
   };
   // Open at the recorded output; the complete original arguments remain below.
@@ -229,25 +232,27 @@ export function ToolCard(props: {
     const value = tool();
     if (value?.result)
       return value.result.settlement === 'unknown'
-        ? 'Unknown'
+        ? tr('Unknown')
         : value.result.isError || value.result.settlement === 'failed'
-          ? 'Error'
+          ? tr('Error')
           : value.result.settlement === 'rejected'
-            ? 'Rejected'
-            : 'Recorded';
+            ? tr('Rejected')
+            : tr('Recorded');
     // History references describe their fence, never current execution liveness.
     return value?.call
       ? value.call.dispatched
-        ? 'Dispatched'
-        : 'Input recorded'
-      : 'Not completed';
+        ? tr('Dispatched')
+        : tr('Input recorded')
+      : tr('Not completed');
   };
   return (
     <View style={{ width: '100%', minWidth: 0, gap: detailsGap }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0 }}>
         <Button
           selected={props.expanded()}
-          accessibilityLabel={`Toggle tool ${tool()?.call?.name ?? 'details'}`}
+          accessibilityLabel={tr('Toggle tool {name}', {
+            name: tool()?.call?.name ?? tr('Tool details'),
+          })}
           tooltip={title()}
           onPress={inputAction(props.expand, {
             sessionId: props.sessionId,
@@ -283,8 +288,8 @@ export function ToolCard(props: {
             else={
               <Status
                 label={fallbackState()}
-                error={fallbackState() === 'Error'}
-                warning={fallbackState() === 'Rejected' || fallbackState() === 'Unknown'}
+                error={fallbackState() === tr('Error')}
+                warning={fallbackState() === tr('Rejected') || fallbackState() === tr('Unknown')}
               />
             }
           >
@@ -301,8 +306,10 @@ export function ToolCard(props: {
         </Button>
         <If when={props.expanded()}>
           <Button
-            accessibilityLabel="Toggle original tool details"
-            tooltip={props.original() ? 'Show readable tool details' : 'Show original tool data'}
+            accessibilityLabel={tr('Toggle original tool details')}
+            tooltip={
+              props.original() ? tr('Show readable tool details') : tr('Show original tool data')
+            }
             selected={props.original()}
             onPress={inputAction(props.showOriginal, {
               sessionId: props.sessionId,
@@ -326,7 +333,7 @@ export function ToolCard(props: {
       <If when={props.expanded()}>
         <View style={{ paddingLeft: 16 }}>
           <Scroll
-            accessibilityLabel="Tool details"
+            accessibilityLabel={tr('Tool details')}
             onScroll={() => props.reading?.()}
             style={{
               minHeight: 16,
@@ -355,7 +362,7 @@ export function ToolCard(props: {
             </Each>
             <If when={!references().length}>
               <Text selectable style={{ color: C.muted }}>
-                {props.row().text || 'Original tool source is unavailable in this history row.'}
+                {props.row().text || tr('Original tool source is unavailable in this history row.')}
               </Text>
             </If>
           </Scroll>

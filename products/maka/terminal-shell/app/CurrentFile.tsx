@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, errorText, renderText, UiError, type UiText } from './text';
+import { tr } from './locale';
 import { cleanup, computed, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
@@ -42,7 +44,7 @@ type FileState =
   | FileView
   | { kind: 'idle' }
   | { kind: 'loading'; previous: FileView | null }
-  | { kind: 'error'; message: string; previous: FileView | null };
+  | { kind: 'error'; message: UiText; previous: FileView | null };
 export type CurrentFileModel = {
   target: WorkspaceFileTarget;
   state(): FileState;
@@ -74,7 +76,6 @@ const captured = (state: FileState): FileView | null =>
     : state.kind === 'loading' || state.kind === 'error'
       ? state.previous
       : state;
-const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
 const close = async (resource: { stream: { close(): Promise<void> } | null } | null) => {
   const stream = resource?.stream;
   if (resource) resource.stream = null;
@@ -107,7 +108,7 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
     stale.set(true);
     state.set({
       kind: 'error',
-      message: message(reason),
+      message: errorText(reason),
       previous: captured(state()),
     });
   };
@@ -154,7 +155,7 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
         if (ownsRead(request, watch))
           state.set({
             kind: 'error',
-            message: message(reason),
+            message: errorText(reason),
             previous: captured(state()),
           });
       })
@@ -181,9 +182,9 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
       for (;;) {
         const change = await opened.next();
         if (!ownsWatch(watch)) return;
-        if (change === null) throw new Error('File updates ended. Retry to reconnect.');
+        if (change === null) throw new UiError('File updates ended. Retry to reconnect.');
         if (change.kind === 'unavailable')
-          throw new Error('The parent directory changed or is unavailable. Retry to reopen it.');
+          throw new UiError('The parent directory changed or is unavailable. Retry to reopen it.');
         if (change.kind === 'ready') {
           watch.ready = true;
           read(watch);
@@ -240,7 +241,7 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
     version: string;
     digest: string;
     failed: boolean;
-    message: string;
+    message: UiText;
   } | null>(null);
   let mounted = true;
   cleanup(() => {
@@ -261,7 +262,7 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
             version: original.version,
             digest: original.digest,
             failed: false,
-            message: 'File copied',
+            message: '',
           });
       } catch (reason) {
         if (owns())
@@ -269,7 +270,7 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
             version: original.version,
             digest: original.digest,
             failed: true,
-            message: message(reason),
+            message: errorText(reason),
           });
       } finally {
         if (mounted) copying.set(false);
@@ -298,30 +299,41 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
   };
   const error = () => {
     const value = model.state();
-    return value.kind === 'error' ? value.message : '';
+    return value.kind === 'error' ? renderText(value.message) : '';
   };
   const failed = () => model.state().kind === 'error';
   const notice = () => {
     const value = view();
     switch (value?.kind) {
       case 'text':
-        return value.bytes === 0 ? 'Empty file.' : '';
+        return value.bytes === 0 ? tr('Empty file.') : '';
       case 'absent':
-        return 'This file no longer exists.';
+        return tr('This file no longer exists.');
       case 'changed':
-        return 'This file changed while it was being read. Refresh to capture it again.';
+        return tr('This file changed while it was being read. Refresh to capture it again.');
       case 'binary':
-        return `Binary file · ${value.bytes} bytes. A text preview is unavailable.`;
+        return tr('Binary file · {bytes} bytes. A text preview is unavailable.', {
+          bytes: value.bytes,
+        });
       case 'unsupported':
-        return `This ${value.fileKind === 'symlink' ? 'symbolic link' : value.fileKind} cannot be previewed.`;
+        return tr('This {kind} cannot be previewed.', {
+          kind:
+            value.fileKind === 'symlink'
+              ? tr('symbolic link')
+              : value.fileKind === 'directory'
+                ? tr('directory')
+                : value.fileKind === 'file'
+                  ? tr('file')
+                  : tr('other'),
+        });
       default:
         return '';
     }
   };
   const emptyMessage = () => {
     if (failed()) return error();
-    if (model.state().kind === 'loading') return 'Reading current file…';
-    if (model.state().kind === 'idle') return 'File preview is inactive.';
+    if (model.state().kind === 'loading') return tr('Reading current file…');
+    if (model.state().kind === 'idle') return tr('File preview is inactive.');
     return notice();
   };
   return (
@@ -335,10 +347,18 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
           {model.target.title}
         </Text>
         <Button
-          accessibilityLabel="Copy captured file"
+          accessibilityLabel={tr('Copy captured file')}
           disabled={textCapture() === null}
           onPress={copyAction()}
-          tooltip={copying() ? 'Copying captured file…' : copied()?.message || 'Copy captured file'}
+          tooltip={
+            copying()
+              ? tr('Copying captured file…')
+              : copied()
+                ? copied()!.failed
+                  ? renderText(copied()!.message)
+                  : tr('File copied')
+                : tr('Copy captured file')
+          }
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -351,9 +371,11 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
         </Button>
         <Button
           disabled={model.state().kind === 'loading'}
-          accessibilityLabel="Refresh current file"
+          accessibilityLabel={tr('Refresh current file')}
           onPress={inputAction(model.refresh, null)}
-          tooltip={model.state().kind === 'error' ? 'Retry current file' : 'Refresh current file'}
+          tooltip={
+            model.state().kind === 'error' ? tr('Retry current file') : tr('Refresh current file')
+          }
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -368,38 +390,40 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
             when={version()}
             else={
               <Text style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
-                Captured contents
+                {tr('Captured contents')}
               </Text>
             }
           >
             <Text
               selectable
               numberOfLines={1}
-              accessibilityLabel={`Captured version ${version()}`}
-              tooltip={`Captured version ${version()}`}
+              accessibilityLabel={tr('Captured version {version}', { version: version() })}
+              tooltip={tr('Captured version {version}', { version: version() })}
               style={{ ...captionTextStyle, flex: 1, minWidth: 0, color: C.muted }}
             >
-              Captured version {version()}
+              {tr('Captured version {version}', { version: version() })}
             </Text>
           </If>
           <If when={copied()}>
             <Text
-              accessibilityLabel={copied()!.message}
-              tooltip={copied()!.message}
+              accessibilityLabel={
+                copied()!.failed ? renderText(copied()!.message) : tr('File copied')
+              }
+              tooltip={copied()!.failed ? renderText(copied()!.message) : tr('File copied')}
               style={{
                 ...captionTextStyle,
                 flexShrink: 0,
                 color: copied()!.failed ? C.danger : C.muted,
               }}
             >
-              {copied()!.failed ? 'Copy failed' : 'File copied'}
+              {copied()!.failed ? tr('Copy failed') : tr('File copied')}
             </Text>
           </If>
         </View>
       </If>
       <If when={!readable()}>
         <Scroll
-          accessibilityLabel="File preview status"
+          accessibilityLabel={tr('File preview status')}
           onLayout={(frame) => emptyHeight.set(frame.size.height)}
           style={{ flex: 1, minHeight: 0 }}
         >
@@ -441,7 +465,7 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
               <Text
                 style={{ ...bodyTextStyle, width: '100%', color: C.warning, textAlign: 'center' }}
               >
-                The workspace may have changed. Refresh for current contents.
+                {tr('The workspace may have changed. Refresh for current contents.')}
               </Text>
             </If>
             <If when={failed() || view()?.kind === 'changed'}>
@@ -468,7 +492,7 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
 function RetryCurrentFile(props: { model: CurrentFileModel }) {
   return (
     <Button
-      accessibilityLabel="Retry current file"
+      accessibilityLabel={tr('Retry current file')}
       disabled={props.model.state().kind === 'loading'}
       onPress={inputAction(props.model.refresh, null)}
       style={{
@@ -483,7 +507,7 @@ function RetryCurrentFile(props: { model: CurrentFileModel }) {
       disabledStyle={controlDisabledStyle}
     >
       <Icon name="refresh" color={C.secondary} />
-      <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry</Text>
+      <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Retry')}</Text>
     </Button>
   );
 }
@@ -495,15 +519,15 @@ function CapturedFileStatus(props: { model: CurrentFileModel }) {
       <View style={{ padding: 8, gap: 8, alignItems: 'flex-start' }}>
         <If when={model.stale()}>
           <Text style={{ ...bodyTextStyle, color: C.warning }}>
-            The workspace may have changed. Refresh for current contents.
+            {tr('The workspace may have changed. Refresh for current contents.')}
           </Text>
         </If>
         <If when={model.state().kind === 'loading'}>
-          <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading current file…</Text>
+          <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Reading current file…')}</Text>
         </If>
         <If when={model.state().kind === 'error'}>
           <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
-            {(model.state() as Extract<FileState, { kind: 'error' }>).message}
+            {renderText((model.state() as Extract<FileState, { kind: 'error' }>).message)}
           </Text>
           <RetryCurrentFile model={model} />
         </If>
@@ -527,7 +551,7 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
       onScroll={(event) => {
         if (mounted) props.model.position = { x: event.offset.x, y: event.offset.y };
       }}
-      accessibilityLabel="Captured file text"
+      accessibilityLabel={tr('Captured file text')}
       style={{ flex: 1, minHeight: 0, backgroundColor: C.surface }}
       header={<CapturedFileStatus model={props.model} />}
     >
@@ -572,7 +596,7 @@ function FileImage(props: {
   view: Extract<FileView, { kind: 'image' }>;
   openImageViewer: OpenImageViewer;
 }) {
-  const error = signal('');
+  const error = createText();
   const dimensions = signal<{ width: number; height: number } | null>(null);
   const viewportHeight = signal(0);
   const footerHeight = signal(0);
@@ -596,7 +620,7 @@ function FileImage(props: {
           onError={(reason) => {
             if (mounted) error.set(reason.message);
           }}
-          accessibilityLabel="Captured workspace image"
+          accessibilityLabel={tr('Captured workspace image')}
           style={{ flex: 1, minHeight: 0, width: '100%' }}
         />
       </View>
@@ -604,7 +628,10 @@ function FileImage(props: {
         <If when={dimensions()}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
-              {dimensions()!.width} × {dimensions()!.height} · Captured image
+              {tr('{width} × {height} · Captured image', {
+                width: dimensions()!.width,
+                height: dimensions()!.height,
+              })}
             </Text>
             <ImageViewerButton
               open={props.openImageViewer}
@@ -631,7 +658,7 @@ function FileImage(props: {
             disabledStyle={controlDisabledStyle}
           >
             <Icon name="refresh" color={C.secondary} />
-            <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry image</Text>
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Retry image')}</Text>
           </Button>
         </If>
       </View>

@@ -25,6 +25,7 @@ import { platform, windowSize } from 'nsh/device';
 import type { Position } from './history';
 import { C, controlStyle, captionTextStyle } from './ui';
 import { Icon } from './Icon';
+import { tr } from './locale';
 
 // Match the desktop's dense pixel ticks while retaining whole-cell terminal targets.
 const markPitch = platform.isTerminal ? 16 : 10;
@@ -117,7 +118,9 @@ function NavigationMark(props: {
 }) {
   return (
     <Button
-      accessibilityLabel={`Jump to turn: ${props.item().label || 'Recorded turn'}`}
+      accessibilityLabel={tr('Jump to turn: {label}', {
+        label: props.item().label || tr('Recorded turn'),
+      })}
       tooltip={
         <Overlay
           hintOnFocus
@@ -138,10 +141,10 @@ function NavigationMark(props: {
           }}
         >
           <Text numberOfLines={3} style={{ ...captionTextStyle, color: C.text, fontWeight: '500' }}>
-            {props.item().label || 'Recorded turn'}
+            {props.item().label || tr('Recorded turn')}
           </Text>
           <If when={props.busy}>
-            <Text style={{ ...captionTextStyle, color: C.muted }}>Navigating…</Text>
+            <Text style={{ ...captionTextStyle, color: C.muted }}>{tr('Navigating…')}</Text>
           </If>
         </Overlay>
       }
@@ -215,7 +218,7 @@ export function TurnNavigation(props: {
         <List
           ref={rail}
           testID="turn-navigation"
-          accessibilityLabel="Turn navigation"
+          accessibilityLabel={tr('Turn navigation')}
           each={props.items()}
           keyExtractor={(item) => item.turnId}
           estimatedItemSize={markPitch}
@@ -241,8 +244,8 @@ export function TurnNavigation(props: {
         </If>
         <If when={props.busy()}>
           <Button
-            accessibilityLabel="Cancel turn navigation"
-            tooltip="Cancel navigation"
+            accessibilityLabel={tr('Cancel turn navigation')}
+            tooltip={tr('Cancel navigation')}
             onPress={props.cancel}
             style={{
               position: 'absolute',
@@ -271,7 +274,7 @@ export function ReturnToLatest(props: { visible: boolean; activate(): void }) {
   return (
     <If when={props.visible}>
       <Button
-        accessibilityLabel="Return to latest"
+        accessibilityLabel={tr('Return to latest')}
         onPress={props.activate}
         style={{
           ...controlStyle,
@@ -287,7 +290,7 @@ export function ReturnToLatest(props: { visible: boolean; activate(): void }) {
         focusStyle={{ backgroundColor: C.accent }}
       >
         <Icon name="latest" color={C.secondary} />
-        <Text style={{ ...captionTextStyle, color: C.text }}>Latest</Text>
+        <Text style={{ ...captionTextStyle, color: C.text }}>{tr('Latest')}</Text>
       </Button>
     </If>
   );

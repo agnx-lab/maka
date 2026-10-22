@@ -19,6 +19,7 @@
 
 import { cleanup, signal } from 'nsh';
 import { host } from './host';
+import { createText, errorText, message, UiError } from './text';
 import type {
   ClientOperation,
   CredentialStatus,
@@ -31,7 +32,7 @@ export function settingsValue(reply: unknown): unknown {
   const receipt = record(reply) && record(reply.receipt) ? reply.receipt : null;
   const outcome = receipt?.kind === 'recorded' && record(receipt.outcome) ? receipt.outcome : null;
   if (outcome?.kind !== 'returned')
-    throw new Error(
+    throw new UiError(
       'The result is unknown. Recover the original action before making another change.',
     );
   return outcome.value;
@@ -41,7 +42,7 @@ export const credentialBasis = (status: CredentialStatus | null): CredentialVers
   status?.configured && status.credentialId !== null && status.revision !== null
     ? { locator: status.locator, credentialId: status.credentialId, revision: status.revision }
     : null;
-export function settingsRejection(value: any): Error {
+export function settingsRejection(value: any): UiError {
   if (
     value?.kind === 'connection_stale' ||
     value?.kind === 'revision_conflict' ||
@@ -50,21 +51,21 @@ export function settingsRejection(value: any): Error {
     value?.reason === 'credential_changed' ||
     value?.reason === 'connection_changed'
   )
-    return new Error('These settings changed elsewhere. Reload before saving again.');
+    return new UiError('These settings changed elsewhere. Reload before saving again.');
   if (value?.kind === 'connection_exists')
-    return new Error('That connection ID is already in use. Choose another ID.');
+    return new UiError('That connection ID is already in use. Choose another ID.');
   if (value?.kind === 'invalid_default_target')
-    return new Error('Enable the connection and model before making it the default.');
-  return new Error(
-    `The Host rejected this action (${value?.reason ?? value?.kind ?? 'unknown result'}).`,
-  );
+    return new UiError('Enable the connection and model before making it the default.');
+  return new UiError('The Host rejected this action ({reason}).', {
+    reason: value?.reason ?? value?.kind ?? message('unknown result'),
+  });
 }
 // One presentation owner for the existing native journal. The Client's
 // atomic reservation remains the write fence across pages and processes.
 export function createSettingsOperations() {
   const busy = signal(false);
-  const error = signal('');
-  const notice = signal('');
+  const error = createText();
+  const notice = createText();
   const pending = signal<ClientOperation[]>([]);
   const pendingKnown = signal(false);
   let alive = true;
@@ -72,7 +73,7 @@ export function createSettingsOperations() {
     alive = false;
   });
   const report = (reason: unknown) => {
-    if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
+    if (alive) error.set(errorText(reason));
   };
   const refreshPending = async () => {
     try {
@@ -121,8 +122,8 @@ export function createSettingsOperations() {
           if (original.endpoint === 'management') {
             if (!record(value) || value.status !== 'committed') {
               if (record(value) && value.status === 'conflict')
-                throw new Error('Host services changed elsewhere. Reload before saving again.');
-              throw new Error('The Host rejected this service change. Reload and review it.');
+                throw new UiError('Host services changed elsewhere. Reload before saving again.');
+              throw new UiError('The Host rejected this service change. Reload and review it.');
             }
           } else {
             const outcome = record(value) && value.kind === 'applied' ? value.result : value;
@@ -134,7 +135,7 @@ export function createSettingsOperations() {
           }
           afterKnown(original, value);
         }
-        if (alive) notice.set('Original settings action receipts checked.');
+        if (alive) notice.set(message('Original settings action receipts checked.'));
       } catch (reason) {
         report(reason);
       } finally {

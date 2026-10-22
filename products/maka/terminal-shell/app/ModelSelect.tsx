@@ -24,6 +24,8 @@ import { keymap } from 'nsh/keymap';
 import { List } from 'nsh/list';
 import { platform, windowSize } from 'nsh/device';
 import { host } from './host';
+import { tr } from './locale';
+import { createText, errorText, UiError } from './text';
 import type { ConversationHandle } from './Conversation';
 import { effortCaption, modelCaption, sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelBackend, ModelChoice } from './modelSelection';
@@ -84,7 +86,7 @@ export function ModelSelect(props: {
     const backend = owner.backend();
     return backend
       ? `${modelCaption(backend, owner.modelDetails())} · ${effortCaption(backend, owner.modelDetails())}`
-      : 'Choose a model';
+      : tr('Choose a model');
   };
   return (
     <Popover
@@ -108,8 +110,8 @@ export function ModelSelect(props: {
       }}
       trigger={
         <Button
-          accessibilityLabel="Choose model and effort"
-          tooltip="Choose model and effort · Ctrl+G"
+          accessibilityLabel={tr('Choose model and effort')}
+          tooltip={tr('Choose model and effort · Ctrl+G')}
           onPress={inputAction(props.toggle, {
             sessionId: owner.sessionId,
             instance: props.instance(),
@@ -190,7 +192,7 @@ function ModelMenu(props: {
   const selected = signal(0);
   const loading = signal(false);
   const pending = signal(false);
-  const error = signal('');
+  const error = createText();
   let alive = true;
   let generation = 0;
   let removeSearchKeys = () => {};
@@ -236,7 +238,7 @@ function ModelMenu(props: {
       await props.select(request.backend);
       if (active()) props.close(request.instance);
     } catch (reason) {
-      if (active()) error.set(reason instanceof Error ? reason.message : String(reason));
+      if (active()) error.set(errorText(reason));
     } finally {
       if (alive) pending.set(false);
     }
@@ -296,7 +298,9 @@ function ModelMenu(props: {
         if (!active() || reading !== generation) return;
         if (result.kind === 'changed') {
           if (changed)
-            throw new Error('The model catalog keeps changing. Retry to read the current choices.');
+            throw new UiError(
+              'The model catalog keeps changing. Retry to read the current choices.',
+            );
           changed = true;
           page.set(null);
           selected.set(0);
@@ -310,8 +314,7 @@ function ModelMenu(props: {
         break;
       } while (active() && reading === generation);
     } catch (reason) {
-      if (active() && reading === generation)
-        error.set(reason instanceof Error ? reason.message : String(reason));
+      if (active() && reading === generation) error.set(errorText(reason));
     } finally {
       if (alive && reading === generation) loading.set(false);
     }
@@ -377,19 +380,19 @@ function ModelMenu(props: {
             paddingHorizontal: 8,
           }}
         >
-          Models
+          {tr('Models')}
         </Text>
         <Button
           disabled={pending()}
           accessibilityLabel={
-            pane() === 'root' ? 'Close model selection' : 'Back to model settings'
+            pane() === 'root' ? tr('Close model selection') : tr('Back to model settings')
           }
           onPress={
             pane() === 'root'
               ? inputAction(close, { instance: props.instance, from: pane() })
               : inputAction(changePane, { instance: props.instance, from: pane(), to: 'root' })
           }
-          tooltip={pane() === 'root' ? 'Close' : 'Back'}
+          tooltip={pane() === 'root' ? tr('Close') : tr('Back')}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
@@ -402,7 +405,7 @@ function ModelMenu(props: {
         <Button
           ref={(node) => focusRoot('model', node)}
           disabled={pending()}
-          accessibilityLabel="Choose model"
+          accessibilityLabel={tr('Choose model')}
           onPress={inputAction(changePane, {
             instance: props.instance,
             from: 'root',
@@ -418,7 +421,7 @@ function ModelMenu(props: {
           focusStyle={{ backgroundColor: C.raised }}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...captionTextStyle, color: C.secondary }}>Model</Text>
+          <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Model')}</Text>
           <Text
             numberOfLines={1}
             style={{
@@ -436,7 +439,7 @@ function ModelMenu(props: {
         <Button
           ref={(node) => focusRoot('effort', node)}
           disabled={pending() || !readyChoice()}
-          accessibilityLabel="Choose reasoning effort"
+          accessibilityLabel={tr('Choose reasoning effort')}
           onPress={inputAction(changePane, {
             instance: props.instance,
             from: 'root',
@@ -452,7 +455,7 @@ function ModelMenu(props: {
           focusStyle={{ backgroundColor: C.raised }}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...captionTextStyle, color: C.secondary }}>Reasoning effort</Text>
+          <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Reasoning effort')}</Text>
           <Text
             numberOfLines={1}
             style={{
@@ -480,7 +483,7 @@ function ModelMenu(props: {
             removeSearchKeys = () => unbind.forEach((remove) => remove());
           }}
           autoFocus
-          accessibilityLabel="Search models"
+          accessibilityLabel={tr('Search models')}
           value={query()}
           readonly={pending()}
           onChange={(text) => {
@@ -491,7 +494,7 @@ function ModelMenu(props: {
             list?.scrollToIndex({ index: 0, animated: false });
             void loadModels(true);
           }}
-          placeholder="Search models…"
+          placeholder={tr('Search models…')}
           style={{
             ...inputTextStyle,
             placeholderColor: C.muted,
@@ -525,7 +528,10 @@ function ModelMenu(props: {
                 const choice = () => byId().get(key()) ?? initial;
                 return (
                   <Button
-                    accessibilityLabel={`Use ${choice().label} · ${choice().connectionName}`}
+                    accessibilityLabel={tr('Use {model} · {connection}', {
+                      model: choice().label,
+                      connection: choice().connectionName,
+                    })}
                     disabled={pending()}
                     selected={sameRoute(owner.backend(), choice().selection)}
                     onPress={inputAction(submit, modelAction(choice()))}
@@ -569,7 +575,11 @@ function ModelMenu(props: {
           )}
         </List>
         <Text style={{ ...captionTextStyle, color: C.muted }}>
-          {loading() ? 'Loading…' : `${choices().length} model${choices().length === 1 ? '' : 's'}`}
+          {loading()
+            ? tr('Loading…')
+            : choices().length === 1
+              ? tr('{count} model', { count: choices().length })
+              : tr('{count} models', { count: choices().length })}
         </Text>
       </If>
       <If when={pane() === 'effort'}>
@@ -588,7 +598,9 @@ function ModelMenu(props: {
                     <Button
                       disabled={pending()}
                       accessibilityLabel={
-                        level() === null ? 'Use connection default' : `Use effort ${level()}`
+                        level() === null
+                          ? tr('Use connection default')
+                          : tr('Use effort {level}', { level: level()! })
                       }
                       selected={owner.backend()?.thinkingLevel === level()}
                       onPress={inputAction(
@@ -616,7 +628,7 @@ function ModelMenu(props: {
                         disabled={pending()}
                       />
                       <Text style={{ ...captionTextStyle, color: C.text }}>
-                        {level() === null ? 'Default · Use connection default' : level()}
+                        {level() === null ? tr('Default · Use connection default') : level()}
                       </Text>
                     </Button>
                   )}
@@ -629,34 +641,39 @@ function ModelMenu(props: {
       <If when={pane() !== 'models' && owner.modelDetails().kind !== 'ready'}>
         <Text style={{ ...captionTextStyle, color: C.muted }}>
           {owner.modelDetails().kind === 'loading'
-            ? 'Loading model policy…'
-            : 'The saved model policy is unavailable. Its selection is preserved.'}
+            ? tr('Loading model policy…')
+            : tr('The saved model policy is unavailable. Its selection is preserved.')}
         </Text>
         <Button
           disabled={pending()}
           onPress={inputAction(retry, { instance: props.instance, from: pane() })}
-          accessibilityLabel="Retry model policy"
+          accessibilityLabel={tr('Retry model policy')}
           style={controlStyle}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ ...captionTextStyle, color: C.accent }}>Retry</Text>
+          <Text style={{ ...captionTextStyle, color: C.accent }}>{tr('Retry')}</Text>
         </Button>
       </If>
       <Button
         disabled={pending()}
-        accessibilityLabel="Manage connections and models"
+        accessibilityLabel={tr('Manage connections and models')}
         onPress={inputAction(props.manage, null)}
         style={controlStyle}
         hoverStyle={controlHoverStyle}
         focusStyle={controlFocusStyle}
         disabledStyle={controlDisabledStyle}
       >
-        <Text style={{ ...captionTextStyle, color: C.accent }}>Manage connections & models</Text>
+        <Text style={{ ...captionTextStyle, color: C.accent }}>
+          {tr('Manage connections & models')}
+        </Text>
       </Button>
       <If when={error()}>
-        <Scroll accessibilityLabel="Model selection error" style={{ minHeight: 16, flexShrink: 1 }}>
+        <Scroll
+          accessibilityLabel={tr('Model selection error')}
+          style={{ minHeight: 16, flexShrink: 1 }}
+        >
           <Text selectable style={{ ...captionTextStyle, color: C.danger }}>
             {error()}
           </Text>
@@ -665,18 +682,18 @@ function ModelMenu(props: {
           <Button
             disabled={pending()}
             onPress={inputAction(retry, { instance: props.instance, from: pane() })}
-            accessibilityLabel="Retry model catalog"
+            accessibilityLabel={tr('Retry model catalog')}
             style={controlStyle}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ ...captionTextStyle, color: C.accent }}>Retry</Text>
+            <Text style={{ ...captionTextStyle, color: C.accent }}>{tr('Retry')}</Text>
           </Button>
         </If>
       </If>
       <If when={pending()}>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>Saving selection…</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>{tr('Saving selection…')}</Text>
       </If>
     </View>
   );

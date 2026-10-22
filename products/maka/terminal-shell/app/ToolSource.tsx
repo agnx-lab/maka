@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { createText, UiError, errorText } from './text';
+import { tr } from './locale';
 import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { AgentHistorySourceRead } from '../../../../packages/plugin-sdk/src/index.js';
@@ -57,7 +59,7 @@ export function createToolSource(
     total = signal<number | null>(null),
     format = signal('');
   const busy = signal(false),
-    error = signal('');
+    error = createText();
   let alive = true;
   cleanup(() => {
     alive = false;
@@ -107,12 +109,12 @@ export function createToolSource(
         !['text', 'json', 'image_descriptor'].includes(source.format) ||
         (original.field === 'arguments' && original.path === null && source.format !== 'json')
       )
-        throw new Error('The original tool source could not be verified.');
+        throw new UiError('The original tool source could not be verified.');
       total.set(source.totalBytes);
       format.set(source.format);
       content.set(content() + source.text);
     } catch (reason) {
-      if (alive) error.set(String(reason));
+      if (alive) error.set(errorText(reason));
     } finally {
       if (alive) {
         busy.set(false);
@@ -157,8 +159,8 @@ export function OriginalToolSource(props: { source: ToolSource; label: string })
           })}
         >
           <Text style={{ color: C.muted }}>
-            {source.error() ? 'Retry original source' : 'Reading…'} ·{' '}
-            {messageBytes(source.content())}/{source.total() ?? '?'} bytes
+            {source.error() ? tr('Retry original source') : tr('Reading…')} ·{' '}
+            {messageBytes(source.content())}/{source.total() ?? '?'} {tr('bytes')}
           </Text>
         </Button>
       </If>

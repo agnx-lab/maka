@@ -19,6 +19,9 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=app");
+    println!("cargo:rerun-if-changed=../../../plugins/shared/locale.ts");
+    println!("cargo:rerun-if-changed=../../../plugins/shared/locale-messages.ts");
+    println!("cargo:rerun-if-changed=../../../plugins/shared/tui-messages.ts");
     println!("cargo:rerun-if-changed=../desktop-shell/app/patch.js");
     // Describe the runtime export without constructing a Host client at build time.
     let mut host = nsh_core::ui::Registry::ui_set("maka/host");
