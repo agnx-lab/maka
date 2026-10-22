@@ -796,12 +796,17 @@ async fn configure(owner: Arc<RootOwner>, base: &str, vision: bool, reasoning: b
         overrides["fixture-model"]["defaultThinkingLevel"] = json!("low");
         overrides["fixture-model-alt"]["thinkingLevels"] = json!(["off", "high"]);
         overrides["fixture-model-alt"]["defaultThinkingLevel"] = json!("high");
-        overrides["fixture-model-unknown"] = json!({"contextWindow":200000,"vision":vision,"thinkingLevels":["off","high"]});
+        overrides["fixture-model-unknown"] =
+            json!({"contextWindow":200000,"vision":vision,"thinkingLevels":["off","high"]});
     }
     let enabled_models = if reasoning {
-        json!(["fixture-model","fixture-model-alt","fixture-model-unknown"])
+        json!([
+            "fixture-model",
+            "fixture-model-alt",
+            "fixture-model-unknown"
+        ])
     } else {
-        json!(["fixture-model","fixture-model-alt"])
+        json!(["fixture-model", "fixture-model-alt"])
     };
     let CatalogMutationResult::Committed {connection:Some(connection),..} = config.create_connection(serde_json::from_value(json!({
         "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":enabled_models,"modelOverrides":overrides}

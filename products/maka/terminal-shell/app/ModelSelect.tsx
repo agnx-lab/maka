@@ -17,7 +17,18 @@
  * under the License.
  */
 
-import { batch, cleanup, computed, effect, Input, inputAction, Scroll, signal, Text, View } from 'nsh';
+import {
+  batch,
+  cleanup,
+  computed,
+  effect,
+  Input,
+  inputAction,
+  Scroll,
+  signal,
+  Text,
+  View,
+} from 'nsh';
 import type { YNode } from 'nsh';
 import type { ThinkingLevel } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { Button, Popover } from 'nsh/base';
@@ -483,7 +494,9 @@ function ModelMenu(props: {
             focusStyle={{ backgroundColor: C.raised }}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Reasoning effort')}</Text>
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>
+              {tr('Reasoning effort')}
+            </Text>
             <Text
               numberOfLines={1}
               style={{
@@ -619,7 +632,10 @@ function ModelMenu(props: {
           >
             {(item) => (
               <View style={{ gap: 8 }}>
-                <Each<ThinkingLevel> of={item().thinkingLevels} key={(level: ThinkingLevel) => level}>
+                <Each<ThinkingLevel>
+                  of={item().thinkingLevels}
+                  key={(level: ThinkingLevel) => level}
+                >
                   {(level) => (
                     <Button
                       disabled={pending()}
@@ -649,14 +665,14 @@ function ModelMenu(props: {
                         checked={effectiveThinkingLevel(owner.backend(), item()) === level()}
                         disabled={pending()}
                       />
-                      <Text style={{ ...captionTextStyle, color: C.text }}>
-                        {level()}
-                      </Text>
+                      <Text style={{ ...captionTextStyle, color: C.text }}>{level()}</Text>
                     </Button>
                   )}
                 </Each>
                 <If
-                  when={item().defaultThinkingLevel === null && owner.backend()?.thinkingLevel != null}
+                  when={
+                    item().defaultThinkingLevel === null && owner.backend()?.thinkingLevel != null
+                  }
                 >
                   <Button
                     disabled={pending()}

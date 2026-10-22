@@ -162,7 +162,9 @@ fn assert_effort_choices(view: &AppView, choice: &Value, selected: Option<&str>)
         "efforts must come from this model's metadata"
     );
     assert!(
-        !nodes.iter().any(|node| node.label == "Use connection default"),
+        !nodes
+            .iter()
+            .any(|node| node.label == "Use connection default"),
         "connection inheritance must not appear as another reasoning effort",
     );
     let effective = selected.or_else(|| choice["defaultThinkingLevel"].as_str());
