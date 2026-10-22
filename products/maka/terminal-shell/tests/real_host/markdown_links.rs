@@ -21,9 +21,10 @@ use super::*;
 
 fn link_node(view: &AppView, label: &str) -> AccessibleNode {
     // The text carrier may share the label; only the Link is an activation target.
-    let mut links = view.accessibility_snapshot().into_iter().filter(|node| {
-        node.role == nsh_core::AccessibilityRole::Link && node.label == label
-    });
+    let mut links = view
+        .accessibility_snapshot()
+        .into_iter()
+        .filter(|node| node.role == nsh_core::AccessibilityRole::Link && node.label == label);
     let link = links
         .next()
         .unwrap_or_else(|| panic!("no native Link has label {label:?}"));
