@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "22a1d2e618512339780153798c959876121cdf1f3e61322a39e1c5a3e9e4d491",
+    "Cargo.lock": "722256e3269b5dfcd37e07dc8fb062968c27a9e6d79de67ebefefbc5799df152",
     "Cargo.toml": "34498389f56f8bac8d20ed50993e6f95ee04b296594a95a28d7b66d7364642b0",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
@@ -120,7 +120,7 @@
     "products/maka/bundle/scripts/build.mjs": "db11d8cd6f29ef7ead087261848568da1ad3889a870a89f23fa969449d769d47",
     "products/maka/bundle/src/composition.ts": "05e17fbd85e5ffd1712911d22f77d62b2bc62330f4b32a4b9a85b57b76eb6b79",
     "products/maka/bundle/src/installation.ts": "e13d8adc85cf4d78f38054548e65fe59c1ff95aaf14be7b50649f537313b1788",
-    "products/maka/cli/Cargo.toml": "1ce6301d43e1a51d7f2ce7b022703ade5b3ac10b88831bdc5d0ce019e1c15060",
+    "products/maka/cli/Cargo.toml": "23452216b91436254a2cdb2777bba5c3b4913f95ad5de9feb76de82c76b54911",
     "products/maka/cli/build.rs": "97c68def305bc101788428268fd99b114e5229fa2400542b0fea2eced6edbecc",
     "products/maka/cli/build/product.rs": "44d6ab9638f91a3db0615bd509e4386d5b3aef008f24e3cb1e4dc5a5247b3102",
     "products/maka/client/Cargo.toml": "33a6ff74d79ce70081336cad1f552f7705d0bf10ad82c341f3c0739332c0503c",
@@ -194,7 +194,7 @@
     "products/maka/desktop-shell/app/transcript.js": "d4ac0992ff4347b278adad8bfd7c335bae51c9bbf947720d6c591982b1dccbbb",
     "products/maka/desktop-shell/app/workbar.js": "a59d515945e6c6634ed5f446129e36a23b4de93154443eb30d2b3471d516e9cb",
     "products/maka/desktop-shell/app/workhub.js": "cd1555c73ee9f25ccbfba4ea375ed2bd67787d63f30500035da30ace40258b88",
-    "products/maka/native/Cargo.toml": "4a3c69dfe3d7e5773316dbd0f703ec376cbaef0a7b9915fce395b8460c633d76",
+    "products/maka/native/Cargo.toml": "4dd1b880725ee18369785cc73852402e2a9f6808fb9e99779de07d2479caa169",
     "products/maka/terminal-shell/Cargo.toml": "2f9f8a41b61b7f0f0747c2a673e0cd8afad2ecf6463e58f1be799827ff877713",
     "scripts/apply-dependency-patches.mjs": "67e548835b0de28e3753be559abb5cb2efbe94a46d72e0b756c23f944896d4bd",
     "scripts/plugins/build.mjs": "7bb9a8358482c2cc8d2d6af196f354268426043f6646020ad06b100364abe94f",
