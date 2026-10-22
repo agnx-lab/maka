@@ -110,10 +110,12 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
         support::wait_draft(&client, &fixture.session, "UNSENT_LINK_DRAFT 你好").await;
         // The original workspace PNG paints inside the mixed paragraph. Mouse
         // and keyboard share the same native button and full-screen viewer.
-        let image = support::wait_enabled_button(&mut view, "View full image: Markdown diagram").await;
+        shortcut(&mut view, 'l');
+        wait_view_state(&mut view, |view, _| view.surface().focused() == Some(composer)).await;
         wait_view_state(&mut view, |view, screen| screen.contains('▀') && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Image && node.label == "Markdown diagram")).await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "View full image: Reference diagram"), "a linked image has one logical Link target, not a second preview button");
         wait_view(&mut view, |screen| screen.contains("Not an image") && screen.contains("This file is not a supported image.")).await;
+        let image = support::wait_enabled_button(&mut view, "View full image: Markdown diagram").await;
         support::click_node(&mut view, image.clone());
         wait_view_state(&mut view, |view, screen| screen.contains('▀') && screen.contains("64 × 48") && view.accessibility_snapshot().iter().any(|node| node.label == "Full screen image viewer")).await;
         support::click_button(&mut view, "Close full screen image").await;
@@ -136,13 +138,22 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
         wait_view(&mut view, |screen| screen.contains("REFRESHED_LINK_CONTENT")).await;
         support::click_button(&mut view, "Close workspace preview").await;
         wait_view_state(&mut view, |view, screen| screen.contains("UNSENT_LINK_DRAFT 你好") && !view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview") && view.accessibility_snapshot().iter().any(|node| node.id == image_link.id && node.role == nsh_core::AccessibilityRole::Link && node.focused)).await;
+        // Returning to the image restores that Link, not the message footer.
+        shortcut(&mut view, 'l');
+        wait_view_state(&mut view, |view, _| view.surface().focused() == Some(composer)).await;
+        wait_view_state(&mut view, |view, _| message_source_available(view, false)).await;
         wait_mode_layout(&mut view).await;
         support::click_button(&mut view, "Show message source").await;
+        shortcut(&mut view, 'l');
+        wait_view_state(&mut view, |view, _| view.surface().focused() == Some(composer)).await;
         // Wrapping changes painted lines, not the original source Text.
         wait_view_state(&mut view, |view, _| message_source_available(view, true) && view.accessibility_snapshot().iter().any(|node| node.label.contains("![Markdown diagram]") && node.label.contains("![Reference diagram][image]"))).await;
         wait_mode_layout(&mut view).await;
         support::click_button(&mut view, "Show formatted message").await;
+        shortcut(&mut view, 'l');
+        wait_view_state(&mut view, |view, _| view.surface().focused() == Some(composer)).await;
         support::wait_enabled_button(&mut view, "View full image: Markdown diagram").await;
+        wait_view_state(&mut view, |view, _| message_source_available(view, false)).await;
         wait_mode_layout(&mut view).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy message").await;
