@@ -92,13 +92,13 @@ publish = false
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }
-nsh-core = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1" }
-nsh-engine = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1" }
-nsh-platform-tui = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1" }
-nsh-platform-gpui = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1", default-features = false, features = ["js"] }
-nsh-gpui-terminal = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1" }
-nsh-bundler = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1", default-features = false }
-nsh-base = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1" }
+nsh-core = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e" }
+nsh-engine = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e" }
+nsh-platform-tui = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e" }
+nsh-platform-gpui = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e", default-features = false, features = ["js"] }
+nsh-gpui-terminal = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e" }
+nsh-bundler = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e", default-features = false }
+nsh-base = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e" }
 maka-agent-facts = { path = "plugins/agent/facts" }
 maka-packages = { path = "platform/packages" }
 maka-agent-ports = { path = "plugins/agent/ports" }
@@ -216,8 +216,8 @@ gpui-fast-macos = { path = "third-party/gpui-fast/crates/gpui_macos" }
 gpui-fast-windows = { path = "third-party/gpui-fast/crates/gpui_windows" }
 gpui-fast-linux = { path = "third-party/gpui-fast/crates/gpui_linux" }
 # The terminal backend owns the offscreen renderer and image codec.
-gpui-fast-wgpu = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1" }
-icy_sixel = { git = "https://github.com/M4n5ter/nsh", rev = "5007f64ee98a386ef9cae538be54eb2b6d4956c1" }
+gpui-fast-wgpu = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e" }
+icy_sixel = { git = "https://github.com/M4n5ter/nsh", rev = "750fdf8b14b3eacaf2aa3ed75b282735dded6f7e" }
 gpui-pre-scheduler = { path = "third-party/gpui-fast/crates/scheduler" }
 
 [patch."https://github.com/longbridge/gpui-kit"]
