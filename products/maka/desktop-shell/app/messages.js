@@ -278,6 +278,63 @@ export const MESSAGES = {
   sendFailed: ['Send: {value}', '发送失败：{value}', '傳送失敗：{value}'],
   stopFailed: ['Stop: {value}', '停止失败：{value}', '停止失敗：{value}'],
   stop: ['Stop', '停止', '停止'],
+  // The messages sent while a turn runs, waiting above the composer (queue.js).
+  queued: ['Queued', '待发送', '待傳送'],
+  queuedOne: ['{count} message waiting', '{count} 条消息待发送', '{count} 則訊息待傳送'],
+  queuedMany: ['{count} messages waiting', '{count} 条消息待发送', '{count} 則訊息待傳送'],
+  queuedMessagePlaceholder: ['Queued message', '待发送的消息', '待傳送的訊息'],
+  queuedSteering: ['For this turn', '交给本轮', '交給本輪'],
+  queueSendNow: ['Send now', '直接发送', '直接傳送'],
+  queueSendNowHint: [
+    'Give it to this turn, which reads it at its next step',
+    '交给本轮，它会在下一步读到',
+    '交給本輪，它會在下一步讀到',
+  ],
+  queueSendNowIdle: ['No turn is running', '没有正在运行的一轮', '沒有正在執行的一輪'],
+  queueAttachmentsKept: ['Its attachments stay with it', '附件会保留', '附件會保留'],
+  queueEditGone: [
+    'This message is no longer queued; your edit stays here to copy',
+    '这条消息已不在队列中；你的修改仍在这里，可以复制',
+    '這則訊息已不在佇列中；你的修改仍在這裡，可以複製',
+  ],
+  queueEditedElsewhere: [
+    'This message was changed elsewhere. Save again to replace it with your edit, or cancel to keep that version.',
+    '这条消息已在别处被修改。再次保存会用你的修改替换它，取消则保留那个版本。',
+    '這則訊息已在別處被修改。再次儲存會用你的修改取代它，取消則保留那個版本。',
+  ],
+  queueMissing: [
+    'This message is no longer queued',
+    '这条消息已不在队列中',
+    '這則訊息已不在佇列中',
+  ],
+  queueChanged: ['The queue changed; try again', '队列有变化，请重试', '佇列有變更，請重試'],
+  queueClosed: [
+    'This task can’t take queue changes now',
+    '这个任务现在不能修改队列',
+    '這個任務現在不能修改佇列',
+  ],
+  queueInvalidEdit: [
+    'The Host did not accept this edit',
+    'Host 不接受这次修改',
+    'Host 不接受這次修改',
+  ],
+  queueExecutionChanged: [
+    'This turn can’t take this message now; it stays queued',
+    '本轮现在不能接收这条消息，它仍在队列中',
+    '本輪現在不能接收這則訊息，它仍在佇列中',
+  ],
+  queueNotRunning: [
+    'No turn is running; the message stays queued',
+    '没有正在运行的一轮，消息仍在队列中',
+    '沒有正在執行的一輪，訊息仍在佇列中',
+  ],
+  queueRefused: [
+    'The Host refused the change ({value})',
+    'Host 拒绝了这次修改（{value}）',
+    'Host 拒絕了這次修改（{value}）',
+  ],
+  queueFailed: ['Queue: {value}', '队列：{value}', '佇列：{value}'],
+  save: ['Save', '保存', '儲存'],
   send: ['Send', '发送', '傳送'],
   addConnectionMenu: ['Add connection…', '添加连接…', '新增連線…'],
   executorNote: [

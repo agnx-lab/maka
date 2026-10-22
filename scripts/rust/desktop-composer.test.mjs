@@ -107,9 +107,10 @@ function transcriptOf(id, backend) {
 
 /**
  * A composer whose Host offers THINKING (the default) and PLAIN, and answers
- * `selectBackend` with `answer` (committed by default) and `send` as started.
+ * `selectBackend` with `answer` (committed by default), `send` with `sent`
+ * (started by default) and `stop` with whether it was `stopped`.
  */
-async function setup({ answer = null, created = null } = {}) {
+async function setup({ answer = null, created = null, sent = null, stopped = true } = {}) {
   const mutations = [];
   const reports = [];
   globalThis[Symbol.for('composer.test.query')] = async (endpoint, method, input) => {
@@ -135,8 +136,9 @@ async function setup({ answer = null, created = null } = {}) {
       );
     }
     if (method === 'send') {
-      return returned({ kind: 'started', invocationId: 'run', messageId: 'message' });
+      return returned(sent ?? { kind: 'started', invocationId: 'run', messageId: 'message' });
     }
+    if (method === 'stop') return returned({ requested: stopped });
     throw new Error(`unexpected mutation ${method}`);
   };
   const composer = new Composer(
@@ -170,6 +172,38 @@ test('a thinking level picked for a new task is saved with the task before its f
   ]);
   assert.equal(composer.newBackend, null);
   assert.deepEqual(reports, []);
+});
+
+test('a message sent while a turn runs waits in the queue, not in the conversation', async () => {
+  const { composer, mutations, reports } = await setup({
+    sent: { kind: 'queued', sessionId: 'task', messageId: 'later', revision: 4 },
+  });
+  const transcript = transcriptOf('task', backend('thinking', null));
+  composer.draft.set_value('after this');
+  await composer.send(transcript);
+  assert.equal(mutations.at(-1)[0], 'send');
+  assert.deepEqual(transcript.pending, []);
+  assert.equal(composer.draft.value(), '');
+  assert.deepEqual(reports, []);
+});
+
+test('Stop puts the messages queued behind the run back in the draft', async () => {
+  for (const stopped of [true, false]) {
+    const { composer, mutations } = await setup({ stopped });
+    let done = 0;
+    composer.hooks.takeBack = async () => ({
+      texts: ['first queued', 'second queued'],
+      done: () => (done += 1),
+    });
+    const transcript = transcriptOf('task', backend('thinking', null));
+    transcript.run = { invocationId: 'run', turnId: 'turn', state: 'running' };
+    await composer.stop(transcript);
+    assert.deepEqual(mutations.at(-1), ['stop', { sessionId: 'task', invocationId: 'run' }]);
+    // A run that had ended already keeps its queue: nothing comes back.
+    assert.equal(composer.draft.value(), stopped ? 'first queued\n\nsecond queued' : '');
+    assert.equal(composer.empty, !stopped);
+    assert.equal(done, stopped ? 1 : 0);
+  }
 });
 
 test("a task's model and level are its backend preference; another model starts at its default", async () => {

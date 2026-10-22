@@ -254,6 +254,11 @@ export class Transcript {
     this.watchLast = 0;
     /** What the agent is waiting on the user for. */
     this.interactions = new Interactions(this.id, hooks, endpoint);
+    /**
+     * The messages sent while a turn runs, waiting for a turn, as the watch
+     * or `agent.queue` last gave them: `{ revision, entries }` (queue.js).
+     */
+    this.queue = { revision: -1, entries: [] };
     this.lastOutcome = null;
     /** The session's backend preference from `agent.observe`, or null. */
     this.backend = null;
@@ -533,6 +538,10 @@ export class Transcript {
 
   /** Applies one watch page (results.ts:972-1087). */
   deliver(page) {
+    if (page.kind === 'queue') {
+      this.acceptQueue(page.queue);
+      return;
+    }
     if (page.kind === 'interactions') {
       this.interactions.accept(page.pending);
       this.observeRun();
@@ -1054,6 +1063,13 @@ export class Transcript {
       },
       this.endpoint,
     );
+  }
+
+  /** Takes the queue from the watch or `agent.queue`; an older revision is not taken. */
+  acceptQueue(queue) {
+    if (this.closed || queue.revision < this.queue.revision) return;
+    this.queue = queue;
+    this.hooks.changed();
   }
 
   /**

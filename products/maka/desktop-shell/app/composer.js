@@ -67,7 +67,9 @@ export class Composer {
   /**
    * Creates retained input state and a focus handle, so it belongs in the
    * view's `init`, whose context it keeps for focusing the draft.
-   * @param {{ changed: () => void, report: (message: string) => void }} hooks
+   * @param {{ changed: () => void, report: (message: string) => void,
+   *   takeBack?: (transcript: object) => Promise<{ texts: string[], done: () => void }> }} hooks
+   *   `takeBack` reads the messages queued in a task, which Stop drops (QueueDock.takeBack)
    * @param {() => import("./transcript.js").Transcript | null} target the session Enter sends to
    * @param {() => Promise<import("./transcript.js").Transcript | null>} start starts a session
    *   when none is selected, and resolves with it
@@ -508,6 +510,17 @@ export class Composer {
     return choice ? choiceLabel(choice) : backend.modelId;
   }
 
+  /** The queued messages Stop would drop (QueueDock.takeBack); none when they cannot be read. */
+  async takeBack(transcript) {
+    const none = { texts: [], done() {} };
+    try {
+      return (await this.hooks.takeBack?.(transcript)) ?? none;
+    } catch (error) {
+      log(`composer: reading the queue before stopping failed: ${error.message}`);
+      return none;
+    }
+  }
+
   /**
    * The `model` and `thinkingLevel` to send with: the session's own backend
    * (`agent.observe`, as agent-screen/actions.ts reads it), else the default,
@@ -610,6 +623,10 @@ export class Composer {
         this.attached.set(transcript.id, kept);
         release(files.map((file) => file.handle));
       }
+      // Sent while a turn runs, the message waits in the queue above the
+      // composer (queue.js) until a turn takes it, and shows in the
+      // conversation then.
+      if (result.kind === 'queued') return;
       // The run itself shows up through the watch (`opened`), as in the TUI.
       transcript.addPending(
         result.messageId,
@@ -724,11 +741,21 @@ export class Composer {
     this.stopping = true;
     this.hooks.changed();
     try {
+      // Stopping drops the messages queued behind the run: their text, read
+      // first, comes back to the draft once the Host has stopped it.
+      const queued = await this.takeBack(transcript);
       const result = await operation(transcript.endpoint, 'stop', {
         sessionId: transcript.id,
         invocationId: run.invocationId,
       });
       log(`composer: stop requested=${result.requested}`);
+      if (result.requested && queued.texts.length > 0) {
+        const draft = [this.draft.value(), ...queued.texts].filter((value) => value.trim() !== '');
+        this.draft.set_value(draft.join('\n\n'));
+        this.empty = false;
+        queued.done();
+        log(`composer: ${queued.texts.length} queued messages back in the draft`);
+      }
     } catch (error) {
       this.hooks.report(t('stopFailed', { value: error.message }));
     } finally {
@@ -743,24 +770,15 @@ export class Composer {
  * @param {Composer} composer
  * @param {import("./transcript.js").Transcript | null} transcript
  * @param {{ folder: { name: string, path: string } | null, picker: object | null,
- *   usage: object | null, defaultAccess: string | null, notice: string | null,
- *   dismiss: () => void, addConnection: () => void }} context
+ *   usage: object | null, queue: object | null, defaultAccess: string | null,
+ *   notice: string | null, dismiss: () => void, addConnection: () => void }} context
  *   `folder` is where a new task starts when no task is selected, and `picker`
  *   the chip that chooses it; `usage` the context use before Send (context.js),
- *   or null; `defaultAccess` the permission level new tasks get when known;
- *   `notice` is the last error
+ *   or null; `queue` the messages waiting for a turn, tucked behind the dock's
+ *   top (queue.js), or null; `defaultAccess` the permission level new tasks
+ *   get when known; `notice` is the last error
  */
 export function composerPane(composer, transcript, context, cx) {
-  const m = palette(cx);
-  const dark = cx.theme().is_dark;
-  const inactive = transcript === null && context.folder === null;
-  const running = transcript?.run != null;
-  const executor = transcript?.backend?.kind === 'executor';
-  const files = composer.attachments(transcript);
-  const unsent = !composer.empty || files.length > 0;
-  const canSend = !inactive && !composer.sending && composer.model !== null && unsent;
-  const stop = running && !unsent;
-  const thinking = executor ? null : thinkingMenu(composer, transcript, cx);
   return h_flex()
     .flex_none()
     .w_full()
@@ -772,78 +790,87 @@ export function composerPane(composer, transcript, context, cx) {
       v_flex()
         .w_full()
         .max_w(720)
-        .rounded(28)
-        .bg(m.plate)
-        .border_1()
-        .border_color(dark ? m.border : m.dockRing)
-        .when(!dark, (el) => el.shadow_sm())
+        .when(context.queue !== null, (el) => el.child(context.queue))
+        .child(composerDock(composer, transcript, context, cx)),
+    );
+}
+
+/** The rounded dock: the draft, its files and the controls row. */
+function composerDock(composer, transcript, context, cx) {
+  const m = palette(cx);
+  const dark = cx.theme().is_dark;
+  const inactive = transcript === null && context.folder === null;
+  const running = transcript?.run != null;
+  const executor = transcript?.backend?.kind === 'executor';
+  const files = composer.attachments(transcript);
+  const unsent = !composer.empty || files.length > 0;
+  const canSend = !inactive && !composer.sending && composer.model !== null && unsent;
+  const stop = running && !unsent;
+  const thinking = executor ? null : thinkingMenu(composer, transcript, cx);
+  return v_flex()
+    .w_full()
+    .rounded(28)
+    .bg(m.plate)
+    .border_1()
+    .border_color(dark ? m.border : m.dockRing)
+    .when(!dark, (el) => el.shadow_sm())
+    .child(
+      v_flex()
+        .p(12)
+        .gap(6)
         .child(
-          v_flex()
-            .p(12)
-            .gap(6)
+          div()
+            .w_full()
+            .track_focus(composer.draftFocus)
+            .child(
+              typeset(Textarea.new(composer.draft), 'body')
+                .w_full()
+                .px(8)
+                .py(4)
+                .bg('#00000000')
+                .border_0()
+                .text_color(m.ink)
+                .disabled(inactive),
+            ),
+        )
+        .when(files.length > 0, (el) => el.child(attachmentRow(composer, transcript, files, cx)))
+        .child(
+          h_flex()
+            .gap(2)
+            .items_center()
+            .child(
+              attachButton(composer, transcript, !inactive && composer.canAttach(transcript), cx),
+            )
+            // The chips give way where the row is short of room (a narrow
+            // window), each truncating its label; Send keeps its place.
             .child(
               div()
-                .w_full()
-                .track_focus(composer.draftFocus)
-                .child(
-                  typeset(Textarea.new(composer.draft), 'body')
-                    .w_full()
-                    .px(8)
-                    .py(4)
-                    .bg('#00000000')
-                    .border_0()
-                    .text_color(m.ink)
-                    .disabled(inactive),
-                ),
+                .min_w_0()
+                .child(modelMenu(composer, transcript, context, cx)),
             )
-            .when(files.length > 0, (el) =>
-              el.child(attachmentRow(composer, transcript, files, cx)),
-            )
+            .when(thinking !== null, (el) => el.child(div().min_w_0().child(thinking)))
             .child(
-              h_flex()
-                .gap(2)
-                .items_center()
-                .child(
-                  attachButton(
-                    composer,
-                    transcript,
-                    !inactive && composer.canAttach(transcript),
-                    cx,
-                  ),
-                )
-                // The chips give way where the row is short of room (a narrow
-                // window), each truncating its label; Send keeps its place.
-                .child(
-                  div()
-                    .min_w_0()
-                    .child(modelMenu(composer, transcript, context, cx)),
-                )
-                .when(thinking !== null, (el) => el.child(div().min_w_0().child(thinking)))
-                .child(
-                  div()
-                    .min_w_0()
-                    .child(permissionMenu(composer, transcript, context, cx)),
-                )
-                .when(context.picker !== null, (el) =>
-                  el.child(div().min_w_0().child(context.picker)),
-                )
-                .child(note(context, executor, cx))
-                .when(context.usage !== null, (el) => el.child(context.usage))
-                .child(
-                  stop
-                    ? actionButton('stop', 'stop', cx)
-                        .bg(m.ink)
-                        .disabled(composer.stopping)
-                        .tooltip(t('stop'))
-                        .hover((style) => style.opacity(0.84))
-                        .on_click(() => composer.stop(transcript))
-                    : actionButton('send', 'send', cx, canSend ? m.onPrimary : m.inkMuted)
-                        .bg(canSend ? m.primary : m.wash)
-                        .disabled(!canSend)
-                        .tooltip(t('send'))
-                        .when(canSend, (el) => el.hover((style) => style.bg(m.primaryHover)))
-                        .on_click(() => composer.send(transcript)),
-                ),
+              div()
+                .min_w_0()
+                .child(permissionMenu(composer, transcript, context, cx)),
+            )
+            .when(context.picker !== null, (el) => el.child(div().min_w_0().child(context.picker)))
+            .child(note(context, executor, cx))
+            .when(context.usage !== null, (el) => el.child(context.usage))
+            .child(
+              stop
+                ? actionButton('stop', 'stop', cx)
+                    .bg(m.ink)
+                    .disabled(composer.stopping)
+                    .tooltip(t('stop'))
+                    .hover((style) => style.opacity(0.84))
+                    .on_click(() => composer.stop(transcript))
+                : actionButton('send', 'send', cx, canSend ? m.onPrimary : m.inkMuted)
+                    .bg(canSend ? m.primary : m.wash)
+                    .disabled(!canSend)
+                    .tooltip(t('send'))
+                    .when(canSend, (el) => el.hover((style) => style.bg(m.primaryHover)))
+                    .on_click(() => composer.send(transcript)),
             ),
         ),
     );

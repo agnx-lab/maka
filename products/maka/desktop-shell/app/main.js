@@ -42,6 +42,7 @@ import { Composer, composerPane } from './composer.js';
 import { ContextUse, contextControl } from './context.js';
 import { Find, findBar } from './find.js';
 import { interactionCard } from './interactions.js';
+import { QueueDock, queueTray } from './queue.js';
 import { Settings, settingsNav, settingsPage } from './settings.js';
 import { Directories, folderPicker } from './directories.js';
 import { WorkHub, workhubTabs, workhubBody, chatHint } from './workhub.js';
@@ -160,12 +161,18 @@ export default class MakaDesktop extends View {
     // With no session selected, sending starts one in the folder the
     // composer's folder chip shows (the first root until one is chosen).
     this.composer = new Composer(
-      hooks,
+      { ...hooks, takeBack: (transcript) => this.queueDock.takeBack(transcript) },
       () => this.current(),
       () => {
         const folder = this.startFolder();
         return folder === null ? Promise.resolve(null) : this.newSession(folder);
       },
+      cx,
+    );
+    // The messages queued in the conversation shown, above the composer.
+    this.queueDock = new QueueDock(
+      { ...hooks, giveBack: () => this.composer.focusDraft() },
+      () => this.current(),
       cx,
     );
     // The composer's context use follows the conversation the composer serves.
@@ -999,6 +1006,7 @@ export default class MakaDesktop extends View {
               transcript === null
                 ? null
                 : contextControl(this.contextUse, cx, this.narrowConversation()),
+            queue: queueTray(this.queueDock, transcript, cx),
             // A session whose permissions were never changed still has the
             // level the Host gives every new one.
             defaultAccess:
