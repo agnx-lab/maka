@@ -87,7 +87,7 @@ impl EventLog {
         self.connection.read(move |connection| Box::pin(async move {
             let row: Option<(i64, String)> = sqlx::query_as(
                 "SELECT sequence, event_json FROM runtime_events WHERE event_id = ?1 AND sequence <= ?2
-                 AND json_extract(event_json, '$.invocation.session_id') = ?3
+                 AND (event_json IS NOT NULL AND event_session=?3)
                  AND json_extract(event_json, '$.invocation.turn_id') = ?4"
             ).bind(event_id).bind(through as i64).bind(invocation.session_id).bind(invocation.turn_id)
                 .fetch_optional(connection).await?;
@@ -110,9 +110,9 @@ impl EventLog {
             let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
                 "SELECT session.id, session.revision,
                     COALESCE((SELECT revision FROM message_queue_state WHERE session_id = session.id), 0),
-                    COALESCE((SELECT sequence FROM event_log INDEXED BY session_event_sequence
+                    COALESCE((SELECT sequence FROM event_log INDEXED BY event_material_owner
                         WHERE invocation_id IS NOT NULL
-                        AND json_extract(event_json, '$.invocation.session_id') = session.id
+                        AND (event_json IS NOT NULL AND event_session=session.id)
                         ORDER BY sequence DESC LIMIT 1), 0)
                  FROM session_control session WHERE session.id IN (SELECT value FROM json_each(?))"
             ).bind(sessions).fetch_all(connection).await?;
@@ -215,7 +215,7 @@ impl EventLog {
                     {
                         let mut rows = sqlx::query(
                             "SELECT sequence, length(CAST(event_json AS BLOB)), event_json FROM runtime_events
-                             WHERE json_extract(event_json, '$.invocation.session_id') = ?1
+                             WHERE (event_json IS NOT NULL AND event_session=?1)
                              AND sequence > ?2 AND sequence <= ?3 ORDER BY sequence LIMIT ?4",
                         )
                         .bind(&session_id)

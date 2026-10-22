@@ -27,6 +27,7 @@ use sqlx::{Connection, SqliteConnection};
 use crate::{EventLog, StoreError, sequence_number};
 
 pub(crate) mod history;
+pub(crate) mod observations;
 
 impl EventLog {
     /// Commit ordered facts atomically, validating each against the preceding
@@ -34,6 +35,18 @@ impl EventLog {
     /// until Session removal completes, after which all writes are rejected.
     /// This must not enclose effects: live dispatch and outcome remain separate.
     pub async fn append_batch(&self, events: &[EventWrite]) -> Result<Vec<u64>, CommitError> {
+        if !events.is_empty()
+            && events
+                .iter()
+                .all(|write| matches!(write.event().fact, Fact::ModelObserved { .. }))
+        {
+            self.validate_root().map_err(commit_error)?;
+            return self
+                .connection
+                .writer()
+                .observations(events.to_vec(), self.commits.clone())
+                .await;
+        }
         self.append_batch_checked(events, None)
             .await
             .map_err(commit_error)

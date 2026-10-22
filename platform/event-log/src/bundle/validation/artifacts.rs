@@ -99,7 +99,7 @@ pub(super) async fn validate(
             let row: Option<(i64, bool, bool, String)> = sqlx::query_as(
                 "SELECT sequence,revision,inherited,event_json FROM (
                      SELECT e.sequence,0 AS revision,0 AS inherited,e.event_json FROM runtime_events e
-                     WHERE json_extract(e.event_json,'$.invocation.session_id')=?1 AND e.sequence>?2
+                     WHERE (e.event_json IS NOT NULL AND e.event_session=?1) AND e.sequence>?2
                      ORDER BY e.sequence LIMIT 1)
                  UNION ALL
                  SELECT sequence,revision,inherited,event_json FROM (

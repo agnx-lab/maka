@@ -119,7 +119,7 @@ fn digests(
     let sql = format!(
         "SELECT e.sequence AS sequence, {payload} FROM runtime_events e
          WHERE e.sequence > ?1 AND e.sequence <= ?2
-           AND json_extract(e.event_json,'$.invocation.session_id') = ?3 AND {filter}
+           AND (e.event_json IS NOT NULL AND e.event_session=?3) AND {filter}
          UNION ALL SELECT h.sequence AS sequence, {payload} FROM session_history_members h
          JOIN runtime_events e ON e.sequence = h.sequence
          WHERE h.session_id = ?3 AND h.sequence > ?1 AND h.sequence <= ?2 AND {filter}

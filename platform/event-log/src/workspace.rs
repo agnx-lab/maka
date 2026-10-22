@@ -68,7 +68,7 @@ impl EventLog {
             let rows = sqlx::query(
                 "SELECT s.id, s.revision,
                  COALESCE((SELECT MAX(e.sequence) FROM runtime_events e WHERE
-                    json_extract(e.event_json, '$.invocation.session_id') = s.id), 0) AS sequence,
+                    (e.event_json IS NOT NULL AND e.event_session=s.id)), 0) AS sequence,
                  EXISTS(SELECT 1 FROM shell_runs r WHERE r.session_id = s.id AND
                     json_extract(r.record_json, '$.state.outcome.kind') = 'orphaned') AS orphaned
                  FROM session_control s WHERE COALESCE(json_extract(s.configuration, '$.workspace.path'), json_extract(s.configuration, '$.workspace.hostCwd')) = ?

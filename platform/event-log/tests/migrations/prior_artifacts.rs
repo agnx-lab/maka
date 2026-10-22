@@ -38,8 +38,9 @@ use sqlx::sqlite::SqliteConnectOptions;
 // Run the real historical migrations, then use the real current writer APIs.
 // No migration ledger entry or checksum is removed to manufacture an old schema.
 async fn open_at<const VERSION: i64>(path: &Path) -> EventLog {
-    let lease =
-        Arc::new(crate::root::FileLease::acquire(&path.with_extension("writer.lock")).unwrap());
+    let mut lock_path = path.as_os_str().to_os_string();
+    lock_path.push(".writer.lock");
+    let lease = Arc::new(crate::root::FileLease::acquire(Path::new(&lock_path)).unwrap());
     let connection = OwnedConnection::open(
         SqliteConnectOptions::new()
             .filename(path)
@@ -48,7 +49,7 @@ async fn open_at<const VERSION: i64>(path: &Path) -> EventLog {
         move |connection| {
             Box::pin(async move {
                 sqlx::raw_sql(
-                    "PRAGMA application_id = 1296124754; PRAGMA auto_vacuum = INCREMENTAL;",
+                    "PRAGMA auto_vacuum = INCREMENTAL; PRAGMA application_id = 1296124754;",
                 )
                 .execute(&mut *connection)
                 .await?;
@@ -479,7 +480,7 @@ async fn migration_37_preserves_interaction_receipts_and_relations_without_json_
             0
         ))
         .unwrap(),
-        38
+        39
     );
     for ((table, columns), original) in tables.iter().zip(original) {
         assert_eq!(rows(&db, table, columns), original);
@@ -718,7 +719,7 @@ async fn migration_37_preserves_artifact_metadata_and_copied_image_provenance() 
             0
         ))
         .unwrap(),
-        38
+        39
     );
     assert_eq!(artifacts(&db), prior);
     assert_eq!(mappings(&db), provenance);
@@ -788,3 +789,6 @@ async fn migration_37_preserves_artifact_metadata_and_copied_image_provenance() 
     drop(db);
     log.close().await.unwrap();
 }
+
+#[path = "material_session.rs"]
+mod material_session;

@@ -398,7 +398,7 @@ impl Verification {
 pub(crate) async fn history_hint(connection: &mut SqliteConnection, session: &str) -> bool {
     sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events e
-        WHERE json_extract(e.event_json, '$.invocation.session_id')=?1
+        WHERE (e.event_json IS NOT NULL AND e.event_session=?1)
           AND e.kind <> 'invocation_opened')
         OR EXISTS(SELECT 1 FROM session_history_members WHERE session_id=?1)",
     )

@@ -276,7 +276,7 @@ pub(crate) async fn model_source_unchanged(
                      OR (json_extract(barrier.event_json,'$.fact.event.data.provider_options') IS NOT NULL
                          AND json_extract(barrier.event_json,'$.fact.event.data.provider_options') != '{{}}'))))
          SELECT EXISTS(SELECT 1 FROM runtime_events e WHERE e.sequence > ?3
-           AND json_extract(e.event_json,'$.invocation.session_id')=?5 AND {filter}
+           AND (e.event_json IS NOT NULL AND e.event_session=?5) AND {filter}
            AND NOT (e.invocation_id=?1 AND e.kind IN ('tool_dispatched','tool_settled','tool_rejected')
              AND e.operation_id IN (SELECT operation_id FROM independent))
            AND NOT (e.invocation_id=?1 AND e.kind='tool_notified'

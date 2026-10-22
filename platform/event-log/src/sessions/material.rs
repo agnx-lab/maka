@@ -223,3 +223,90 @@ fn retained(event: &RuntimeEvent) -> Value {
     };
     json!({"id":event.id,"invocation":event.invocation,"recorded_at":event.recorded_at,"fact":fact})
 }
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+    use maka_agent_facts::event::{EventWrite, Invocation, InvocationInput};
+
+    #[tokio::test]
+    async fn observation_cursor_and_pages_exclude_newer_retained_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.sqlite");
+        let log = EventLog::open(&path).await.unwrap();
+        log.create_session("source", "create", &json!({}), 1)
+            .await
+            .unwrap();
+        let invocation = Invocation {
+            session_id: "source".into(),
+            turn_id: "turn".into(),
+            run_id: "run".into(),
+            invocation_id: "invocation".into(),
+        };
+        let opened = RuntimeEvent::new(
+            invocation.clone(),
+            Fact::InvocationOpened {
+                configuration: None,
+                input: InvocationInput::Message {
+                    source_messages: vec![],
+                    content: "live original".into(),
+                    request_fingerprint: None,
+                },
+            },
+        );
+        let ended = RuntimeEvent::new(
+            invocation,
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::Completed,
+            },
+        );
+        assert_eq!(
+            log.append_batch(&[
+                EventWrite::plain(opened).unwrap(),
+                EventWrite::plain(ended.clone()).unwrap()
+            ])
+            .await
+            .unwrap(),
+            [1, 2]
+        );
+        // Exercise the query boundary independently of collection's traversal
+        // order: the newest own fact has proof but no live body.
+        let proof = serde_json::to_string(&retained(&ended)).unwrap();
+        let digest = content_digest(serde_json::to_string(&ended).unwrap().as_bytes());
+        log.connection.run(move |db| Box::pin(async move {
+            sqlx::query("UPDATE event_log SET retained_json=?,body_digest=?,event_json=NULL WHERE sequence=2")
+                .bind(proof).bind(digest).execute(db).await?;
+            Ok(())
+        })).await.unwrap();
+        for _ in 0..2 {
+            let versions = log
+                .observation_versions(&["source".into(), "missing".into()])
+                .await
+                .unwrap();
+            assert_eq!(versions.len(), 1);
+            assert_eq!(versions["source"].event, 1);
+            let page = log.session_events("source", 0, 2, 64, 65536).await.unwrap();
+            assert_eq!(
+                page.events.iter().map(|e| e.sequence).collect::<Vec<_>>(),
+                [1]
+            );
+            assert_eq!(page.through_sequence, 2);
+            assert!(page.next_after.is_none());
+        }
+        log.close().await.unwrap();
+        let log = EventLog::open(&path).await.unwrap();
+        assert_eq!(
+            log.observation_versions(&["source".into()]).await.unwrap()["source"].event,
+            1
+        );
+        assert_eq!(
+            log.session_events("source", 1, 2, 64, 65536)
+                .await
+                .unwrap()
+                .events
+                .len(),
+            0
+        );
+        log.close().await.unwrap();
+    }
+}

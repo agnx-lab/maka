@@ -589,6 +589,26 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
     );
     assert_eq!(copy(&log, request).await, first);
     for session in ["branch", "nested"] {
+        assert_eq!(
+            log.first_message_opening(session)
+                .await
+                .unwrap()
+                .unwrap()
+                .event
+                .invocation
+                .turn_id,
+            "first"
+        );
+        assert_eq!(
+            log.latest_message_opening(session)
+                .await
+                .unwrap()
+                .unwrap()
+                .event
+                .invocation
+                .turn_id,
+            "first"
+        );
         let prefix = log
             .scoped_prefix(LogScope::Session { id: session.into() }, 100, 65536)
             .await
