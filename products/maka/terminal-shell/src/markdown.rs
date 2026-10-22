@@ -23,10 +23,30 @@ use ::markdown::{ParseOptions, mdast::AlignKind, mdast::Node};
 use nsh_core::ui::prelude::*;
 use std::collections::BTreeMap;
 
+mod source;
+
+/// A literal UTF-8 interval or one indivisible Markdown transformation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PropEnum)]
+pub enum MarkdownSourceKind {
+    Literal,
+    Replacement,
+}
+
+/// Local rendered UTF-16 ranges address the original document in UTF-8 bytes.
+#[derive(Clone, Debug, PartialEq, JsObject)]
+pub struct MarkdownSourceSegment {
+    pub start: u32,
+    pub end: u32,
+    pub source_start: u64,
+    pub source_end: u64,
+    pub kind: MarkdownSourceKind,
+}
+
 /// Inline content; unsupported constructs retain their complete source spelling.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct MarkdownRun {
     pub key: String,
+    pub source: Vec<MarkdownSourceSegment>,
     pub text: String,
     pub strong: bool,
     pub emphasis: bool,
@@ -83,6 +103,7 @@ pub struct MarkdownTable {
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct MarkdownBlock {
     pub key: String,
+    pub source: Vec<MarkdownSourceSegment>,
     pub kind: MarkdownBlockKind,
     pub indent: u32,
     pub quote: u32,
@@ -125,7 +146,7 @@ fn parse_source(source: &str) -> Result<Vec<MarkdownBlock>, String> {
         references: BTreeMap::new(),
     };
     output.collect_references(&root);
-    output.visit(&root, Context::default());
+    output.visit(&root, Context::default())?;
     Ok(output.blocks)
 }
 
@@ -163,11 +184,11 @@ impl Presentation<'_> {
         }
     }
 
-    fn visit(&mut self, node: &Node, context: Context) {
+    fn visit(&mut self, node: &Node, context: Context) -> Result<(), String> {
         match node {
             Node::Root(root) => {
                 for child in &root.children {
-                    self.visit(child, context);
+                    self.visit(child, context)?;
                 }
             }
             Node::Blockquote(quote) => {
@@ -178,7 +199,7 @@ impl Presentation<'_> {
                             quote: context.quote + 1,
                             ..context
                         },
-                    );
+                    )?;
                 }
             }
             Node::List(list) => {
@@ -214,7 +235,7 @@ impl Presentation<'_> {
                                 indent: context.indent + 1,
                                 ..context
                             },
-                        );
+                        )?;
                     }
                     if let Some(block) = self.blocks.get_mut(first) {
                         block.marker = marker;
@@ -228,7 +249,7 @@ impl Presentation<'_> {
                     MarkdownBlockKind::Paragraph,
                     0,
                     context,
-                );
+                )?;
             }
             Node::Heading(heading) => {
                 self.phrasing(
@@ -237,11 +258,12 @@ impl Presentation<'_> {
                     MarkdownBlockKind::Heading,
                     u32::from(heading.depth),
                     context,
-                );
+                )?;
             }
             Node::Code(code) => {
                 let mut block = self.block(node, MarkdownBlockKind::Code, context);
                 block.text.clone_from(&code.value);
+                block.source = source::code(self.source, node, &code.value)?;
                 block.language = code.lang.clone().unwrap_or_default();
                 self.blocks.push(block);
             }
@@ -273,8 +295,9 @@ impl Presentation<'_> {
                                 child,
                                 Marks::default(),
                                 None,
+                                context.quote,
                                 &mut runs,
-                            );
+                            )?;
                         }
                         cells.push(MarkdownTableCell {
                             key: format!("table-cell:{}", start(cell_node)),
@@ -293,12 +316,14 @@ impl Presentation<'_> {
                 }
                 let mut block = self.block(node, MarkdownBlockKind::Table, context);
                 block.text = raw(self.source, node).into();
+                block.source = source::literal(start(node), &block.text);
                 block.table = Some(MarkdownTable { columns, rows });
                 self.blocks.push(block);
             }
             Node::ThematicBreak(_) => {
                 let mut block = self.block(node, MarkdownBlockKind::Rule, context);
                 block.text = raw(self.source, node).into();
+                block.source = source::literal(start(node), &block.text);
                 self.blocks.push(block);
             }
             // Link definitions are metadata, not rendered document content.
@@ -307,14 +332,17 @@ impl Presentation<'_> {
             _ => {
                 let mut block = self.block(node, MarkdownBlockKind::Literal, context);
                 block.text = raw(self.source, node).into();
+                block.source = source::literal(start(node), &block.text);
                 self.blocks.push(block);
             }
         }
+        Ok(())
     }
 
     fn block(&self, node: &Node, kind: MarkdownBlockKind, context: Context) -> MarkdownBlock {
         MarkdownBlock {
             key: format!("{}:{}", kind.js_name(), start(node)),
+            source: Vec::new(),
             kind,
             indent: context.indent,
             quote: context.quote,
@@ -334,7 +362,7 @@ impl Presentation<'_> {
         kind: MarkdownBlockKind,
         level: u32,
         context: Context,
-    ) {
+    ) -> Result<(), String> {
         let mut block = self.block(node, kind, context);
         for child in children {
             inline(
@@ -343,11 +371,13 @@ impl Presentation<'_> {
                 child,
                 Marks::default(),
                 None,
+                context.quote,
                 &mut block.runs,
-            );
+            )?;
         }
         block.level = level;
         self.blocks.push(block);
+        Ok(())
     }
 }
 
@@ -365,8 +395,9 @@ fn inline(
     node: &Node,
     marks: Marks,
     link: Option<&MarkdownLink>,
+    quote: u32,
     runs: &mut Vec<MarkdownRun>,
-) {
+) -> Result<(), String> {
     let linked = match node {
         Node::Link(value) => Some((&value.children, &value.url)),
         Node::LinkReference(value) => references
@@ -380,9 +411,9 @@ fn inline(
             target: target.clone(),
         };
         for child in children {
-            inline(source, references, child, marks, Some(&target), runs);
+            inline(source, references, child, marks, Some(&target), quote, runs)?;
         }
-        return;
+        return Ok(());
     }
     let children = match node {
         Node::Strong(strong) => Some((
@@ -410,9 +441,9 @@ fn inline(
     };
     if let Some((children, marks)) = children {
         for child in children {
-            inline(source, references, child, marks, link, runs);
+            inline(source, references, child, marks, link, quote, runs)?;
         }
-        return;
+        return Ok(());
     }
     let (text, marks) = match node {
         Node::Text(text) => (&*text.value, marks),
@@ -427,8 +458,14 @@ fn inline(
         _ => (raw(source, node), marks),
     };
     if text.is_empty() {
-        return;
+        return Ok(());
     }
+    let mut mapped = match node {
+        Node::Text(_) => source::text(source, node, text, quote)?,
+        Node::InlineCode(_) => source::inline_code(source, node, text, quote)?,
+        Node::Break(_) => source::line_break(source, node),
+        _ => source::literal(start(node), text),
+    };
     if let Some(previous) = runs.last_mut()
         && previous.strong == marks.strong
         && previous.emphasis == marks.emphasis
@@ -436,11 +473,18 @@ fn inline(
         && previous.code == marks.code
         && previous.link.as_ref() == link
     {
+        let shift = previous.source.last().map_or(0, |segment| segment.end);
+        for segment in &mut mapped {
+            segment.start += shift;
+            segment.end += shift;
+        }
+        previous.source.extend(mapped);
         previous.text.push_str(text);
-        return;
+        return Ok(());
     }
     runs.push(MarkdownRun {
         key: format!("inline:{}", start(node)),
+        source: mapped,
         text: text.into(),
         strong: marks.strong,
         emphasis: marks.emphasis,
@@ -448,6 +492,7 @@ fn inline(
         code: marks.code,
         link: link.cloned(),
     });
+    Ok(())
 }
 
 fn start(node: &Node) -> usize {
@@ -513,8 +558,80 @@ mod tests {
         assert_eq!(first[0].key, next[0].key);
         assert_eq!(first[0].runs[0].key, next[0].runs[0].key);
         assert_eq!(first[0].runs[1].text, "粗体");
+        assert_eq!(
+            first[0].runs[0].source,
+            [MarkdownSourceSegment {
+                start: 0,
+                end: 3,
+                source_start: 0,
+                source_end: 7,
+                kind: MarkdownSourceKind::Literal,
+            }]
+        );
+        assert_eq!(
+            first[0].runs[1].source,
+            [MarkdownSourceSegment {
+                start: 0,
+                end: 2,
+                source_start: 9,
+                source_end: 15,
+                kind: MarkdownSourceKind::Literal,
+            }]
+        );
+        assert_eq!(
+            first[0].runs[2].source,
+            [MarkdownSourceSegment {
+                start: 0,
+                end: 11,
+                source_start: 17,
+                source_end: 37,
+                kind: MarkdownSourceKind::Literal,
+            }]
+        );
         assert_eq!(first[0].runs[2].text, " 👩🏽‍💻 e\u{301}");
         assert_eq!(next[0].runs[1].key, first[0].runs[1].key);
+    }
+
+    #[test]
+    fn source_addresses_keep_entities_escapes_and_inline_code_atomic() {
+        let blocks = parse_source("A &amp; \\* &#x1F642; ` a🙂 `").unwrap();
+        assert_eq!(blocks[0].runs[0].text, "A & * 🙂 ");
+        let ranges: Vec<_> = blocks[0].runs[0]
+            .source
+            .iter()
+            .map(|segment| {
+                (
+                    segment.start,
+                    segment.end,
+                    segment.source_start,
+                    segment.source_end,
+                    segment.kind,
+                )
+            })
+            .collect();
+        assert_eq!(
+            ranges,
+            [
+                (0, 2, 0, 2, MarkdownSourceKind::Literal),
+                (2, 3, 2, 7, MarkdownSourceKind::Replacement),
+                (3, 4, 7, 8, MarkdownSourceKind::Literal),
+                (4, 5, 8, 10, MarkdownSourceKind::Replacement),
+                (5, 6, 10, 11, MarkdownSourceKind::Literal),
+                (6, 8, 11, 20, MarkdownSourceKind::Replacement),
+                (8, 9, 20, 21, MarkdownSourceKind::Literal),
+            ]
+        );
+        assert_eq!(blocks[0].runs[1].text, "a🙂");
+        assert_eq!(
+            blocks[0].runs[1].source,
+            [MarkdownSourceSegment {
+                start: 0,
+                end: 3,
+                source_start: 23,
+                source_end: 28,
+                kind: MarkdownSourceKind::Literal,
+            }]
+        );
     }
 
     #[test]

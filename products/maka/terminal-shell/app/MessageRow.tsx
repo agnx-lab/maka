@@ -24,6 +24,7 @@ import { Button } from 'nsh/base';
 import { platform } from 'nsh/device';
 import { messageKey, type Row } from './history';
 import { MarkdownBody } from './MarkdownBody';
+import { SourceText } from './SourceText';
 import { C, bodyTextStyle, secondaryTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 import { HistoryAttachments } from './Attachments';
@@ -85,6 +86,7 @@ export function MessageRow({
           expanded.set(action.value);
           if (action.value) onExpand?.(action.key);
         };
+        const sourceId = () => `${sessionId}/${row().messageId}/${row().field}`;
         const text = computed(() => row().text);
         const preview = computed(() => /\S[^\r\n]*/.exec(text())?.[0].trim() ?? '');
         const thinking = () => row().field === 'thinking' || row().role === 'thinking';
@@ -117,16 +119,21 @@ export function MessageRow({
                             when={row().role === 'assistant' && row().field === 'body'}
                             else={
                               <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
-                                {text()}
+                                <SourceText row={row} sourceId={sourceId()} />
                               </Text>
                             }
                           >
-                            <MarkdownBody row={row} openLink={openLink} userScroll={userScroll} />
+                            <MarkdownBody
+                              row={row}
+                              sourceId={sourceId()}
+                              openLink={openLink}
+                              userScroll={userScroll}
+                            />
                           </If>
                         }
                       >
                         <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
-                          {text()}
+                          <SourceText row={row} sourceId={sourceId()} />
                         </Text>
                       </If>
                       <View
@@ -267,6 +274,7 @@ export function MessageRow({
                               else={
                                 <MarkdownBody
                                   row={row}
+                                  sourceId={sourceId()}
                                   openLink={openLink}
                                   userScroll={userScroll}
                                   compact
@@ -274,7 +282,7 @@ export function MessageRow({
                               }
                             >
                               <Text selectable style={{ ...secondaryTextStyle, color: C.muted }}>
-                                {text()}
+                                <SourceText row={row} sourceId={sourceId()} />
                               </Text>
                             </If>
                           </View>
@@ -313,7 +321,7 @@ export function MessageRow({
                 }}
               >
                 <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
-                  {text()}
+                  <SourceText row={row} sourceId={sourceId()} />
                 </Text>
                 <If when={(row().attachments?.length ?? 0) > 0}>
                   <HistoryAttachments

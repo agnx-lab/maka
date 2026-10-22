@@ -19,6 +19,7 @@
 
 import { errorText, renderText, type UiText } from './text';
 import { tr } from './locale';
+import { SourceText } from './SourceText';
 import { cleanup, computed, effect, signal, Text, View } from 'nsh';
 import { markdown } from 'maka/markdown';
 import type { MarkdownBlock } from 'maka/markdown';
@@ -38,6 +39,7 @@ const sameInput = (left: Input | null, right: Input | null) =>
 
 export function MarkdownBody(props: {
   row: () => Row;
+  sourceId: string;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   userScroll(): void;
@@ -120,7 +122,7 @@ export function MarkdownBody(props: {
               color: props.compact ? C.muted : C.text,
             }}
           >
-            {props.row().text}
+            <SourceText row={props.row} sourceId={props.sourceId} />
           </Text>
           <If when={failure()}>
             <Text style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.danger }}>
@@ -135,6 +137,7 @@ export function MarkdownBody(props: {
           {(block) => (
             <MarkdownBlockView
               block={block}
+              sourceId={props.sourceId}
               compact={props.compact}
               openLink={props.openLink}
               userScroll={props.userScroll}
