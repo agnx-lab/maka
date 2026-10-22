@@ -17,7 +17,12 @@
  * under the License.
  */
 
-import type { Contract, EntryDeclaration, Export, Import } from '../../packages/plugin-sdk/src/index.js';
+import type {
+  Contract,
+  EntryDeclaration,
+  Export,
+  Import,
+} from '../../packages/plugin-sdk/src/index.js';
 export const required = (contract: Contract): Export => ({ contract, availability: 'required' });
 export const one = (contract: Contract): Import => ({ contract, cardinality: { kind: 'one' } });
 export const empty = { type: 'object', properties: {}, required: [], additionalProperties: false };

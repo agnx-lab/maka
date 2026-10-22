@@ -58,7 +58,7 @@ test('release notices reject changed dependency inputs and edited texts', async 
       'products/maka/desktop-shell/app/.gitignore',
       'patches/zod+4.6.5.patch',
       'products/maka/bundle/scripts/build.mjs',
-      'plugins/settings/connection-form/index.ts',
+      'plugins/settings/settings/package.ts',
       'packages/plugin-sdk/src/contracts.ts',
     ]) {
       const original = await readFile(join(root, name));
