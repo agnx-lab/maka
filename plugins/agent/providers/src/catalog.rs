@@ -17,8 +17,9 @@
  * under the License.
  */
 
-//! Immutable, route-specific public model facts. Network and publication belong
-//! to the product owner; account observations and user policy remain separate.
+//! Immutable public model facts with route-specific execution controls. Network
+//! and publication belong to the product owner; account observations and user
+//! policy remain separate.
 
 use maka_agent_facts::configuration::{ModelInfo, validation};
 use serde_json::Value;
@@ -86,6 +87,7 @@ impl Catalog {
 #[derive(Debug)]
 pub struct Snapshot {
     models: Models,
+    descriptions: BTreeMap<String, ModelInfo>,
 }
 
 impl Snapshot {
@@ -122,7 +124,10 @@ impl Snapshot {
                 );
             }
         }
-        Ok(Self { models })
+        Ok(Self {
+            models,
+            descriptions: BTreeMap::new(),
+        })
     }
 
     /// Each present source must be a complete valid JSON payload. Cache/fallback
@@ -140,6 +145,21 @@ impl Snapshot {
             .map(openrouter::parse)
             .transpose()?
             .unwrap_or_default();
+        snapshot.descriptions = router
+            .iter()
+            .map(|model| {
+                (
+                    model.id.clone(),
+                    ModelInfo {
+                        id: model.id.clone(),
+                        display_name: model.display_name.clone(),
+                        description: model.description.clone(),
+                        knowledge_cutoff: model.knowledge_cutoff.clone(),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
         let descriptions = merge::shared_descriptions(&entries, &router);
         for mut entry in entries {
             if entry.provider != "openrouter"
@@ -163,8 +183,13 @@ impl Snapshot {
         Ok(snapshot)
     }
 
+    /// An unknown route may borrow prose through an exact public ID. Its
+    /// execution controls, limits and availability remain unknown.
     pub fn get(&self, provider: &str, exact_model_id: &str) -> Option<&ModelInfo> {
-        self.models.get(provider)?.get(exact_model_id)
+        self.models
+            .get(provider)
+            .and_then(|models| models.get(exact_model_id))
+            .or_else(|| self.descriptions.get(exact_model_id))
     }
 
     /// Restore the one public observation captured at admission. A captured
@@ -185,7 +210,10 @@ impl Snapshot {
                 .or_default()
                 .insert(record.id.clone(), record);
         }
-        Ok(Self { models })
+        Ok(Self {
+            models,
+            descriptions: BTreeMap::new(),
+        })
     }
 
     /// Only missing account facts are filled. An account's own effort list also

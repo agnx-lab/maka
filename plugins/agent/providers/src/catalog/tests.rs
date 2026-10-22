@@ -105,7 +105,63 @@ fn new_public_model_keeps_each_routes_own_controls_and_limits() {
     assert_eq!(gateway.capabilities.unwrap().function_calling, Some(true));
     assert_eq!(gateway.structured_output, Some(true));
     assert_eq!(snapshot.get("openrouter", "brand-new-native"), None);
-    assert_eq!(snapshot.get("deepseek", "vendor/new-model:free"), None);
+    assert_eq!(
+        snapshot.get("deepseek", "vendor/new-model:free"),
+        Some(&ModelInfo {
+            id: "vendor/new-model:free".into(),
+            display_name: Some("Gateway name".into()),
+            description: Some("Shared model description".into()),
+            knowledge_cutoff: Some("2026-01".into()),
+            ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn compatible_connections_share_exact_public_ids_without_borrowing_route_controls() {
+    let router = json!({"data":[{
+        "id":"vendor/new-model","name":"Public name","description":"Public description",
+        "knowledge_cutoff":"2026-01","canonical_slug":"some-other-id",
+        "context_length":131072,"supported_parameters":["tools","reasoning"],
+        "reasoning":{"mandatory":true,"supported_efforts":["high"],"default_effort":"high"}
+    }]});
+    let snapshot = Snapshot::from_sources(None, Some(&router)).unwrap();
+    let public = ModelInfo {
+        id: "vendor/new-model".into(),
+        display_name: Some("Public name".into()),
+        description: Some("Public description".into()),
+        knowledge_cutoff: Some("2026-01".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        snapshot.get("openai-compatible", "vendor/new-model"),
+        Some(&public)
+    );
+    assert_eq!(snapshot.get("openai-compatible", "new-model"), None);
+    assert_eq!(snapshot.get("openai-compatible", "some-other-id"), None);
+    let reported = ModelInfo {
+        display_name: Some("Account name".into()),
+        context_window: Some(8192),
+        thinking_levels: Some(vec![]),
+        capabilities: Some(ModelCapabilities {
+            reasoning: Some(false),
+            function_calling: Some(false),
+            ..Default::default()
+        }),
+        ..ModelInfo::new("vendor/new-model")
+    };
+    let expected = ModelInfo {
+        description: Some("Public description".into()),
+        knowledge_cutoff: Some("2026-01".into()),
+        ..reported.clone()
+    };
+    assert_eq!(
+        snapshot.resolve("openai-compatible", reported.clone()),
+        expected
+    );
+    let captured =
+        Snapshot::for_model("openai-compatible", "vendor/new-model", Some(public)).unwrap();
+    assert_eq!(captured.resolve("openai-compatible", reported), expected);
 }
 
 #[test]
