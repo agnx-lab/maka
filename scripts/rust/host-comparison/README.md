@@ -158,7 +158,8 @@ python3 scripts/rust/host-comparison/summarize.py /home/me/host-results \
 The reducer requires `campaign-manifest.json` in the result directory (or an
 explicit `--campaign /path/to/manifest.json`). Before running a campaign, record
 `plannedRunIds`, an array of the exact output directory names, and
-`harnessSha256`, a mapping of `compare.py`, `telemetry.py`, and `ts-adapter.mjs` to
+`harnessSha256`, a mapping of `compare.py`, `telemetry.py`, `ts-adapter.mjs`, and
+`diagnostics.mjs` to
 their SHA-256 hashes. Keep those files frozen throughout the campaign.
 
 The reducer reads directories named `*-formal-*`, `*background1000-*`, or
@@ -186,3 +187,15 @@ Untimed setup invokes the same CLI's `--operation-worker host init` directly as 
 workaround. Actual execution uses the ordinary `maka host serve` production
 binary. This workaround is recorded here and must not be interpreted as a fix
 to the public initialization command.
+
+TS error receipts preserve the error name, message, code, request dispatch/retry
+metadata, and a bounded causal chain. Cycles, unreadable properties and truncated
+causes are marked explicitly. These diagnostics do not retry or reclassify any
+operation. Earlier receipts that omitted causes remain inconclusive about the
+underlying connection failure; do not infer a cause from the revised formatter.
+
+Check the diagnostic encoder with:
+
+```sh
+node --test scripts/rust/host-comparison/diagnostics.test.mjs
+```

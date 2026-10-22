@@ -464,7 +464,12 @@ def manifest(options):
         return h.hexdigest()
 
     source = RUST if options.kind == "rust" else TS
-    files = [Path(__file__), BASE / "telemetry.py", BASE / "ts-adapter.mjs"]
+    files = [
+        Path(__file__),
+        BASE / "telemetry.py",
+        BASE / "ts-adapter.mjs",
+        BASE / "diagnostics.mjs",
+    ]
     if options.kind == "ts":
         files += [
             TS / "package-lock.json",
