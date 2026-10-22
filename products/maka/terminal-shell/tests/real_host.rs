@@ -1247,7 +1247,7 @@ async fn workspace_folders_page_navigate_and_reject_replaced_directory_authority
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_enabled_node(&mut view, "Close model selection").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_focused_input(&mut view, "Message composer").await;
+        wait_editable_composer(&mut view).await;
         assert_ne!(view.surface().focused(), Some(editor));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
         view.handle_event(Event::Paste("NEW_FOLDER_DRAFT".into()));
