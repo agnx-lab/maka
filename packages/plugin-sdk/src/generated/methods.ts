@@ -738,7 +738,6 @@ export interface ServiceMethods {
         defaultCompactionPrompt: string;
         revision: number;
         displayName: string;
-        assistantTone: string;
         workspaceInstructions: boolean;
         incognitoActive: boolean;
         shellTitles: boolean;

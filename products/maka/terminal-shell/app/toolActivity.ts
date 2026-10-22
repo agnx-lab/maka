@@ -142,7 +142,11 @@ export function latestToolActivity(
   return latest;
 }
 
-export function toolActivitySummary(tool: ToolActivity, phaseLabel: string, title?: string): string {
+export function toolActivitySummary(
+  tool: ToolActivity,
+  phaseLabel: string,
+  title?: string,
+): string {
   const detail = tool.detail.replace(/\s+/g, ' ').trim();
   return [phaseLabel, tool.name, title ? snippet(title) : undefined, detail]
     .filter(Boolean)

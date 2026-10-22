@@ -41329,9 +41329,6 @@ export const contracts = {
               displayName: {
                 type: 'string',
               },
-              assistantTone: {
-                type: 'string',
-              },
               workspaceInstructions: {
                 type: 'boolean',
               },
@@ -41350,7 +41347,6 @@ export const contracts = {
               'defaultCompactionPrompt',
               'revision',
               'displayName',
-              'assistantTone',
               'workspaceInstructions',
               'incognitoActive',
               'shellTitles',
@@ -44811,16 +44807,13 @@ export const contracts = {
                       displayName: {
                         type: 'string',
                       },
-                      assistantTone: {
-                        type: 'string',
-                      },
                       kind: {
                         type: 'string',
                         const: 'personalization',
                       },
                     },
                     additionalProperties: false,
-                    required: ['kind', 'displayName', 'assistantTone'],
+                    required: ['kind', 'displayName'],
                   },
                   {
                     type: 'object',

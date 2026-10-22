@@ -2167,7 +2167,6 @@ export type SettingsPreferencesMutation =
     }
   | {
       displayName: string;
-      assistantTone: string;
       kind: 'personalization';
     }
   | {
@@ -7783,7 +7782,6 @@ export interface SettingsAssistantPreferences {
   defaultCompactionPrompt: string;
   revision: number;
   displayName: string;
-  assistantTone: string;
   workspaceInstructions: boolean;
   incognitoActive: boolean;
   shellTitles: boolean;
