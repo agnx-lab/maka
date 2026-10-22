@@ -772,6 +772,46 @@ mod tests {
     }
 
     #[test]
+    fn sixel_latest_ready_keeps_a_newer_pending_scene_when_older_work_finishes_last() {
+        let frames = native_frames(3);
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.frame_capacity = 5;
+        inbox.last_fully_written_geometry = Some(1);
+        for frame in &frames {
+            encoding(&mut inbox, frame);
+        }
+        inbox.finished(&frames[0].token(), Some(native_encoded(&frames[0], 1)));
+        let writing = inbox.take_encoded().unwrap();
+        assert_eq!(writing.frame.token(), frames[0].token());
+
+        // A is writing while C completes before B. The newest scene is C,
+        // regardless of which codec finishes last.
+        inbox.finished(&frames[2].token(), Some(native_encoded(&frames[2], 1)));
+        assert_eq!(
+            inbox.frames.len(),
+            2,
+            "the unfinished older worker retains its original slot"
+        );
+        assert!(inbox.take_encoded().is_none());
+        inbox.finished(&frames[1].token(), Some(native_encoded(&frames[1], 1)));
+        assert_eq!(
+            inbox.frames.len(),
+            1,
+            "an older completion cannot replace the newer pending scene"
+        );
+        assert!(inbox.take_encoded().is_none());
+        assert!(inbox.published.is_none());
+
+        consume_flush(&mut inbox, &writing);
+        let latest = inbox.take_encoded().unwrap();
+        assert_eq!(latest.frame.token(), frames[2].token());
+        consume_flush(&mut inbox, &latest);
+        assert_eq!(inbox.published, Some(frames[2].token()));
+        assert!(inbox.frames.is_empty());
+        assert!(inbox.in_flight.is_none());
+    }
+
+    #[test]
     fn first_flush_opens_parallel_admission_and_every_resize_closes_it() {
         let mut inbox = Inbox::new(capabilities(), false);
         inbox.frame_capacity = 5;
