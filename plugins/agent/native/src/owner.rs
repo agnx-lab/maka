@@ -47,6 +47,7 @@ mod patches;
 mod queue;
 mod recall;
 mod recap;
+mod runs;
 mod scheduler;
 mod skills;
 mod title;
@@ -188,7 +189,7 @@ pub(crate) struct Owner {
     planning_tools: Vec<String>,
     skills: Option<skills::Library>,
     executors: crate::executor::Executors,
-    runs: Arc<Mutex<Runs>>,
+    runs: Arc<runs::Registry>,
     workers: TaskTracker,
     producers: TaskTracker,
     producer_gate: Arc<Mutex<()>>,
@@ -887,18 +888,21 @@ impl Owner {
         if text.trim().is_empty() && attachments.is_empty() {
             return Err("agent_message_invalid".into());
         }
-        let mut runs = self.runs.lock().await;
-        if runs.closing {
-            return Err("agent_closed".into());
-        }
-        if runs.quarantined.contains(&id) {
-            return Err("agent_cleanup_unconfirmed".into());
-        }
-        let current = runs.controls.get(&id);
-        if let Some(reason) = current.and_then(|control| control.failure) {
-            return Err(reason.into());
-        }
-        let queued = current.map(|control| control.invocation.clone());
+        let admission = self.runs.session(&id).await;
+        let queued = {
+            let runs = admission.state().await;
+            if runs.closing {
+                return Err("agent_closed".into());
+            }
+            if runs.quarantined.contains(&id) {
+                return Err("agent_cleanup_unconfirmed".into());
+            }
+            let current = runs.controls.get(&id);
+            if let Some(reason) = current.and_then(|control| control.failure) {
+                return Err(reason.into());
+            }
+            current.map(|control| control.invocation.clone())
+        };
         let session = self.session(&id).await?;
         if session.archived {
             return Err("agent_session_configuration_changed".into());
@@ -1043,7 +1047,7 @@ impl Owner {
             },
             submitted_intent: None,
         };
-        let admission = maka_event_log::message_admissions::PendingMessageAdmission {
+        let pending = maka_event_log::message_admissions::PendingMessageAdmission {
             execution: maka_event_log::message_admissions::PendingExecution {
                 owner: self.prefix.clone(),
                 basis: serde_json::to_value(&basis).expect("accepted message basis"),
@@ -1063,7 +1067,7 @@ impl Owner {
                     .map_err(|_| "agent_queue_unavailable")?;
                 match self
                     .store
-                    .admit_queued_message(&self.revision.activation, revision, admission.clone())
+                    .admit_queued_message(&self.revision.activation, revision, pending.clone())
                     .await
                 {
                     Ok(receipt) => {
@@ -1082,7 +1086,7 @@ impl Owner {
             .input(invocation.clone(), backend, basis.clone(), delivered)
             .await?;
         self.store
-            .admit_message(admission)
+            .admit_message(pending)
             .await
             .map_err(|_| "agent_admission_failed")?;
         let cancellation = self.stop.child_token();
@@ -1090,12 +1094,12 @@ impl Owner {
             Ok(running) => running,
             Err(error) => {
                 if error.is_cleanup_unconfirmed() {
-                    runs.quarantined.insert(id.clone());
+                    admission.state().await.quarantined.insert(id.clone());
                 }
                 return Err(public_error(error));
             }
         };
-        self.publish(&mut runs, &running, basis);
+        self.publish(&mut *admission.state().await, &running, basis);
         let owner = self.clone();
         self.workers
             .spawn(async move { owner.drive(running).await });
@@ -1189,7 +1193,7 @@ impl Owner {
     }
 }
 struct Idle {
-    runs: tokio::sync::OwnedMutexGuard<Runs>,
+    runs: runs::Exclusive,
     _producer: tokio::sync::OwnedMutexGuard<()>,
     stop: CancellationToken,
 }

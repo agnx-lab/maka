@@ -177,7 +177,7 @@ pub(super) struct Setup {
     standard_sources: bool,
     prepare_skills: bool,
     skill_tools: bool,
-    preparation: Option<Arc<PreparationProbe>>,
+    preparation: Option<(Arc<dyn Handler>, Arc<dyn NativeOwner>)>,
     images: Option<images::Source>,
     confirmation: contract::ToolConfirmation,
 }
@@ -782,23 +782,25 @@ impl Setup {
         if self.web || self.health {
             maka_web::provide(registry).unwrap();
         }
-        if let Some(probe) = &self.preparation {
-            let probe = probe.clone();
+        if let Some((handler, owner)) = &self.preparation {
+            let handler = handler.clone();
+            let owner = owner.clone();
             registry
                 .insert(
                     maka_skills_api::IMPLEMENTATION.into(),
                     Arc::new(move |_, _| {
-                        let probe = probe.clone();
+                        let handler = handler.clone();
+                        let owner = owner.clone();
                         Box::pin(async move {
                             NativeActivation {
                                 exports: Ok(BTreeMap::from([(
                                     maka_skills_api::EXPORT.into(),
                                     Published {
                                         contract: maka_skills_api::contract(),
-                                        value: probe.clone() as Arc<dyn Handler>,
+                                        value: handler,
                                     },
                                 )])),
-                                owner: probe,
+                                owner,
                             }
                         })
                     }),
@@ -2066,7 +2068,7 @@ async fn skill_preparation_parent_scope_owns_work_after_observer_loss_and_cleanu
                 cleanup_failed: failed,
             });
             let mut setup = Setup::skill_preparation(dir.path().into(), false);
-            setup.preparation = Some(probe.clone());
+            setup.preparation = Some((probe.clone(), probe.clone()));
             let f = Fixture::with_services("http://127.0.0.1:9/v1", None, None, Some(setup)).await;
             let parent = scope(&f.issuer, true);
             let owner = f.owner.clone();
@@ -2780,4 +2782,152 @@ async fn queued_messages_resume_with_equivalent_native_service_targets_after_res
             fixture.config.shutdown().await.unwrap();
         }
     }).await.unwrap();
+}
+
+struct AdmissionPreparation {
+    entered: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+    messages: Arc<StdMutex<Vec<String>>>,
+}
+impl Handler for AdmissionPreparation {
+    fn call(
+        &self,
+        method: String,
+        input: Value,
+        _: Context,
+    ) -> BoxFuture<'static, Result<Value, String>> {
+        assert_eq!(method, "prepare");
+        let message = input["input"]["message"].as_str().unwrap().to_owned();
+        self.messages.lock().unwrap().push(message.clone());
+        let entered = self.entered.clone();
+        let release = self.release.clone();
+        Box::pin(async move {
+            if message == "first blocked" {
+                entered.add_permits(1);
+                release.acquire().await.unwrap().forget();
+            }
+            Ok(
+                serde_json::to_value(maka_skills_api::contract::Preparation::Ready {
+                    text: None,
+                    record: maka_skills_api::contract::PreparationRecord {
+                        revision: maka_agent_facts::artifact::content_digest(
+                            b"admission preparation",
+                        ),
+                        metadata_prompt: String::new(),
+                        invocation: Default::default(),
+                    },
+                    required_tools: Default::default(),
+                })
+                .unwrap(),
+            )
+        })
+    }
+}
+impl NativeOwner for AdmissionPreparation {
+    fn close(&self) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test]
+async fn independent_session_admits_while_preparation_is_blocked_and_same_session_stays_ordered() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let dir = tempfile::tempdir().unwrap();
+        let probe = Arc::new(AdmissionPreparation {
+            entered: Arc::new(Semaphore::new(0)),
+            release: Arc::new(Semaphore::new(0)),
+            messages: Arc::new(StdMutex::new(Vec::new())),
+        });
+        let mut setup = Setup::skill_preparation(dir.path().into(), false);
+        setup.preparation = Some((probe.clone(), probe.clone()));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let f = Fixture::with_services(
+            &format!("http://{}/v1", listener.local_addr().unwrap()),
+            None,
+            None,
+            Some(setup),
+        )
+        .await;
+        let a = f.create("Blocked preparation").await;
+        let b = f.create("Independent preparation").await;
+        let selection = f.selection().await;
+        let mut first = Box::pin(f.mutation(
+            2,
+            "send",
+            json!({"sessionId":a,"message":"first blocked","model":selection}),
+            Uuid::new_v4(),
+        ));
+        tokio::select! {
+            value = &mut first => panic!("blocked preparation returned: {value:?}"),
+            permit = probe.entered.acquire() => permit.unwrap().forget(),
+        }
+        assert!(f.owner.runs.clone().try_lock_owned().is_err());
+        let mut same = Box::pin(f.mutation(
+            2,
+            "send",
+            json!({"sessionId":a,"message":"same queued","model":selection}),
+            Uuid::new_v4(),
+        ));
+        let independent = f.mutation(
+            2,
+            "send",
+            json!({"sessionId":b,"message":"independent started","model":selection}),
+            Uuid::new_v4(),
+        );
+        let independent = tokio::select! {
+            value = &mut first => panic!("blocked preparation returned: {value:?}"),
+            value = &mut same => panic!("same Session overtook its first message: {value:?}"),
+            value = independent => value.unwrap(),
+        };
+        assert_eq!(independent["kind"], "started");
+        assert_eq!(
+            *probe.messages.lock().unwrap(),
+            ["first blocked", "independent started"]
+        );
+        probe.release.add_permits(1);
+        let first = first.await.unwrap();
+        assert_eq!(first["kind"], "started");
+        let queued = same.await.unwrap();
+        assert_eq!(queued["kind"], "queued");
+        assert_eq!(
+            *probe.messages.lock().unwrap(),
+            ["first blocked", "independent started", "same queued"]
+        );
+        let server = tokio::spawn(async move {
+            let mut bodies = Vec::new();
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                bodies.push(request(&mut socket).await);
+                response(&mut socket).await;
+            }
+            bodies
+        });
+        f.drained().await;
+        let bodies = server.await.unwrap();
+        let mut last_inputs: Vec<_> = bodies
+            .iter()
+            .map(|body| {
+                body["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|item| item["role"] == "user")
+                    .unwrap()["content"]
+                    .as_str()
+                    .unwrap()
+            })
+            .collect();
+        last_inputs.sort_unstable();
+        assert_eq!(
+            last_inputs,
+            ["first blocked", "independent started", "same queued"]
+        );
+        assert!(f.store.pending_messages(&a).await.unwrap().is_empty());
+        assert!(f.store.pending_messages(&b).await.unwrap().is_empty());
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
 }
