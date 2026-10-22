@@ -34,7 +34,8 @@ const nativeModules = {
     }) };
     export { state as InputState, state as TextareaState };
     export const Button = { new: ui };
-    export { ui as v_flex, ui as h_flex, ui as TextView, ui as Scrollbar,
+    export const VirtualListScrollHandle = { new: () => ({ scroll_to_item() {}, release() { return true; } }) };
+    export { ui as v_flex, ui as h_flex, ui as TextView, ui as Scrollbar, ui as v_virtual_list,
       ui as set_theme, ui as Input, ui as Checkbox, ui as Switch,
       ui as Popover, ui as Textarea, ui as h_resizable, ui as resizable_panel };`,
   'maka-locale': `export const system = () => 'en';`,

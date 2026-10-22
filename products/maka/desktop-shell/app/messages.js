@@ -522,6 +522,23 @@ export const MESSAGES = {
     '无法加载更早的消息。',
     '無法載入更早的訊息。',
   ],
+  backToLatest: ['Return to latest', '返回最新内容', '返回最新內容'],
+  turnUnlabelled: ['Recorded turn', '已记录的轮次', '已記錄的輪次'],
+  turnLoading: [
+    '{value}\nLoading… Click again to stop.',
+    '{value}\n正在加载…再次点击可停止。',
+    '{value}\n正在載入…再次點擊可停止。',
+  ],
+  turnNotShown: [
+    'This turn has no messages to show.',
+    '本轮没有可显示的消息。',
+    '本輪沒有可顯示的訊息。',
+  ],
+  turnUnreachable: [
+    'Older history did not advance. This turn could not be reached.',
+    '无法继续读取更早的历史，未能定位到本轮。',
+    '無法繼續讀取更早的歷史，未能定位到本輪。',
+  ],
   beginningOfTask: ['Beginning of task', '任务开始', '任務開始'],
   thinking: ['Thinking…', '深度思考中…', '深度思考中…'],
   thought: ['Thought', '已深度思考', '已深度思考'],

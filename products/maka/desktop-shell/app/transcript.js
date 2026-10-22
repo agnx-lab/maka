@@ -44,7 +44,14 @@
 //   message (messages.ts:35-122, 186-218).
 
 import { div, list } from 'gpui-kit';
-import { v_flex, h_flex, TextView, Scrollbar } from 'gpui-base';
+import {
+  v_flex,
+  h_flex,
+  TextView,
+  Scrollbar,
+  VirtualListScrollHandle,
+  v_virtual_list,
+} from 'gpui-base';
 import { query, subscribe, next, close, log, readHistory, readSource } from './host.js';
 import { Interactions } from './interactions.js';
 import { compareRowPositions, rowPositionKey } from './history-position.js';
@@ -54,6 +61,7 @@ import {
   typeset,
   text,
   icon,
+  iconButton,
   tippedIcon,
   markdownStyle,
   byteSize,
@@ -73,6 +81,18 @@ const COLUMN_WIDTH = 720;
 const COLUMN_GUTTER = 24;
 /** The footer's Fork button, square at the end of the column (turnFooter). */
 const FORK_BUTTON = 24;
+/**
+ * The turn rail (turnRail): its ticks' width and pitch, its distance from
+ * the pane's right edge, clear of the scrollbar, and its greatest height.
+ * It shows only where the space beside the reading column holds it with 8
+ * to spare, as Maka Desktop's prompt rail hides where it would cover the
+ * messages.
+ */
+const RAIL_WIDTH = 24;
+const TICK_PITCH = 10;
+const RAIL_INSET = 16;
+const RAIL_MAX = 420;
+const RAIL_ROOM = RAIL_INSET + RAIL_WIDTH + 8;
 
 const FIELD_ORDER = { thinking: 0, body: 1 };
 
@@ -211,7 +231,11 @@ export class Transcript {
      * are, instead of following the newest row (see showing).
      */
     this.anchored = this.anchor !== null;
-    /** Accepted local message whose arrival asks the list to resume at its end. */
+    /**
+     * The last request for the list's end, which it resumes following: a
+     * sent message's id (addPending) or `latest/<n>` (toLatest). A jump
+     * clears it (reveal).
+     */
     this.scrollToEnd = null;
     /** The items the list last showed, `{ start, end, count }`, or null before it drew. */
     this.visible = null;
@@ -228,6 +252,8 @@ export class Transcript {
     this.olderFence = 0;
     this.before = null;
     this.loadingOlder = false;
+    /** The read of the page before the oldest row while one runs (loadOlder). */
+    this.olderTask = null;
     // Reading forward: the cursor after the newest row when the last page stopped short of its fence.
     this.after = null;
     this.following = false;
@@ -293,6 +319,31 @@ export class Transcript {
      */
     this.jump = null;
     this.jumps = 0;
+    /**
+     * Turns the Host samples for going back to them, `agent.historyLandmarks`
+     * at the fence `through`: up to 64, with where each starts and the start
+     * of its message. The rail lists them with the loaded turns (turns).
+     */
+    this.landmarks = { through: -1, items: [] };
+    /** Whether landmarks are being read, and the newest fence they were asked for at. */
+    this.landmarksReading = false;
+    this.landmarksWanted = -1;
+    /** The rail's turns, as last built from `rows` and `landmarks`. */
+    this.turnList = null;
+    /** The turn of the first item on screen, which the rail marks, or null. */
+    this.topTurn = null;
+    /** Whether the newest row is on screen; else the button to go back to it shows. */
+    this.atLatest = true;
+    /** How many times the reader went back to the newest row (toLatest): each is a new request. */
+    this.latestRequests = 0;
+    /** The turn the rail is going to while older pages are read for it, or null. */
+    this.goingTo = null;
+    /**
+     * The rail's scroll position (native state, which cannot be made while
+     * drawing), released on close, and the turn it last centred.
+     */
+    this.railScroll = VirtualListScrollHandle.new();
+    this.railCentred = null;
     /** The list items last built from the rows (see displayItems). */
     this.view = null;
     /**
@@ -320,6 +371,7 @@ export class Transcript {
       const observed = await query(this.endpoint, 'observe', { sessionId: this.id });
       if (this.closed) return;
       this.acceptObservation(observed);
+      this.readLandmarks(observed.through);
       this.parts = observed.parts.map((part) => ({
         invocationId: observed.run?.invocationId ?? null,
         stepId: part.stepId,
@@ -409,12 +461,24 @@ export class Transcript {
   }
 
   /**
-   * The list showed items `range` of `count`. A transcript opened at its
+   * The list showed `items[range]` of `count`. A transcript opened at its
    * anchor follows its newest row again once that row is on screen with
    * nothing newer left to read: the reader has caught up.
    */
-  showing(range, count) {
+  showing(range, count, items = displayItems(this)) {
     this.visible = { start: range.start, end: range.end, count };
+    // The rail marks the turn at the top; the button to the newest row shows
+    // while it is off screen. Redrawn only when either changes.
+    let topTurn = null;
+    for (let index = range.start; index < range.end && topTurn === null; index += 1) {
+      topTurn = turnOf(items[index]);
+    }
+    const atLatest = range.end >= count && this.after === null;
+    if (topTurn !== this.topTurn || atLatest !== this.atLatest) {
+      this.topTurn = topTurn;
+      this.atLatest = atLatest;
+      this.hooks.changed();
+    }
     if (
       this.anchored &&
       this.ready &&
@@ -513,6 +577,8 @@ export class Transcript {
   async close() {
     this.closed = true;
     this.interactions.close();
+    if (this.railScroll !== null) this.railScroll.release();
+    this.railScroll = null;
     const handle = this.watchHandle;
     this.watchHandle = null;
     if (handle !== null) await close(handle);
@@ -704,6 +770,7 @@ export class Transcript {
       const observed = await query(this.endpoint, 'observe', { sessionId: this.id });
       if (this.closed) return;
       this.acceptObservation(observed);
+      this.readLandmarks(observed.through);
       this.hooks.changed();
     } catch (error) {
       if (!this.closed) this.hooks.report(t('sessionStateFailed', { value: error.message }));
@@ -769,6 +836,12 @@ export class Transcript {
       if (!this.closed) this.hooks.report(t('transcriptFailed', { value: error.message }));
     } finally {
       this.following = false;
+    }
+    // Read to the end without a new item (the rest of a row loaded in part):
+    // the list reports no new range, so look at the last one again.
+    const items = displayItems(this);
+    if (!this.closed && this.visible !== null && this.visible.count === items.length) {
+      this.showing(this.visible, items.length, items);
     }
   }
 
@@ -840,9 +913,18 @@ export class Transcript {
     this.rows = older.concat(rest);
   }
 
-  /** Loads the page before the oldest row, at the first page's fence. Resolves with the history calls made. */
-  async loadOlder() {
-    if (this.before === null || this.loadingOlder || this.closed || !this.ready) return 0;
+  /**
+   * Loads the page before the oldest row, at the first page's fence, or
+   * waits for the one being loaded. Resolves with the history calls made.
+   */
+  loadOlder() {
+    if (this.loadingOlder) return this.olderTask;
+    if (this.before === null || this.closed || !this.ready) return Promise.resolve(0);
+    this.olderTask = this.readOlder();
+    return this.olderTask;
+  }
+
+  async readOlder() {
     this.loadingOlder = true;
     this.olderError = null;
     this.hooks.changed();
@@ -940,8 +1022,140 @@ export class Transcript {
     this.jumps += 1;
     this.jump = { position, field, drawn: false };
     this.anchored = true;
+    // The new list would take a request for the end made before as its own.
+    this.scrollToEnd = null;
     this.hooks.changed();
     return true;
+  }
+
+  /**
+   * Reads the turns the Host samples at `through`, when newer than those
+   * read. One read at a time; a newer fence asked for meanwhile is read after
+   * it. A failed read leaves the rail with the loaded turns, and the next
+   * observation tries again.
+   */
+  async readLandmarks(through) {
+    this.landmarksWanted = Math.max(this.landmarksWanted, through);
+    if (this.closed || this.landmarksReading) return;
+    this.landmarksReading = true;
+    try {
+      while (!this.closed && this.landmarksWanted > this.landmarks.through) {
+        const fence = this.landmarksWanted;
+        const page = await query(this.endpoint, 'historyLandmarks', {
+          sessionId: this.id,
+          through: fence,
+        });
+        if (this.closed) return;
+        if (page.through !== fence) throw new Error(`answered fence ${page.through} for ${fence}`);
+        this.landmarks = { through: fence, items: page.landmarks };
+        this.hooks.changed();
+      }
+    } catch (error) {
+      log(`transcript "${this.session.title}": landmarks: ${error.message}`);
+    } finally {
+      this.landmarksReading = false;
+    }
+  }
+
+  /**
+   * The turns the rail lists, oldest first: `{ turnId, label, position,
+   * loaded }`, where `position` is where the turn starts, `label` the start
+   * of its message, empty when none is known, and `loaded` whether rows of it
+   * are. The Host's landmarks reach turns not loaded; the loaded rows add the
+   * turns since and the labels it left out.
+   */
+  turns() {
+    const cached = this.turnList;
+    if (cached?.rows === this.rows && cached.landmarks === this.landmarks) return cached.turns;
+    const byTurn = new Map();
+    for (const mark of this.landmarks.items) {
+      byTurn.set(mark.turnId, {
+        turnId: mark.turnId,
+        label: mark.label,
+        position: mark.position,
+        loaded: false,
+      });
+    }
+    for (const row of this.rows) {
+      if (!row.turnId || row.position === undefined) continue;
+      const label = row.role === 'user' ? oneLine(row.text) : '';
+      const known = byTurn.get(row.turnId);
+      if (known === undefined) {
+        byTurn.set(row.turnId, { turnId: row.turnId, label, position: row.position, loaded: true });
+      } else {
+        known.loaded = true;
+        if (known.label === '' && label !== '') known.label = label;
+      }
+    }
+    const turns = [...byTurn.values()].sort((a, b) => compareRowPositions(a.position, b.position));
+    this.turnList = { rows: this.rows, landmarks: this.landmarks, turns };
+    return turns;
+  }
+
+  /**
+   * Shows a turn from the rail at the top of the list. A turn not loaded yet
+   * is loaded first, page by page back to its start; a page that cannot be
+   * read stops it (loadOlder says why), and so do asking for the same turn
+   * again, scrolling, sending and going back to the newest row (stopGoing).
+   * Another turn asked for meanwhile takes its place.
+   */
+  async goToTurn(turn) {
+    if (!this.ready) return;
+    const going = turn.turnId;
+    if (this.goingTo === going) {
+      this.goingTo = null;
+      this.hooks.changed();
+      return;
+    }
+    this.goingTo = going;
+    this.hooks.changed();
+    try {
+      // The turn's first row may be loaded only in part: read back past its start.
+      while (startsAfter(this.before, turn.position)) {
+        const before = this.before;
+        await this.loadOlder();
+        if (this.closed || this.goingTo !== going || this.olderError !== null) return;
+        if (sameCursor(this.before, before)) {
+          this.hooks.report(t('turnUnreachable'));
+          return;
+        }
+      }
+      const items = displayItems(this);
+      const row = this.rows.find(
+        (row) =>
+          row.turnId === going &&
+          compareRowPositions(row.position, turn.position) >= 0 &&
+          items.some((item) => holdsRow(item, row.position)),
+      );
+      if (row === undefined) {
+        this.hooks.report(t('turnNotShown'));
+        return;
+      }
+      this.reveal(row.position);
+      log(`transcript "${this.session.title}": went to turn ${going}`);
+    } finally {
+      if (this.goingTo === going) {
+        this.goingTo = null;
+        this.hooks.changed();
+      }
+    }
+  }
+
+  /** Stops going to a turn from the rail: the reader went elsewhere. */
+  stopGoing() {
+    if (this.goingTo === null) return;
+    log(`transcript "${this.session.title}": stopped going to turn ${this.goingTo}`);
+    this.goingTo = null;
+    this.hooks.changed();
+  }
+
+  /** Goes back to the newest row and follows it again, as sending does. */
+  toLatest() {
+    this.stopGoing();
+    this.anchored = false;
+    this.latestRequests += 1;
+    this.scrollToEnd = `latest/${this.latestRequests}`;
+    this.hooks.changed();
   }
 
   /** Whether turn footers offer Fork: a task's conversation, not WorkHub's. */
@@ -1078,6 +1292,7 @@ export class Transcript {
    * follows the newest row again, where the message shows.
    */
   addPending(messageId, text, attachments = []) {
+    this.stopGoing();
     this.anchored = false;
     this.scrollToEnd = messageId;
     const covered = `${messageId}/body`;
@@ -1087,6 +1302,33 @@ export class Transcript {
       { key: covered, role: 'user', covered, pending: true, text, attachments },
     ];
   }
+}
+
+/** Whether history before `cursor` (the oldest loaded row's) still holds the start of the row at `position`. */
+function startsAfter(cursor, position) {
+  if (cursor === null) return false;
+  const order = compareRowPositions(cursor.position, position);
+  return order > 0 || (order === 0 && cursor.offset > 0);
+}
+
+function sameCursor(a, b) {
+  return (
+    a !== null &&
+    b !== null &&
+    compareRowPositions(a.position, b.position) === 0 &&
+    a.field === b.field &&
+    a.offset === b.offset
+  );
+}
+
+/** The turn a list item belongs to, or null for one of none (the history row, the working row). */
+function turnOf(item) {
+  return item?.row?.turnId ?? item?.turnId ?? null;
+}
+
+/** A message's start on one line, as the rail's tooltip shows it (96 characters, as the Host's landmarks). */
+function oneLine(value) {
+  return Array.from(value.replace(/\s+/g, ' ').trim()).slice(0, 96).join('');
 }
 
 /** Where the transcript's earliest history stands, as the row above the first message shows it. */
@@ -1236,10 +1478,12 @@ function displayItems(transcript) {
 
 /**
  * The selected task's transcript: the measured list in the reading column,
- * and its scrollbar. `empty`, when given, is what a transcript with no
- * messages shows instead of saying so.
+ * its scrollbar, the turn rail where the pane is `width` wide enough for it
+ * beside the column, and the button back to the newest row while that is
+ * off screen. `empty`, when given, is what a transcript with no messages
+ * shows instead of saying so.
  */
-export function transcriptPane(transcript, loadOlder, cx, empty = null) {
+export function transcriptPane(transcript, loadOlder, cx, empty = null, width = 0) {
   const m = palette(cx);
   // One snapshot for this render; the list's callbacks run during later
   // layouts and must agree with the count given here.
@@ -1256,6 +1500,10 @@ export function transcriptPane(transcript, loadOlder, cx, empty = null) {
   const items = from > 0 ? all.slice(from) : all;
   const hasRows = transcript.rows.length + transcript.pending.length + transcript.live.length > 0;
   const id = `transcript-${transcript.id}${transcript.jumps > 0 ? `-${transcript.jumps}` : ''}`;
+  const turns =
+    transcript.ready && transcript.railScroll !== null && width >= COLUMN_WIDTH + 2 * RAIL_ROOM
+      ? transcript.turns()
+      : [];
   return (
     v_flex()
       .id(`${id}-area`)
@@ -1264,6 +1512,8 @@ export function transcriptPane(transcript, loadOlder, cx, empty = null) {
       .min_h_0()
       // A footer's click comes on release; the press before it says where it was.
       .on_mouse_down('left', (event) => transcript.pressed(event))
+      // Scrolling while the rail loads a turn's history leaves the reader where they scrolled.
+      .when(transcript.goingTo !== null, (el) => el.on_scroll_wheel(() => transcript.stopGoing()))
       .when(!transcript.ready || !hasRows, (el) =>
         el
           .items_center()
@@ -1301,14 +1551,120 @@ export function transcriptPane(transcript, loadOlder, cx, empty = null) {
                   jump.drawn = true;
                   if (from > 0) transcript.hooks.changed();
                 }
-                transcript.showing({ start, end }, shown + from);
+                transcript.showing({ start, end }, shown + from, all);
                 if (start < NEAR_TOP && transcript.before !== null) loadOlder();
               })
               .on_item_click((key, cx) => transcript.click(key, cx)),
           )
-          .child(Scrollbar.vertical(id).absolute().inset_0()),
+          .child(Scrollbar.vertical(id).absolute().inset_0())
+          .when(turns.length > 1, (el) => el.child(turnRail(transcript, turns, cx)))
+          .when(!transcript.atLatest, (el) => el.child(latestButton(transcript, cx))),
       )
   );
+}
+
+/**
+ * The turns at the pane's right edge, oldest at the top, as Maka Desktop's
+ * prompt rail and terminal-shell's turn navigation show them: a tick for
+ * each (Transcript.turns), centred on the pane's height and scrolled on its
+ * own when more than fit. The tick of the turn at the top of the list is
+ * marked and kept in view. Hovering a tick shows the start of its message;
+ * a click shows the turn (goToTurn). A turn with no rows loaded has a
+ * shorter tick, and the one being loaded is drawn in the primary colour.
+ */
+function turnRail(transcript, turns, cx) {
+  const active = turns.findIndex((turn) => turn.turnId === transcript.topTurn);
+  if (active >= 0 && transcript.railCentred !== transcript.topTurn) {
+    transcript.railCentred = transcript.topTurn;
+    transcript.railScroll.scroll_to_item(active, 'center');
+  }
+  return v_flex()
+    .absolute()
+    .top(0)
+    .bottom(0)
+    .right(RAIL_INSET)
+    .w(RAIL_WIDTH)
+    .py(32)
+    .justify_center()
+    .child(
+      div()
+        .h(turns.length * TICK_PITCH + 8)
+        .max_h(RAIL_MAX)
+        .min_h_0()
+        .flex_shrink_1()
+        .child(
+          v_virtual_list(
+            `turn-rail-${transcript.id}`,
+            turns.length,
+            TICK_PITCH,
+            (index) => turns[index].turnId,
+            (range) => {
+              const ticks = [];
+              for (let index = range.start; index < range.end; index += 1) {
+                ticks.push(turnTick(turns[index], transcript, cx));
+              }
+              return ticks;
+            },
+          )
+            .track_scroll(transcript.railScroll)
+            .size_full()
+            .py(4)
+            // The rows under the rail take clicks too (GPUI hands a click to
+            // every element under the pointer): the tick keeps its own.
+            .on_item_click((key, cx) => {
+              cx.stop_propagation();
+              const turn = transcript.turns().find((turn) => turn.turnId === key);
+              if (turn !== undefined) transcript.goToTurn(turn);
+            }),
+        ),
+    );
+}
+
+function turnTick(turn, transcript, cx) {
+  const m = palette(cx);
+  const active = turn.turnId === transcript.topTurn;
+  const going = turn.turnId === transcript.goingTo;
+  const label = turn.label === '' ? t('turnUnlabelled') : turn.label;
+  return h_flex()
+    .w(RAIL_WIDTH)
+    .h(TICK_PITCH)
+    .justify_end()
+    .pr(1)
+    .rounded(4)
+    .hover((style) => style.bg(m.hover))
+    .tooltip(going ? t('turnLoading', { value: label }) : label)
+    .child(
+      div()
+        .h(2)
+        .w(active || going ? 20 : turn.loaded ? 12 : 8)
+        .rounded(1)
+        .bg(going ? m.primary : active ? m.ink : m.inkDisabled),
+    );
+}
+
+/** The round button at the foot of the pane that goes back to the newest row (toLatest). */
+function latestButton(transcript, cx) {
+  const m = palette(cx);
+  return h_flex()
+    .absolute()
+    .left(0)
+    .right(0)
+    .bottom(12)
+    .justify_center()
+    .child(
+      iconButton('transcript-latest', 'chevron-down', cx, 32)
+        .rounded(16)
+        .bg(m.overlay)
+        .border_1()
+        .border_color(m.border)
+        .shadow_sm()
+        .hover((style) => style.bg(m.bubble))
+        .tooltip(t('backToLatest'))
+        .on_click((event, cx) => {
+          cx.stop_propagation();
+          transcript.toLatest();
+        }),
+    );
 }
 
 /** One item of the transcript list, in the reading column; called from layout for each visible item. */

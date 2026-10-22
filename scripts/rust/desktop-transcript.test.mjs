@@ -25,9 +25,10 @@ import test from 'node:test';
 // are replaced; calling any UI export fails instead of emulating a toolkit.
 const nativeModules = {
   'gpui-kit': `const ui = () => { throw new Error('unexpected native UI call'); };
-    export { ui as div, ui as list, ui as svg };`,
+    export { ui as div, ui as list, ui as svg, ui as uniform_list };`,
   'gpui-base': `const ui = () => { throw new Error('unexpected native UI call'); };
-    export { ui as v_flex, ui as h_flex, ui as TextView, ui as Scrollbar,
+    export const VirtualListScrollHandle = { new: () => ({ scroll_to_item() {}, release() { return true; } }) };
+    export { ui as v_flex, ui as h_flex, ui as TextView, ui as Scrollbar, ui as v_virtual_list,
       ui as InputState, ui as set_theme, ui as Button, ui as Input };`,
   'maka-locale': `export const system = () => 'en';`,
   'maka-host': `export const query = (...args) => globalThis[Symbol.for('transcript.test.query')](...args);

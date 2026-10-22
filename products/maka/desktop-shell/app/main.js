@@ -797,6 +797,17 @@ export default class MakaDesktop extends View {
   }
 
   /**
+   * The conversation's plate's width: what the window leaves it beside the
+   * sidebar, and the Workbar's kept width less beside the Workbar (see
+   * workbarSplit).
+   */
+  conversationWidth() {
+    const { sidebar, workbar } = this.layout();
+    const split = this.workbarSplit(sidebar, SPLIT_GAP);
+    return workbar === 'beside' ? split.shared - split.workbar - 2 * SPLIT_GAP : split.shared;
+  }
+
+  /**
    * Whether the conversation's plate can be narrower than CONVERSATION_MIN:
    * beside the Workbar in a narrow window (see workbarSplit).
    */
@@ -990,7 +1001,15 @@ export default class MakaDesktop extends View {
       .when(finding, (el) => el.child(findBar(this.find, cx)))
       .when(transcript === null, (el) => el.child(view.empty))
       .when(transcript !== null, (el) =>
-        el.child(transcriptPane(transcript, () => transcript.loadOlder(), cx, view.hint)),
+        el.child(
+          transcriptPane(
+            transcript,
+            () => transcript.loadOlder(),
+            cx,
+            view.hint,
+            this.conversationWidth(),
+          ),
+        ),
       )
       .when(card !== null, (el) => el.child(card))
       .when(failed !== null, (el) => el.child(this.failedBar(transcript, failed, cx)))
