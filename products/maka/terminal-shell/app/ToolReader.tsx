@@ -85,6 +85,7 @@ function ToolText(props: {
   text: string;
   copyLabel: string;
   source: ToolSource;
+  userScroll(): void;
   gutter?: string;
   tone?: 'added' | 'removed' | 'warning';
 }) {
@@ -112,7 +113,11 @@ function ToolText(props: {
         </Text>
         <Copy label={props.copyLabel} text={() => props.text} source={props.source} />
       </View>
-      <Scroll horizontal contentStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+      <Scroll
+        horizontal
+        onScrollIntent={props.userScroll}
+        contentStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}
+      >
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
           <If when={props.gutter !== undefined}>
             <Text
@@ -144,7 +149,7 @@ function ToolText(props: {
   );
 }
 
-function Read(props: { value: ToolRead; source: ToolSource }) {
+function Read(props: { value: ToolRead; source: ToolSource; userScroll(): void }) {
   const value = props.value;
   const lines = value.content.split('\n');
   if (lines.at(-1) === '') lines.pop();
@@ -165,6 +170,7 @@ function Read(props: { value: ToolRead; source: ToolSource }) {
         gutter={gutter}
         copyLabel={tr('Copy read contents')}
         source={props.source}
+        userScroll={props.userScroll}
       />
       <If when={value.partialLine}>
         <Text style={{ ...captionTextStyle, color: C.warning }}>
@@ -180,7 +186,7 @@ function Read(props: { value: ToolRead; source: ToolSource }) {
   );
 }
 
-function Process(props: { value: ToolProcess; source: ToolSource }) {
+function Process(props: { value: ToolProcess; source: ToolSource; userScroll(): void }) {
   const value = props.value;
   const label = () =>
     ({
@@ -218,6 +224,7 @@ function Process(props: { value: ToolProcess; source: ToolSource }) {
         text={value.command}
         copyLabel={tr('Copy recorded command')}
         source={props.source}
+        userScroll={props.userScroll}
       />
       <Text selectable style={{ ...captionTextStyle, color: C.muted }}>
         {tr('Working directory')} · {value.cwd}
@@ -239,12 +246,14 @@ function Process(props: { value: ToolProcess; source: ToolSource }) {
             text={output.stdout}
             copyLabel={tr('Copy stdout')}
             source={props.source}
+            userScroll={props.userScroll}
           />
           <ToolText
             label="stderr"
             text={output.stderr}
             copyLabel={tr('Copy stderr')}
             source={props.source}
+            userScroll={props.userScroll}
             tone="warning"
           />
           <If when={output.stdoutTruncated || output.stderrTruncated}>
@@ -260,12 +269,14 @@ function Process(props: { value: ToolProcess; source: ToolSource }) {
             text={output.scrollback}
             copyLabel={tr('Copy terminal scrollback')}
             source={props.source}
+            userScroll={props.userScroll}
           />
           <ToolText
             label={tr('Terminal screen')}
             text={output.screen}
             copyLabel={tr('Copy terminal screen')}
             source={props.source}
+            userScroll={props.userScroll}
           />
           <If when={output.lastAlternateScreen !== null}>
             <ToolText
@@ -273,6 +284,7 @@ function Process(props: { value: ToolProcess; source: ToolSource }) {
               text={output.lastAlternateScreen!}
               copyLabel={tr('Copy last alternate screen')}
               source={props.source}
+              userScroll={props.userScroll}
             />
           </If>
           <If when={output.truncated}>
@@ -291,7 +303,7 @@ function Process(props: { value: ToolProcess; source: ToolSource }) {
   );
 }
 
-function Change(props: { value: ToolChange; source: ToolSource }) {
+function Change(props: { value: ToolChange; source: ToolSource; userScroll(): void }) {
   const value = props.value;
   if (value.phase === 'requested')
     return (
@@ -307,6 +319,7 @@ function Change(props: { value: ToolChange; source: ToolSource }) {
             copyLabel={tr('Copy requested file contents')}
             tone="added"
             source={props.source}
+            userScroll={props.userScroll}
           />
         ) : value.operation === 'edit' ? (
           <View style={{ gap: 8 }}>
@@ -316,6 +329,7 @@ function Change(props: { value: ToolChange; source: ToolSource }) {
               copyLabel={tr('Copy requested removal')}
               tone="removed"
               source={props.source}
+              userScroll={props.userScroll}
             />
             <ToolText
               label={tr('Requested replacement')}
@@ -323,6 +337,7 @@ function Change(props: { value: ToolChange; source: ToolSource }) {
               copyLabel={tr('Copy requested replacement')}
               tone="added"
               source={props.source}
+              userScroll={props.userScroll}
             />
           </View>
         ) : (
@@ -336,6 +351,7 @@ function Change(props: { value: ToolChange; source: ToolSource }) {
                 text={value.diff!}
                 copyLabel={tr('Copy requested patch')}
                 source={props.source}
+                userScroll={props.userScroll}
               />
             </If>
           </View>
@@ -379,6 +395,7 @@ function Change(props: { value: ToolChange; source: ToolSource }) {
               text={value.previous!}
               copyLabel={tr('Copy recorded previous contents')}
               source={props.source}
+              userScroll={props.userScroll}
               tone="removed"
             />
           </If>
@@ -445,15 +462,15 @@ function Sections(props: { items: ToolSection[] }) {
   );
 }
 
-export function ToolReader(props: { value: ToolProjection; source: ToolSource }) {
+export function ToolReader(props: { value: ToolProjection; source: ToolSource; userScroll(): void }) {
   const value = props.value;
   switch (value.kind) {
     case 'read':
-      return <Read value={value.value} source={props.source} />;
+      return <Read value={value.value} source={props.source} userScroll={props.userScroll} />;
     case 'process':
-      return <Process value={value.value} source={props.source} />;
+      return <Process value={value.value} source={props.source} userScroll={props.userScroll} />;
     case 'change':
-      return <Change value={value.value} source={props.source} />;
+      return <Change value={value.value} source={props.source} userScroll={props.userScroll} />;
     case 'sections':
       return (
         <Sections items={(props.value as Extract<ToolProjection, { kind: 'sections' }>).sections} />

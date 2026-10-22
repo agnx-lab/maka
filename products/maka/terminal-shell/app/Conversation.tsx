@@ -80,6 +80,8 @@ import {
   type DraftAttachment,
 } from './attachmentDraft';
 
+type HistoryNavigation = { kind: 'start' } | { kind: 'turn'; item: TurnNavigationItem };
+
 export type Control = (method: string, input: any) => Promise<any>;
 export type ConversationHandle = ComposerSession & {
   interactions(): AgentPendingInteractions;
@@ -180,7 +182,11 @@ export function Conversation(props: ConversationProps) {
   });
   const awayFromLatest = signal(false);
   const visibleTurn = signal<string | null>(null);
-  const navigatingTurn = signal<string | null>(null);
+  const navigation = signal<HistoryNavigation | null>(null);
+  const navigatingTurn = computed(() => {
+    const target = navigation();
+    return target?.kind === 'turn' ? target.item.turnId : null;
+  });
   const attachmentMetadataFailed = signal(false);
   const attachmentMetadataReads = new Set<string>();
   const draft = signal('');
@@ -408,7 +414,6 @@ export function Conversation(props: ConversationProps) {
   let followAgain = false;
   let olderTask: Promise<boolean> | null = null;
   let landmarksReadingThrough = -1;
-  let turnJump: TurnNavigationItem | null = null;
   let draftRevision = 0;
   let editEpoch = 0;
   let pendingDraft: (AttachmentEdit & { text: string }) | null = null;
@@ -925,7 +930,7 @@ export function Conversation(props: ConversationProps) {
     else if (transcriptTask === null) startTranscript();
   };
 
-  // Automatic paging and an explicit Turn jump await the same native-history read.
+  // Automatic paging, Home and Turn jumps await the same native-history read.
   const loadOlder = (): Promise<boolean> => {
     if (olderTask) return olderTask;
     if (!alive || !ready() || before() === null) return Promise.resolve(false);
@@ -956,27 +961,61 @@ export function Conversation(props: ConversationProps) {
       });
     return olderTask;
   };
-  const cancelTurnNavigation = (turnId = navigatingTurn()) => {
+  const cancelNavigation = (turnId = navigatingTurn()) => {
     if (!alive || turnId !== navigatingTurn()) return;
-    turnJump = null;
-    navigatingTurn.set(null);
+    navigation.set(null);
+  };
+  const navigateStart = async () => {
+    if (!alive || !ready()) return;
+    const target: HistoryNavigation = { kind: 'start' };
+    navigation.set(target);
+    innerReader.set(null);
+    awayFromLatest.set(true);
+    try {
+      while (alive && navigation() === target && before() !== null) {
+        const previous = before();
+        if (!(await loadOlder())) return;
+        if (!alive || navigation() !== target) return;
+        if (
+          before() !== null &&
+          comparePosition(before().position, previous.position) === 0 &&
+          before().field === previous.field &&
+          before().offset === previous.offset
+        ) {
+          notice.set(
+            uiMessage('Older history did not advance. The beginning could not be reached.'),
+          );
+          return;
+        }
+      }
+      if (!alive || navigation() !== target) return;
+      const first = displayKeys()[0];
+      if (first !== undefined)
+        list?.scrollToIndex({
+          index: displayKeys().indexOf(first),
+          viewPosition: 0,
+          animated: false,
+        });
+    } finally {
+      if (navigation() === target) navigation.set(null);
+    }
   };
   const navigateTurn = async (item: TurnNavigationItem) => {
     if (!alive || !ready()) return;
-    turnJump = item;
-    navigatingTurn.set(item.turnId);
+    const target: HistoryNavigation = { kind: 'turn', item };
+    navigation.set(target);
     innerReader.set(null);
     try {
       if (item.anchor.kind === 'landmark') {
-        const target = item.anchor;
+        const landmark = item.anchor;
         // The raw Turn opening may itself be omitted from conversation history.
         // Load past that boundary, then choose a real display seat in its bounds.
         while (
           alive &&
-          turnJump === item &&
+          navigation() === target &&
           before() !== null &&
-          (comparePosition(before().position, target.position) > 0 ||
-            (comparePosition(before().position, target.position) === 0 && before().offset > 0))
+          (comparePosition(before().position, landmark.position) > 0 ||
+            (comparePosition(before().position, landmark.position) === 0 && before().offset > 0))
         ) {
           const previous = before();
           if (!(await loadOlder())) return;
@@ -991,7 +1030,7 @@ export function Conversation(props: ConversationProps) {
           }
         }
       }
-      if (!alive || turnJump !== item) return;
+      if (!alive || navigation() !== target) return;
       const targetRows = new Set(
         rows()
           .filter(
@@ -1023,7 +1062,7 @@ export function Conversation(props: ConversationProps) {
       list?.scrollToIndex({ index, viewPosition: 0 });
       list?.focus();
     } finally {
-      if (turnJump === item) cancelTurnNavigation();
+      if (navigation() === target) cancelNavigation();
     }
   };
 
@@ -1232,7 +1271,7 @@ export function Conversation(props: ConversationProps) {
           : '',
     );
     if (accepted.kind === 'queued') return;
-    cancelTurnNavigation();
+    cancelNavigation();
     awayFromLatest.set(false);
     innerReader.set(null);
     list?.scrollToEnd({ animated: false });
@@ -1397,7 +1436,7 @@ export function Conversation(props: ConversationProps) {
   };
   const chooseReading = ({ owner, mode }: { owner: string; mode: 'chat' | 'trajectory' }) => {
     if (alive && owner === sessionId) {
-      cancelTurnNavigation();
+      cancelNavigation();
       reading.set(mode);
     }
   };
@@ -1489,14 +1528,15 @@ export function Conversation(props: ConversationProps) {
       return !savingFailed();
     },
     focus() {
+      cancelNavigation();
       props.focusComposer();
     },
     focusHistory() {
-      cancelTurnNavigation();
+      cancelNavigation();
       list?.focus();
     },
     focusActivity(turnId) {
-      cancelTurnNavigation();
+      cancelNavigation();
       const group = projection().entries.findLast(
         (entry) => entry.kind === 'process' && entry.turnId === turnId,
       );
@@ -1534,7 +1574,7 @@ export function Conversation(props: ConversationProps) {
     },
     jumpLatest(turnId) {
       if (!alive) return;
-      cancelTurnNavigation();
+      cancelNavigation();
       awayFromLatest.set(false);
       const targetTurn = turnId ?? runTurn();
       const group = projection().entries.findLast(
@@ -1557,7 +1597,7 @@ export function Conversation(props: ConversationProps) {
 
   cleanup(() => {
     alive = false;
-    turnJump = null;
+    navigation.set(null);
     wakeReconnect?.();
     modelGeneration += 1;
     modelRead = null;
@@ -1717,7 +1757,11 @@ export function Conversation(props: ConversationProps) {
             ref={list}
             onLayout={(frame) => readingSize.set(frame.size)}
             each={displayKeys()}
-            onScrollDragStart={() => cancelTurnNavigation()}
+            onScrollIntent={(event) => {
+              if (event.intent === 'start') void navigateStart().catch(report);
+              else cancelNavigation();
+            }}
+            onBlur={() => cancelNavigation()}
             onViewableItemsChange={(event) =>
               visibleTurn.set(entryTurn(event.viewableItems[0]?.item ?? ''))
             }
@@ -1810,6 +1854,7 @@ export function Conversation(props: ConversationProps) {
                         through={() => latestKnown}
                         previewImage={props.previewImage}
                         openLink={props.openLink}
+                        userScroll={() => cancelNavigation()}
                         reveal={reveal}
                         activity={activity}
                         viewport={readingSize}
@@ -1843,6 +1888,7 @@ export function Conversation(props: ConversationProps) {
                         through={() => latestKnown}
                         previewImage={props.previewImage}
                         openLink={props.openLink}
+                        userScroll={() => cancelNavigation()}
                         onExpand={reveal}
                         onToolReading={(key) => {
                           if (
@@ -1878,7 +1924,7 @@ export function Conversation(props: ConversationProps) {
               navigate={(item) => {
                 void navigateTurn(item).catch(report);
               }}
-              cancel={inputAction(cancelTurnNavigation, navigatingTurn())}
+              cancel={inputAction(cancelNavigation, navigatingTurn())}
             />
           </If>
           <ReturnToLatest

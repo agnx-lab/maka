@@ -176,6 +176,7 @@ function ActivityLog(props: {
   viewport: () => { width: number; height: number };
   previewImage(image: ImagePreview): void;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+  userScroll(): void;
   reading(away: boolean): void;
   reveal(): void;
 }) {
@@ -260,6 +261,7 @@ function ActivityLog(props: {
             state.following() ? { autoscrollToBottomThreshold: 16 } : {}
           }
           scrollbar={true}
+          onScrollIntent={props.userScroll}
           onScroll={(event) => {
             if (!alive || lease !== state.lease) return;
             const away =
@@ -352,6 +354,7 @@ function ActivityLog(props: {
                       through={props.through}
                       previewImage={props.previewImage}
                       openLink={props.openLink}
+                      userScroll={props.userScroll}
                       onExpand={(key) => {
                         if (!alive || !ownList) return;
                         state.following.set(false);
@@ -394,6 +397,7 @@ export function TurnPanel(props: {
   reveal(): void;
   previewImage(image: ImagePreview): void;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+  userScroll(): void;
   reading(away: boolean): void;
 }) {
   const active = () =>

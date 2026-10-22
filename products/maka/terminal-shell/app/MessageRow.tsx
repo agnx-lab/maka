@@ -48,6 +48,7 @@ export function MessageRow({
   viewState,
   previewImage,
   openLink,
+  userScroll,
   onExpand,
   ownerKey,
   toolMaxHeight,
@@ -60,6 +61,7 @@ export function MessageRow({
   viewState?: MessageViewState;
   previewImage(image: ImagePreview): void;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+  userScroll(): void;
   onExpand?(key: string): void;
   ownerKey?: () => string;
   toolMaxHeight: () => number;
@@ -285,6 +287,7 @@ export function MessageRow({
                         if (expanded()) onToolReading?.(rowKey(row()));
                       }}
                       previewImage={previewImage}
+                      userScroll={userScroll}
                       expand={setExpanded}
                       showOriginal={setSourceMode}
                     />

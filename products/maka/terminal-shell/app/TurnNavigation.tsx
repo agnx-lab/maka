@@ -224,6 +224,7 @@ export function TurnNavigation(props: {
           estimatedItemSize={markPitch}
           scrollbar={false}
           contentStyle={{ paddingVertical: railInset }}
+          onScrollIntent={() => props.cancel()}
           onScroll={(event) => offset.set(event.offset.y)}
           style={{ flex: 1, minHeight: 0 }}
         >

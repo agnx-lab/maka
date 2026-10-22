@@ -1277,7 +1277,7 @@ pub struct ReplyGate {
 }
 impl ReplyGate {
     pub fn start(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "send", "mutation", false)
+        Self::for_method(directory, target, "send", "mutation", false, None)
     }
     pub fn global_instructions(directory: &Path, target: PathBuf) -> Self {
         Self::for_method(
@@ -1286,25 +1286,36 @@ impl ReplyGate {
             "updateGlobalInstructions",
             "mutation",
             false,
+            None,
         )
     }
     pub fn directories(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "directories", "finished", false)
+        Self::for_method(directory, target, "directories", "finished", false, None)
     }
     pub fn respond(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "respond", "mutation", false)
+        Self::for_method(directory, target, "respond", "mutation", false, None)
     }
     #[cfg(unix)]
     pub fn history(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "history", "finished", false)
+        Self::for_method(directory, target, "history", "finished", false, None)
     }
     #[cfg(unix)]
     pub fn disconnect_history(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "history", "finished", true)
+        Self::for_method(directory, target, "history", "finished", true, None)
     }
     #[cfg(unix)]
     pub fn disconnect_watch(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "watch", "item", true)
+        Self::for_method(directory, target, "watch", "item", true, None)
+    }
+    pub fn before_history(directory: &Path, target: PathBuf, cursor: Value) -> Self {
+        Self::for_method(
+            directory,
+            target,
+            "history",
+            "finished",
+            false,
+            Some(cursor),
+        )
     }
     fn for_method(
         directory: &Path,
@@ -1312,6 +1323,7 @@ impl ReplyGate {
         method: &'static str,
         reply: &'static str,
         disconnect: bool,
+        before: Option<Value>,
     ) -> Self {
         let address = socket(directory, &format!("gate-{method}-{disconnect}"));
         let mut listener = LocalListener::bind(&address).unwrap();
@@ -1328,13 +1340,13 @@ impl ReplyGate {
                     tokio::select! {
                         accepted=listener.accept()=> {
                             let downstream=accepted.unwrap(); let upstream=ipc::connect(&target).await.unwrap();
-                            let armed=armed.clone(); let held=held.clone(); let release=release.clone();
+                            let armed=armed.clone(); let held=held.clone(); let release=release.clone(); let before=before.clone();
                             connections.spawn(async move {
                                 let (down_read,mut down_write)=tokio::io::split(downstream);
                                 let (up_read,mut up_write)=tokio::io::split(upstream);
                                 let selected=Arc::new(AtomicBool::new(false)); let mark=selected.clone();
                                 let up=async move {let mut reader=wire::Reader::new(down_read); while let Ok(value)=reader.read::<Value>().await {
-                                    if value["endpoint"]=="agent" && value["method"]==method {mark.store(true,Ordering::SeqCst);}
+                                    if value["endpoint"]=="agent" && value["method"]==method && before.as_ref().is_none_or(|cursor| value["input"]["position"]["kind"]=="before" && value["input"]["position"]["cursor"]==*cursor) {mark.store(true,Ordering::SeqCst);}
                                     if wire::write(&mut up_write,&value).await.is_err(){break;}
                                 }
                                 let _ = up_write.shutdown().await;

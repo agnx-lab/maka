@@ -563,6 +563,11 @@ export const conversationMessages = {
   ],
   'Not completed': ['Not completed', '未完成', '未完成'],
   'Observation stopped': ['Observation stopped', '更新已停止', '更新已停止'],
+  'Older history did not advance. The beginning could not be reached.': [
+    'Older history did not advance. The beginning could not be reached.',
+    '无法继续读取更早的历史，未能定位到对话开头。',
+    '無法繼續讀取更早的歷史，未能定位到對話開頭。',
+  ],
   'Older history did not advance. This turn could not be reached.': [
     'Older history did not advance. This turn could not be reached.',
     '无法继续读取更早的历史，未能定位到本轮。',

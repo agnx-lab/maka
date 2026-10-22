@@ -1790,6 +1790,27 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
+    async fn commit_native_events(view: &AppView) {
+        let (done, committed) = tokio::sync::oneshot::channel();
+        view.control()
+            .unwrap()
+            .advance_clock(Duration::ZERO, move || {
+                let _ = done.send(());
+            });
+        committed.await.unwrap();
+    }
+    async fn focus_history(view: &mut AppView) {
+        let composer = view.surface().focused();
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)));
+        commit_native_events(view).await;
+        wait_view_state(view, |view, _| {
+            view.surface().focused().is_some()
+                && view.surface().focused() != composer
+                && view.surface().input_context().is_none()
+                && !view.surface().animating()
+        })
+        .await;
+    }
     tokio::time::timeout(Duration::from_secs(120), async {
         let mut fixture = Fixture::open().await;
         fixture.seed_history(16).await;
@@ -1797,6 +1818,92 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let tail = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         assert!(!tail["before"].is_null(), "the original history must exceed one page");
+
+        // One physical Home must reach the canonical beginning, including pages
+        // which this fresh mount has never loaded. Keep its unsent draft intact.
+        const HOME_DRAFT: &str = "HISTORY_HOME_UNSENT_你好";
+        let home_client = fixture.client().await;
+        let (mut home, home_bindings) = fixture.view(home_client.clone(), Some(fixture.session.clone()));
+        wait_editable_composer(&mut home).await;
+        home.handle_event(Event::Paste(HOME_DRAFT.into()));
+        support::wait_draft(&home_client, &fixture.session, HOME_DRAFT).await;
+        wait_view(&mut home, |screen| screen.contains("History 15 paragraph")).await;
+        focus_history(&mut home).await;
+        home.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL)));
+        let beginning = wait_view(&mut home, |screen| screen.contains("History question 00") && screen.contains("History 00 paragraph 00")).await;
+        assert!(beginning.lines().position(|line| line.contains("History question 00"))
+            < beginning.lines().position(|line| line.contains("History 00 paragraph 00")));
+        assert!(!beginning.contains("Load earlier messages"));
+        support::wait_draft(&home_client, &fixture.session, HOME_DRAFT).await;
+        evidence("history-home-canonical-beginning", &beginning);
+        drop(home);
+        home_bindings.close().await.unwrap();
+
+        // Identify the actual final page using the same immutable Host fence.
+        // The gate withholds that real reply, not a fabricated history result.
+        let mut final_cursor = tail["before"].clone();
+        let final_page = loop {
+            let page = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"before","cursor":final_cursor},"view":"conversation"})).await.unwrap();
+            if page["before"].is_null() { break page; }
+            final_cursor = page["before"].clone();
+        };
+        let boundary = final_page["chunks"].as_array().unwrap().iter().rev()
+            .find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
+        let added = boundary["text"].as_str().unwrap();
+        let boundary_turn = (0..16).find(|turn| added.contains(&format!("History {turn:02} paragraph 00"))).unwrap();
+        let added_marker = format!("History {boundary_turn:02} paragraph 00");
+        let wheel_marker = format!("History {:02} paragraph 01", boundary_turn + 1);
+        let gate = ReplyGate::before_history(fixture.directory.path(), fixture.address.clone(), final_cursor);
+        let cancel_client = fixture.client_at(&gate.address).await;
+        let (mut cancelled, cancel_bindings) = fixture.view(cancel_client.clone(), Some(fixture.session.clone()));
+        wait_editable_composer(&mut cancelled).await;
+        assert_eq!(cancelled.surface().input_context().unwrap().text.as_deref(), Some(HOME_DRAFT));
+        wait_view(&mut cancelled, |screen| screen.contains("History 15 paragraph")).await;
+        assert!(!cancelled.accessibility_snapshot().iter().any(|node| node.label.contains(&added_marker)));
+        gate.arm();
+        focus_history(&mut cancelled).await;
+        cancelled.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL)));
+        gate.held.notified().await;
+        // Repeating Home moves to the now-loaded prefix while joining the same
+        // held older read. A wheel then owns the viewport, even at this boundary.
+        cancelled.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL)));
+        commit_native_events(&cancelled).await;
+        let local_start = wait_view_state(&mut cancelled, |view, screen| !view.surface().animating() && screen.contains("History ")).await;
+        support::scroll_snapshot_text(&mut cancelled, &local_start, "History ", MouseEventKind::ScrollDown);
+        let scrolling = std::time::Instant::now();
+        loop {
+            support::tick(&mut cancelled);
+            let screen = cancelled.snapshot();
+            if screen.contains(&wheel_marker) { break; }
+            assert!(scrolling.elapsed() < Duration::from_secs(20), "the cancelling wheel did not reach its adjacent complete row:\n{screen}");
+            support::scroll_snapshot_text(&mut cancelled, &screen, "History ", MouseEventKind::ScrollDown);
+            tokio::task::yield_now().await;
+        }
+        commit_native_events(&cancelled).await;
+        let wheel = wait_view_state(&mut cancelled, |view, screen| !view.surface().animating() && screen.contains(&wheel_marker)).await;
+        let wheel_row = wheel.lines().position(|line| line.contains(&wheel_marker)).unwrap();
+        assert!(!cancelled.accessibility_snapshot().iter().any(|node| node.label.contains(&added_marker)));
+        gate.release();
+        // AX includes mounted overscan. This newly prepended paragraph proves
+        // the final reply and all its promise continuations reached a real
+        // native commit; a wire write alone would not provide that barrier.
+        let retained = wait_view_state(&mut cancelled, |view, _| view.accessibility_snapshot().iter().any(|node| node.label.contains(&added_marker))).await;
+        assert_eq!(retained.lines().position(|line| line.contains(&wheel_marker)), Some(wheel_row), "a completed, cancelled Home moved the user's wheel anchor:\n{retained}");
+        assert!(!retained.contains("History question 00"), "the cancelled Home snapped to canonical start:\n{retained}");
+        support::wait_draft(&cancel_client, &fixture.session, HOME_DRAFT).await;
+        assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["through"], observed["through"], "history navigation must not change the Host range");
+        evidence("history-home-wheel-cancels-late-reply", &retained);
+        shortcut(&mut cancelled, 'l');
+        wait_editable_composer(&mut cancelled).await;
+        cancelled.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)));
+        cancelled.handle_event(Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
+        support::wait_draft(&cancel_client, &fixture.session, "").await;
+        drop(cancelled);
+        cancel_bindings.close().await.unwrap();
+        drop(gate);
+
+        // A fresh tail mount retains the original wheel-across-unloaded-pages
+        // coverage independently of the full-history Home checks above.
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
         wait_editable_composer(&mut view).await;
         let history = wait_view(&mut view, |screen| screen.contains("History 15 paragraph")).await;

@@ -147,6 +147,7 @@ function Field(props: {
   sessionId: string;
   through: number;
   original(): boolean;
+  userScroll(): void;
 }) {
   const source = createToolSource(props.reference, props.sessionId, props.through);
   const family = cardFamily(source.original.presentation);
@@ -167,7 +168,7 @@ function Field(props: {
         />
       }
     >
-      <ToolReader value={projection()!} source={source} />
+      <ToolReader value={projection()!} source={source} userScroll={props.userScroll} />
     </If>
   );
 }
@@ -184,6 +185,7 @@ export function ToolCard(props: {
   expand(action: { sessionId: string; key: string; value: boolean }): void;
   showOriginal(action: { sessionId: string; key: string; value: boolean }): void;
   previewImage(image: ImagePreview): void;
+  userScroll(): void;
 }) {
   const tool = (): HistoryTool | null => props.row().tool ?? null;
   const family = () => cardFamily(tool()?.call?.presentation);
@@ -334,6 +336,7 @@ export function ToolCard(props: {
         <View style={{ paddingLeft: 16 }}>
           <Scroll
             accessibilityLabel={tr('Tool details')}
+            onScrollIntent={props.userScroll}
             onScroll={() => props.reading?.()}
             style={{
               minHeight: 16,
@@ -357,6 +360,7 @@ export function ToolCard(props: {
                   sessionId={props.sessionId}
                   through={props.row().metadataThrough ?? props.through()}
                   original={props.original}
+                  userScroll={props.userScroll}
                 />
               )}
             </Each>
