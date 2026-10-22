@@ -342,7 +342,7 @@ SELECT json_object(
     END)) AS projected, invocation_id AS owner, sequence
 FROM runtime_events
 WHERE sequence > ?2 AND sequence <= ?3
-AND json_extract(event_json, '$.invocation.session_id') = ?1
+AND (event_json IS NOT NULL AND event_session=?1)
 AND (kind IN ('invocation_ended', 'model_requested', 'model_completed', 'model_interrupted', 'context_checkpoint_recorded') OR NOT EXISTS (
     SELECT 1 FROM runtime_events opening
     WHERE opening.invocation_id = runtime_events.invocation_id

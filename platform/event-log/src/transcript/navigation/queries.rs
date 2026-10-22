@@ -21,7 +21,7 @@ pub(super) const FENCE: &str = "
 SELECT MAX(sequence) FROM (
  SELECT MAX(event.sequence) AS sequence FROM runtime_events event
  JOIN runtime_events opening ON opening.invocation_id = event.invocation_id AND opening.kind = 'invocation_opened'
- WHERE json_extract(event.event_json, '$.invocation.session_id') = ?1
+ WHERE (event.event_json IS NOT NULL AND event.event_session=?1)
  AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
  UNION ALL
  SELECT MAX(h.sequence) FROM session_history_members h
@@ -38,13 +38,20 @@ AND (row.source_sequence,row.item_index)>=(COALESCE(?3,1),COALESCE(?4,0))
 ORDER BY row.source_sequence,row.item_index LIMIT 257";
 
 pub(super) const LANDMARKS: &str = "
-WITH openings AS (
- SELECT opening.invocation_id, opening.sequence,
- ROW_NUMBER() OVER (PARTITION BY json_extract(opening.event_json, '$.invocation.turn_id') ORDER BY opening.sequence) AS first
- FROM session_history_events opening
- WHERE opening.owner_session_id = ?1
- AND opening.kind = 'invocation_opened' AND opening.sequence <= ?2
- AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
+WITH sources AS (
+ SELECT opening.invocation_id,opening.sequence,json_extract(opening.event_json,'$.invocation.turn_id') AS turn_id
+ FROM runtime_events opening
+ WHERE json_extract(opening.event_json,'$.invocation.session_id')=?1
+ AND opening.kind='invocation_opened' AND opening.sequence<=?2
+ AND json_extract(opening.event_json,'$.fact.input.kind') IN ('message','continuation')
+ UNION ALL
+ SELECT opening.invocation_id,opening.sequence,json_extract(opening.event_json,'$.invocation.turn_id')
+ FROM session_history_members h JOIN runtime_events opening ON opening.sequence=h.sequence
+ WHERE h.session_id=?1 AND h.sequence<=?2 AND opening.kind='invocation_opened'
+ AND json_extract(opening.event_json,'$.fact.input.kind') IN ('message','continuation')
+), openings AS (
+ SELECT invocation_id,sequence,ROW_NUMBER() OVER (PARTITION BY turn_id ORDER BY sequence) AS first
+ FROM sources
 ), candidates AS (
  SELECT invocation_id, sequence, ROW_NUMBER() OVER (ORDER BY sequence) - 1 AS rank, COUNT(*) OVER () AS total
  FROM openings WHERE first = 1

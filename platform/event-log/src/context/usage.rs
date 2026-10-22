@@ -161,7 +161,7 @@ async fn additions(
     // Legacy interrupted fragments are discarded; marked retained progress
     // was handled above. Completed Main output is already in newest usage.
     const FILTER: &str = "
-        e.sequence > ?1 AND json_extract(e.event_json,'$.invocation.session_id')=?2
+        e.sequence > ?1 AND (e.event_json IS NOT NULL AND e.event_session=?2)
         AND e.kind IN ('invocation_opened','message_steered','model_requested',
             'model_observed','executor_completed','tool_settled','tool_rejected','tool_notified',
             'context_checkpoint_recorded','tool_result_archived')

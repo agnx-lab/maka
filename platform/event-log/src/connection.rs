@@ -53,6 +53,7 @@ type ReadJob = Box<
 >;
 enum Command {
     Run(Job),
+    Observations(crate::append::observations::Request),
     Shutdown,
 }
 
@@ -77,6 +78,29 @@ pub(crate) struct WriterIngress {
 }
 
 impl WriterIngress {
+    pub(crate) async fn observations(
+        &self,
+        events: Vec<maka_agent_facts::event::EventWrite>,
+        commits: watch::Sender<u64>,
+    ) -> Result<Vec<u64>, maka_agent_facts::event::CommitError> {
+        use maka_agent_facts::event::CommitError;
+        let (reply, result) = oneshot::channel();
+        self.jobs
+            .send(Command::Observations(
+                crate::append::observations::Request::new(
+                    events,
+                    commits,
+                    reply,
+                    self.failures.clone(),
+                ),
+            ))
+            .await
+            .map_err(|_| CommitError::Rejected(StoreError::ConnectionClosed.to_string()))?;
+        result
+            .await
+            .map_err(|_| CommitError::OutcomeUnknown(StoreError::OperationUnknown.to_string()))?
+    }
+
     pub(crate) fn failures(&self) -> u64 {
         self.failures.load(Ordering::Acquire)
     }
@@ -171,21 +195,47 @@ impl OwnedConnection {
                     .unwrap_or(Err(StoreError::OperationUnknown));
                     let success = initialized.is_ok();
                     // If open's waiter disappeared, close without accepting work.
+                    let mut pending = None;
                     if ready.send(initialized).is_ok() && success {
-                        while let Some(command) = runtime.block_on(receiver.recv()) {
-                            let job = match command {
-                                Command::Run(job) => job,
-                                Command::Shutdown => {
-                                    // Reject new sends, then drain every accepted job.
-                                    receiver.close();
-                                    continue;
-                                }
-                            };
-                            let executed = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                runtime.block_on(job(&mut connection, validate()))
-                            }));
-                            if executed.is_err() {
-                                // An unwound connection cannot accept further jobs.
+                        while let Some(command) =
+                            pending.take().or_else(|| runtime.block_on(receiver.recv()))
+                        {
+                            let executed =
+                                std::panic::catch_unwind(AssertUnwindSafe(|| match command {
+                                    Command::Run(job) => {
+                                        runtime.block_on(job(&mut connection, validate()));
+                                        true
+                                    }
+                                    Command::Observations(first) => {
+                                        // Only the already queued adjacent prefix shares a commit.
+                                        // Keep a control boundary locally, ahead of later ingress.
+                                        let mut group = vec![first];
+                                        while group.len() < 32 {
+                                            match receiver.try_recv() {
+                                                Ok(Command::Observations(request)) => {
+                                                    group.push(request)
+                                                }
+                                                Ok(boundary) => {
+                                                    pending = Some(boundary);
+                                                    break;
+                                                }
+                                                Err(_) => break,
+                                            }
+                                        }
+                                        runtime.block_on(crate::append::observations::commit(
+                                            &mut connection,
+                                            group,
+                                            &validate,
+                                        ))
+                                    }
+                                    Command::Shutdown => {
+                                        // Reject new sends, then drain every accepted job.
+                                        receiver.close();
+                                        true
+                                    }
+                                }));
+                            if !matches!(executed, Ok(true)) {
+                                // Neither an unwound nor uncertain transaction may be reused.
                                 break;
                             }
                             match runtime.block_on(
@@ -209,6 +259,8 @@ impl OwnedConnection {
                     // queued work, including sends holding an earlier capacity permit,
                     // before joining readers. None also accounts for those permits.
                     receiver.close();
+                    queued_drop_panicked |=
+                        std::panic::catch_unwind(AssertUnwindSafe(|| drop(pending))).is_err();
                     while let Some(command) = runtime.block_on(receiver.recv()) {
                         queued_drop_panicked |=
                             std::panic::catch_unwind(AssertUnwindSafe(|| drop(command))).is_err();
