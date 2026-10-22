@@ -551,14 +551,15 @@ mod tests {
             "a completed stale result releases only its own slot"
         );
         assert!(inbox.reserve_frame());
-        assert!(
-            !inbox.can_submit(),
-            "new geometry needs its own whole flush"
-        );
-        inbox.release_reservation();
         for _ in 0..4 {
             inbox.finished(&token, None);
         }
+        assert_eq!(inbox.frames.len(), 1);
+        assert!(
+            !inbox.can_submit(),
+            "new geometry needs its own whole flush even with spare capacity"
+        );
+        inbox.release_reservation();
         assert!(inbox.frames.is_empty());
         assert!(inbox.can_submit());
         assert_eq!(inbox.last_fully_written_geometry, Some(1));
