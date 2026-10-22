@@ -2454,7 +2454,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         assert!(view.accessibility_snapshot().iter().any(|node| node.label == captured_version));
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse files"));
         view.resize(120, 40);
-        wait_view(&mut view, |screen| screen.contains("64 × 48 · Captured image") && screen.contains("UNSENT_PREVIEW_DRAFT")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("64 × 48 · Captured image") && screen.contains("UNSENT_PREVIEW_DRAFT") && view.accessibility_snapshot().iter().any(|node| node.label == "Resize workspace preview")).await;
         support::click_button(&mut view, "Close workspace preview").await;
         wait_view_state(&mut view, |view, screen| !screen.contains("Captured image") && !view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close workspace preview")).await;
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse workspace files"));
