@@ -9898,18 +9898,30 @@ dependencies = [
 name = "maka-product-native"
 version = "0.2.0"
 dependencies = [
+ "futures-util",
  "maka-acp-native",
  "maka-agent-native",
+ "maka-agent-ports",
+ "maka-capabilities",
  "maka-computer-native",
+ "maka-config",
+ "maka-event-log",
  "maka-files-native",
  "maka-host-runtime",
  "maka-interactions-native",
  "maka-jev-native",
+ "maka-model",
+ "maka-network",
  "maka-processes-native",
+ "maka-providers",
  "maka-settings-native",
  "maka-skills-native",
  "maka-ui-authoring",
  "maka-web",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

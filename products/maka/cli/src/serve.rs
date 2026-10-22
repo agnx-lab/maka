@@ -89,8 +89,17 @@ pub(super) async fn run(
                 crate::application::Roots::Configured(deployment.project_directory_roots.clone())
             })
             .unwrap_or(crate::application::Roots::Saved),
+        None,
     )
     .await?;
+    serve_product(host, websocket).await
+}
+async fn serve_product(
+    mut product: crate::application::ProductHost,
+    websocket: Option<WebSocketListener>,
+) -> Result<(), HostError> {
+    let result = async {
+    let host = &product.host;
     let endpoint = super::endpoint::LocalEndpoint::bind()?;
     let cancellation = CancellationToken::new();
     let _signals = super::signals::watch(cancellation.clone())?;
@@ -106,8 +115,11 @@ pub(super) async fn run(
         ready["websocketUrl"] = format!("ws://{}/runtime-host", listener.local_addr()?).into();
     }
     println!("{ready}");
-    let result = listen(endpoint, websocket, host, cancellation).await;
+    let result = listen(endpoint, websocket, host.clone(), cancellation).await;
     result.and(registration.remove().map_err(Into::into))
+    }.await;
+    let cleanup = product.shutdown().await;
+    result.and(cleanup)
 }
 
 /// Process policy belongs to the CLI, never to an embedded Host library.

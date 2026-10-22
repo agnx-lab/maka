@@ -1,0 +1,380 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::*;
+use futures_util::future::BoxFuture;
+use maka_agent_ports::model::{Connect, Error, Socket};
+use maka_event_log::root::{RootNamespaces, RootOwner};
+use serde_json::json;
+use std::{collections::VecDeque, sync::Mutex};
+use tokio::sync::Semaphore;
+
+struct Reply {
+    status: u16,
+    body: Value,
+    etag: &'static str,
+}
+struct Script {
+    replies: Mutex<BTreeMap<String, VecDeque<Reply>>>,
+    requests: Mutex<Vec<http::Request>>,
+    entered: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+}
+impl Transport for Script {
+    fn identity(&self) -> u64 {
+        1
+    }
+    fn request(&self, request: http::Request) -> BoxFuture<'_, Result<http::Response, Error>> {
+        Box::pin(async move {
+            let reply = self
+                .replies
+                .lock()
+                .unwrap()
+                .get_mut(&request.url)
+                .unwrap()
+                .pop_front()
+                .expect("unexpected extra public refresh");
+            self.requests.lock().unwrap().push(request);
+            self.entered.add_permits(1);
+            self.release.acquire().await.unwrap().forget();
+            Ok(http::Response {
+                head: http::Head {
+                    status: reply.status,
+                    url: String::new(),
+                    headers: vec![("ETag".into(), reply.etag.as_bytes().to_vec())],
+                },
+                body: Arc::new(Bytes(Mutex::new(Some(
+                    serde_json::to_vec(&reply.body).unwrap(),
+                )))),
+            })
+        })
+    }
+    fn connect(&self, _: Connect) -> BoxFuture<'_, Result<Arc<dyn Socket>, Error>> {
+        Box::pin(async { Err(Error::Adapter("catalogs do not use WebSockets".into())) })
+    }
+}
+struct Bytes(Mutex<Option<Vec<u8>>>);
+impl http::Body for Bytes {
+    fn next(&self) -> BoxFuture<'_, Result<Option<Vec<u8>>, http::Error>> {
+        Box::pin(async { Ok(self.0.lock().unwrap().take()) })
+    }
+    fn cancel(&self) {}
+    fn close(&self) -> BoxFuture<'_, Result<(), http::Error>> {
+        Box::pin(async {
+            self.0.lock().unwrap().take();
+            Ok(())
+        })
+    }
+}
+fn record(body: Value, etag: &str) -> PublicCatalogRecord {
+    PublicCatalogRecord {
+        body,
+        etag: Some(etag.into()),
+        last_modified: Some("Wed, 21 Oct 2026 08:00:00 GMT".into()),
+        checked_at: 1,
+    }
+}
+fn root(directory: &tempfile::TempDir) -> Arc<RootOwner> {
+    maka_event_log::root::private_directory(directory.path()).unwrap();
+    Arc::new(
+        RootOwner::create(
+            &directory.path().join("root"),
+            &RootNamespaces {
+                ownership: directory.path().join("owners"),
+                control: directory.path().join("control"),
+            },
+        )
+        .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_responses() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = root(&directory);
+    let audit = ConfigurationStore::for_root(root.clone()).await.unwrap();
+    audit
+        .put_public_catalog(
+            PublicCatalogSource::ModelsDev,
+            record(json!({}), "models-old"),
+        )
+        .await
+        .unwrap();
+    let before = audit
+        .put_public_catalog(
+            PublicCatalogSource::OpenRouter,
+            record(
+                json!({"data":[{"id":"runtime-test/model","name":"Old public name"}]}),
+                "router-old",
+            ),
+        )
+        .await
+        .unwrap();
+    let updated = json!({"data":[{"id":"runtime-test/model","name":"New public name"}]});
+    let transport = Arc::new(Script {
+        replies: Mutex::new(BTreeMap::from([
+            (
+                SOURCES[0].1.into(),
+                VecDeque::from([
+                    Reply {
+                        status: 304,
+                        body: Value::Null,
+                        etag: "models-new",
+                    },
+                    Reply {
+                        status: 200,
+                        body: json!([]),
+                        etag: "invalid",
+                    },
+                    Reply {
+                        status: 304,
+                        body: Value::Null,
+                        etag: "models-new",
+                    },
+                ]),
+            ),
+            (
+                SOURCES[1].1.into(),
+                VecDeque::from([
+                    Reply {
+                        status: 200,
+                        body: updated.clone(),
+                        etag: "router-new",
+                    },
+                    Reply {
+                        status: 200,
+                        body: json!({"data":[{"id":"broken","name":false}]}),
+                        etag: "invalid",
+                    },
+                    Reply {
+                        status: 200,
+                        body: json!({"data":[]}),
+                        etag: "router-empty",
+                    },
+                ]),
+            ),
+        ])),
+        requests: Mutex::new(Vec::new()),
+        entered: Arc::new(Semaphore::new(0)),
+        release: Arc::new(Semaphore::new(0)),
+    });
+    let mut runtime = RuntimeCatalog::with_transport(
+        ConfigurationStore::for_root(root.clone()).await.unwrap(),
+        transport.clone(),
+    )
+    .await
+    .unwrap();
+    let catalog = runtime.catalog();
+    assert_eq!(
+        catalog
+            .snapshot
+            .read()
+            .await
+            .get("openrouter", "runtime-test/model")
+            .unwrap()
+            .display_name
+            .as_deref(),
+        Some("Old public name")
+    );
+    runtime.start(std::future::pending());
+    let release = async {
+        transport.entered.acquire_many(2).await.unwrap().forget();
+        transport.release.add_permits(2);
+    };
+    let (first, second, ()) = tokio::join!(catalog.refresh(), runtime.refresh(), release);
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(
+        transport.requests.lock().unwrap().len(),
+        2,
+        "concurrent intents must share the startup refresh"
+    );
+    let current = audit.public_catalog().await.unwrap();
+    assert_eq!(
+        current.catalog_revision,
+        before + 1,
+        "304 freshness must not advance the catalog"
+    );
+    assert_eq!(
+        current.sources[&PublicCatalogSource::ModelsDev].body,
+        json!({})
+    );
+    assert_eq!(
+        current.sources[&PublicCatalogSource::ModelsDev]
+            .etag
+            .as_deref(),
+        Some("models-new")
+    );
+    assert!(current.sources[&PublicCatalogSource::ModelsDev].checked_at > 1);
+    assert_eq!(
+        current.sources[&PublicCatalogSource::OpenRouter].body,
+        updated
+    );
+    assert_eq!(
+        catalog
+            .snapshot
+            .read()
+            .await
+            .get("openrouter", "runtime-test/model")
+            .unwrap()
+            .display_name
+            .as_deref(),
+        Some("New public name")
+    );
+    for request in transport.requests.lock().unwrap().iter() {
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, _)| name == "if-none-match")
+        );
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, _)| name == "if-modified-since")
+        );
+        assert!(
+            request
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("authorization")
+                    && !name.eq_ignore_ascii_case("proxy-authorization"))
+        );
+        assert!(request.body.is_empty());
+    }
+    transport.release.add_permits(2);
+    assert!(catalog.refresh().await.is_err());
+    assert_eq!(
+        audit.public_catalog().await.unwrap(),
+        current,
+        "invalid sources must preserve both durable last-good records"
+    );
+    assert_eq!(
+        catalog
+            .snapshot
+            .read()
+            .await
+            .get("openrouter", "runtime-test/model")
+            .unwrap()
+            .display_name
+            .as_deref(),
+        Some("New public name")
+    );
+    transport.release.add_permits(2);
+    catalog.refresh().await.unwrap();
+    assert!(
+        catalog
+            .snapshot
+            .read()
+            .await
+            .get("openrouter", "runtime-test/model")
+            .is_none(),
+        "a successful empty source must remove its old public-only model"
+    );
+    assert_eq!(
+        audit.public_catalog().await.unwrap().catalog_revision,
+        before + 2
+    );
+    runtime.shutdown().await.unwrap();
+    assert!(
+        catalog.refresh().await.is_err(),
+        "a retired owner cannot admit another refresh"
+    );
+    audit.close().await.unwrap();
+    drop(root);
+}
+
+struct Closing {
+    entered: Arc<Semaphore>,
+    closing: Arc<Semaphore>,
+    acknowledgement: Arc<Semaphore>,
+}
+impl Transport for Closing {
+    fn identity(&self) -> u64 {
+        2
+    }
+    fn request(&self, _: http::Request) -> BoxFuture<'_, Result<http::Response, Error>> {
+        Box::pin(async {
+            Ok(http::Response {
+                head: http::Head {
+                    status: 200,
+                    url: String::new(),
+                    headers: vec![],
+                },
+                body: Arc::new(PendingBody {
+                    entered: self.entered.clone(),
+                    closing: self.closing.clone(),
+                    acknowledgement: self.acknowledgement.clone(),
+                }),
+            })
+        })
+    }
+    fn connect(&self, _: Connect) -> BoxFuture<'_, Result<Arc<dyn Socket>, Error>> {
+        Box::pin(async { Err(Error::Adapter("catalogs do not use WebSockets".into())) })
+    }
+}
+struct PendingBody {
+    entered: Arc<Semaphore>,
+    closing: Arc<Semaphore>,
+    acknowledgement: Arc<Semaphore>,
+}
+impl http::Body for PendingBody {
+    fn next(&self) -> BoxFuture<'_, Result<Option<Vec<u8>>, http::Error>> {
+        Box::pin(async {
+            self.entered.add_permits(1);
+            std::future::pending().await
+        })
+    }
+    fn cancel(&self) {}
+    fn close(&self) -> BoxFuture<'_, Result<(), http::Error>> {
+        Box::pin(async {
+            self.closing.add_permits(1);
+            self.acknowledgement.acquire().await.unwrap().forget();
+            Ok(())
+        })
+    }
+}
+#[tokio::test]
+async fn shutdown_joins_both_cancelled_bodies_before_releasing_the_runtime() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = root(&directory);
+    let transport = Arc::new(Closing {
+        entered: Arc::new(Semaphore::new(0)),
+        closing: Arc::new(Semaphore::new(0)),
+        acknowledgement: Arc::new(Semaphore::new(0)),
+    });
+    let mut runtime = RuntimeCatalog::with_transport(
+        ConfigurationStore::for_root(root.clone()).await.unwrap(),
+        transport.clone(),
+    )
+    .await
+    .unwrap();
+    runtime.start(std::future::pending());
+    transport.entered.acquire_many(2).await.unwrap().forget();
+    let shutdown = tokio::spawn(async move { runtime.shutdown().await });
+    transport.closing.acquire_many(2).await.unwrap().forget();
+    assert!(
+        !shutdown.is_finished(),
+        "cancel is not a cleanup acknowledgement"
+    );
+    transport.acknowledgement.add_permits(2);
+    shutdown.await.unwrap().unwrap();
+    drop(root);
+}

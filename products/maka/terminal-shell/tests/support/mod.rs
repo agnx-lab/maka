@@ -420,13 +420,14 @@ impl Fixture {
             .await
             .unwrap();
         let mut native = NativeRegistry::default();
+        let catalog = Arc::new(maka_product_native::catalog::Catalog::new(maka_product_native::catalog::Snapshot::bundled().unwrap()));
         if terminals {
             // Use the product's original factories; composition still admits
             // only the services explicitly installed in this fixture.
-            maka_product_native::provide(&mut native).unwrap();
+            maka_product_native::provide(&mut native, catalog).unwrap();
         } else {
-            maka_agent_native::provide(&mut native).unwrap();
-            maka_settings_native::provide(&mut native).unwrap();
+            maka_agent_native::provide(&mut native, catalog.clone()).unwrap();
+            maka_settings_native::provide(&mut native, catalog).unwrap();
         }
         if let Some(handler) = login_handler.clone() {
             let contract = authentication_contract.clone();

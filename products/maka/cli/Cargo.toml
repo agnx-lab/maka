@@ -45,6 +45,7 @@ path = "../terminal-shell/tests/real_host.rs"
 [dependencies]
 hex.workspace = true
 maka-agent-facts.workspace = true
+maka-agent-ports.workspace = true
 maka-packages.workspace = true
 maka-product-native.workspace = true
 maka-schema.workspace = true
@@ -104,7 +105,6 @@ ratatui.workspace = true
 rusqlite.workspace = true
 log = "0.4"
 schemars.workspace = true
-maka-agent-ports.workspace = true
 agent-client-protocol.workspace = true
 tokio-util = { workspace = true, features = ["compat"] }
 hyper = { version = "1.11.1", features = ["server", "http1"] }

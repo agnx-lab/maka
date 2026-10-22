@@ -766,10 +766,10 @@ async fn independent_public_agent_client_finds_published_fork_after_uncertain_ho
             control:fixture._root.path().join("control"),
         };
         let owner = maka_event_log::root::RootOwner::open(fixture.database.parent().unwrap(),&namespaces).unwrap();
-        let host = crate::application::open_host(owner,Default::default(),crate::application::Roots::Configured(Some(vec![
+        let mut product = crate::application::open_host(owner,Default::default(),crate::application::Roots::Configured(Some(vec![
             maka_host_runtime::DirectoryRootSpec {label:"Test".into(),path:fixture.workspace.to_str().unwrap().into()},
-        ]))).await.unwrap();
-        let epoch = host.epoch();
+        ])),Some(support::catalog_transport())).await.unwrap();
+        let epoch = product.host.epoch();
         assert_ne!(epoch,fixture.epoch);
         #[cfg(unix)]
         let endpoint = fixture._root.path().join("reopened.sock");
@@ -778,7 +778,11 @@ async fn independent_public_agent_client_finds_published_fork_after_uncertain_ho
         let listener = maka_host_runtime::ipc::LocalListener::bind(&endpoint).unwrap();
         let stop = tokio_util::sync::CancellationToken::new();
         let _cleanup = stop.clone().drop_guard();
-        let server = tokio::spawn(async move {host.serve_local(listener,stop).await});
+        let server = tokio::spawn(async move {
+            let result = product.host.serve_local(listener,stop).await;
+            let cleanup = product.shutdown().await.map_err(|error| error.to_string());
+            result.and(cleanup)
+        });
         let mut client = Client::connect(&endpoint,Some(epoch)).await.unwrap();
         assert_eq!(support::query(&client,"receipts","read",json!(reference)).await,unresolved);
         assert_eq!(support::query(&client,"agent","forkReceipt",json!({"reference":reference})).await,published);

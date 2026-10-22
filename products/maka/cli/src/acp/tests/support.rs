@@ -28,6 +28,45 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+pub fn catalog_transport() -> std::sync::Arc<dyn maka_agent_ports::model::Transport> {
+    struct Unavailable;
+    impl maka_agent_ports::model::Transport for Unavailable {
+        fn identity(&self) -> u64 {
+            0
+        }
+        fn request(
+            &self,
+            _: maka_capabilities::http::Request,
+        ) -> futures_util::future::BoxFuture<
+            '_,
+            Result<maka_capabilities::http::Response, maka_agent_ports::model::Error>,
+        > {
+            Box::pin(async {
+                Err(maka_agent_ports::model::Error::Adapter(
+                    "public catalog network is not part of this fixture".into(),
+                ))
+            })
+        }
+        fn connect(
+            &self,
+            _: maka_agent_ports::model::Connect,
+        ) -> futures_util::future::BoxFuture<
+            '_,
+            Result<
+                std::sync::Arc<dyn maka_agent_ports::model::Socket>,
+                maka_agent_ports::model::Error,
+            >,
+        > {
+            Box::pin(async {
+                Err(maka_agent_ports::model::Error::Adapter(
+                    "public catalog does not use WebSockets".into(),
+                ))
+            })
+        }
+    }
+    std::sync::Arc::new(Unavailable)
+}
+
 pub struct Fixture {
     pub _root: tempfile::TempDir,
     pub workspace: PathBuf,
@@ -61,7 +100,7 @@ impl Fixture {
             &provider.base_url,
         )
         .await;
-        let host = crate::application::open_host(
+        let mut product = crate::application::open_host(
             RootOwner::open(&root, &namespaces).unwrap(),
             Default::default(),
             crate::application::Roots::Configured(Some(vec![
@@ -70,6 +109,7 @@ impl Fixture {
                     path: workspace.to_str().unwrap().into(),
                 },
             ])),
+            Some(catalog_transport()),
         )
         .await
         .unwrap();
@@ -78,11 +118,15 @@ impl Fixture {
         #[cfg(windows)]
         let endpoint = PathBuf::from(format!(r"\\.\pipe\maka-acp-{}", uuid::Uuid::new_v4()));
         let listener = LocalListener::bind(&endpoint).unwrap();
-        let epoch = host.epoch();
+        let epoch = product.host.epoch();
         let stop = CancellationToken::new();
         let server = tokio::spawn({
             let stop = stop.clone();
-            async move { host.serve_local(listener, stop).await }
+            async move {
+                let result = product.host.serve_local(listener, stop).await;
+                let cleanup = product.shutdown().await.map_err(|error| error.to_string());
+                result.and(cleanup)
+            }
         });
         let native = Native::connect(&endpoint, Some(epoch)).await.unwrap();
         assert!(

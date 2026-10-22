@@ -95,18 +95,62 @@ pub(crate) async fn select_committed_host(
     Ok(())
 }
 
+/// Product resources retain their Root until public I/O has been cancelled
+/// and joined, even when generic Host shutdown has already drained its store.
+pub(crate) struct ProductHost {
+    pub host: Arc<Host>,
+    catalog: maka_product_native::catalog::RuntimeCatalog,
+}
+impl ProductHost {
+    pub(crate) fn admitted(
+        host: Arc<Host>,
+        mut catalog: maka_product_native::catalog::RuntimeCatalog,
+    ) -> Self {
+        catalog.start(host.wait_for_drain());
+        Self { host, catalog }
+    }
+    pub(crate) async fn shutdown(&mut self) -> Result<(), HostError> {
+        let catalog = self.catalog.shutdown().await.map_err(HostError::from);
+        let host = self.host.shutdown().await.map_err(HostError::from);
+        catalog.and(host)
+    }
+}
+
 pub(crate) async fn open_host(
     owner: RootOwner,
     options: Options,
     roots: Roots,
-) -> Result<Arc<Host>, HostError> {
+    catalog_transport: Option<Arc<dyn maka_agent_ports::model::Transport>>,
+) -> Result<ProductHost, HostError> {
     let store = Arc::new(maka_transport::open_store(Arc::new(owner)).await?);
+    let catalog = async {
+        let configuration = maka_config::ConfigurationStore::for_root(store.owned_root()?).await?;
+        let catalog = match catalog_transport {
+            Some(transport) => {
+                maka_product_native::catalog::RuntimeCatalog::with_transport(
+                    configuration,
+                    transport,
+                )
+                .await?
+            }
+            None => maka_product_native::catalog::RuntimeCatalog::open(configuration).await?,
+        };
+        Ok::<_, HostError>(catalog)
+    }
+    .await;
+    let mut catalog = match catalog {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            store.drain().await;
+            return Err(error);
+        }
+    };
     let result = async {
         let (loaded, Selection::PublicHost { endpoints, native }) = prepare(&store, roots).await?;
         Ok(Host::open_loaded_with_options(
             store.clone(),
             loaded,
-            crate::application::serve::native()?,
+            crate::application::serve::native(catalog.catalog())?,
             Some(maka_host_js::factory(Default::default())),
             endpoints,
             native,
@@ -115,10 +159,15 @@ pub(crate) async fn open_host(
         .await?)
     }
     .await;
-    if result.is_err() {
-        store.drain().await;
+    match result {
+        Ok(host) => Ok(ProductHost::admitted(host, catalog)),
+        Err(error) => {
+            let cleanup = catalog.shutdown().await;
+            store.drain().await;
+            cleanup.map_err(HostError::from)?;
+            Err(error)
+        }
     }
-    result
 }
 async fn prepare(
     store: &EventLog,

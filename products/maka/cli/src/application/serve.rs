@@ -45,9 +45,11 @@ pub(crate) struct Serve {
     #[arg(long, value_name = "FILE")]
     native: Option<PathBuf>,
 }
-pub(super) fn native() -> Result<NativeRegistry, HostError> {
+pub(super) fn native(
+    catalog: Arc<maka_product_native::catalog::Catalog>,
+) -> Result<NativeRegistry, HostError> {
     let mut native = NativeRegistry::default();
-    maka_product_native::provide(&mut native)?;
+    maka_product_native::provide(&mut native, catalog)?;
     Ok(native)
 }
 pub(super) async fn run(args: Serve) -> Result<(), HostError> {
@@ -69,20 +71,50 @@ pub(super) async fn run(args: Serve) -> Result<(), HostError> {
         .transpose()?
         .unwrap_or_default();
     let store = Arc::new(maka_transport::open_store(Arc::new(owner)).await?);
-    let host = Host::open_with_options(
-        store,
-        args.deployment,
-        native()?,
-        Some(maka_host_js::factory(Default::default())),
-        endpoints,
-        grants,
-        Options {
-            lifecycle_mode: LifecycleMode::Service,
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(HostError::from)?;
+    let catalog = async {
+        let configuration = maka_config::ConfigurationStore::for_root(store.owned_root()?).await?;
+        Ok::<_, HostError>(maka_product_native::catalog::RuntimeCatalog::open(configuration).await?)
+    }
+    .await;
+    let mut catalog = match catalog {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            store.drain().await;
+            return Err(error);
+        }
+    };
+    let opened = async {
+        Ok::<_, HostError>(
+            Host::open_with_options(
+                store.clone(),
+                args.deployment,
+                native(catalog.catalog())?,
+                Some(maka_host_js::factory(Default::default())),
+                endpoints,
+                grants,
+                Options {
+                    lifecycle_mode: LifecycleMode::Service,
+                    ..Default::default()
+                },
+            )
+            .await?,
+        )
+    }
+    .await;
+    let host = match opened {
+        Ok(host) => super::ProductHost::admitted(host, catalog),
+        Err(error) => {
+            let cleanup = catalog.shutdown().await;
+            store.drain().await;
+            cleanup.map_err(HostError::from)?;
+            return Err(error);
+        }
+    };
+    serve(host).await
+}
+async fn serve(mut product: super::ProductHost) -> Result<(), HostError> {
+    let result = async {
+    let host = &product.host;
     let endpoint = crate::endpoint::LocalEndpoint::bind()?;
     let cancellation = CancellationToken::new();
     let _signals = crate::signals::watch(cancellation.clone())?;
@@ -91,6 +123,9 @@ pub(super) async fn run(args: Serve) -> Result<(), HostError> {
         "{}",
         json!({"kind":"ready","rootId":host.root_id(),"hostEpoch":host.epoch(),"socketPath":endpoint.path})
     );
-    let result = crate::serve::listen(endpoint, None, host, cancellation).await;
+    let result = crate::serve::listen(endpoint, None, host.clone(), cancellation).await;
     result.and(registration.remove().map_err(Into::into))
+    }.await;
+    let cleanup = product.shutdown().await;
+    result.and(cleanup)
 }

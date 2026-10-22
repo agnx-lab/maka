@@ -98,52 +98,60 @@ impl Candidate {
                     )
                 })
                 .unwrap_or(crate::application::Roots::Saved),
+            None,
         )
         .await?;
-        let endpoint = LocalEndpoint::bind()?;
-        let registration = host.publish_registration(
-            &endpoint.path,
-            websocket
-                .as_ref()
-                .map(|listener| listener.local_addr())
-                .transpose()?,
-        )?;
-        let idle_host = host.clone();
-        let idle_cancel = cancel.clone();
-        let idle_grace = if deployment.is_some() {
-            30_000
-        } else {
-            self.idle_grace_ms
-        };
-        let expiry = tokio::spawn(async move {
-            let result = idle_host
-                .wait_until_idle(
-                    Duration::from_millis(self.initial_connection_timeout_ms),
-                    Duration::from_millis(idle_grace),
-                )
-                .await;
-            if let Err(error) = result {
-                eprintln!("candidate cleanup unconfirmed: {error}");
-            }
-            idle_cancel.cancel();
-        });
-        let serving = super::serve::listen(endpoint, websocket, host.clone(), cancel);
-        tokio::pin!(serving);
-        let result = tokio::select! {
-            biased;
-            _ = owner_lost.cancelled() => {
-                // EOF abandons an unaccepted startup. Once a client was admitted,
-                // ordinary Host residency and idle expiry own this lifetime.
-                host.abandon_unaccepted_startup().await;
-                serving.await
-            }
-            result = &mut serving => result,
-        };
-        expiry.abort();
-        let _ = expiry.await;
-        drop(signals);
-        let removed = registration.remove();
-        result.and(removed.map_err(Into::into))
+        let mut product = host;
+        let result = async {
+            let host = &product.host;
+            let endpoint = LocalEndpoint::bind()?;
+            let registration = host.publish_registration(
+                &endpoint.path,
+                websocket
+                    .as_ref()
+                    .map(|listener| listener.local_addr())
+                    .transpose()?,
+            )?;
+            let idle_host = host.clone();
+            let idle_cancel = cancel.clone();
+            let idle_grace = if deployment.is_some() {
+                30_000
+            } else {
+                self.idle_grace_ms
+            };
+            let expiry = tokio::spawn(async move {
+                let result = idle_host
+                    .wait_until_idle(
+                        Duration::from_millis(self.initial_connection_timeout_ms),
+                        Duration::from_millis(idle_grace),
+                    )
+                    .await;
+                if let Err(error) = result {
+                    eprintln!("candidate cleanup unconfirmed: {error}");
+                }
+                idle_cancel.cancel();
+            });
+            let serving = super::serve::listen(endpoint, websocket, host.clone(), cancel);
+            tokio::pin!(serving);
+            let result = tokio::select! {
+                biased;
+                _ = owner_lost.cancelled() => {
+                    // EOF abandons an unaccepted startup. Once a client was admitted,
+                    // ordinary Host residency and idle expiry own this lifetime.
+                    host.abandon_unaccepted_startup().await;
+                    serving.await
+                }
+                result = &mut serving => result,
+            };
+            expiry.abort();
+            let _ = expiry.await;
+            drop(signals);
+            let removed = registration.remove();
+            result.and(removed.map_err(Into::into))
+        }
+        .await;
+        let cleanup = product.shutdown().await;
+        result.and(cleanup)
     }
 }
 

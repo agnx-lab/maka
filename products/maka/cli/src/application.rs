@@ -21,7 +21,7 @@ mod install;
 mod product;
 mod serve;
 
-pub(crate) use product::{Roots, open_host, select_committed_host};
+pub(crate) use product::{ProductHost, Roots, open_host, select_committed_host};
 
 use std::path::{Path, PathBuf};
 

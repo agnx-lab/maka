@@ -18,10 +18,16 @@
  */
 
 //! Factories compiled into the Maka product; composition decides activation.
+pub mod catalog;
+
 use maka_host_runtime::application::NativeRegistry;
-pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
+use std::sync::Arc;
+pub fn provide(
+    registry: &mut NativeRegistry,
+    catalog: Arc<catalog::Catalog>,
+) -> Result<(), String> {
     maka_ui_authoring::provide(registry)?;
-    maka_agent_native::provide(registry)?;
+    maka_agent_native::provide(registry, catalog.clone())?;
     maka_acp_native::provide(registry)?;
     maka_files_native::provide(registry)?;
     maka_computer_native::provide(registry)?;
@@ -31,7 +37,7 @@ pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
     maka_interactions_native::forms::provide(registry)?;
     maka_web::provide(registry)?;
     maka_jev_native::provide(registry)?;
-    maka_agent_native::workhub::provide(registry)?;
-    maka_settings_native::provide(registry)?;
+    maka_agent_native::workhub::provide(registry, catalog.clone())?;
+    maka_settings_native::provide(registry, catalog)?;
     Ok(())
 }
