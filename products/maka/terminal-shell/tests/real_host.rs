@@ -911,9 +911,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert_eq!(view.surface().focused(), Some(model_trigger));
         tab_to_label(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(created_editor));
-        // Native Tab entry selects the Input's contents; menu restoration
-        // above preserves the original caret without a new Tab entry.
-        assert_eq!(view.surface().input_context().unwrap().selection, 0..33);
+        // Tab entry preserves the multiline composer's original caret, just as
+        // menu restoration above does.
+        assert_eq!(view.surface().input_context().unwrap().selection, caret);
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Message B uses the selected model"));
         support::wait_draft(&client, &created_id, "Message B uses the selected model").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
