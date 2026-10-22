@@ -1200,11 +1200,9 @@ class RustHost:
         self.process = None
 
     async def initialize(self):
-        # Current finite-command observer discards stdin. Invoke the same CLI init
-        # worker directly during untimed setup; retain the failed public-init receipt.
+        # Exercise the public initializer, including its input and observation boundary.
         proc = await asyncio.create_subprocess_exec(
             str(RUST / "target/release/maka"),
-            "--operation-worker",
             "host",
             "init",
             "--root",

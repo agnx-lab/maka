@@ -23,7 +23,10 @@
 use maka_host_runtime::HostError;
 use serde::Serialize;
 use std::{future::Future, io::Write, process::Stdio, time::Duration};
-use tokio::{io::AsyncReadExt, time::Instant};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    time::Instant,
+};
 
 tokio::task_local! {
     static DEADLINE: Instant;
@@ -92,7 +95,7 @@ pub(crate) fn progress(phase: Phase, completed: Option<u64>, total: Option<u64>)
 
 /// Detach only this finite command so the caller can leave while accepted
 /// blocking work retains its existing leases. Never terminate a discovered Host.
-pub(crate) async fn observe(timeout: Duration) -> Result<(), HostError> {
+pub(crate) async fn observe(timeout: Duration, settings_stdin: bool) -> Result<(), HostError> {
     // Leave a small part of the same budget for the timeout diagnostic.
     let deadline = Instant::now() + timeout.saturating_sub(Duration::from_millis(10));
     // Only this observer may be exited at the deadline: it owns no Root or
@@ -105,51 +108,70 @@ pub(crate) async fn observe(timeout: Duration) -> Result<(), HostError> {
             std::thread::sleep(timeout);
             std::process::exit(70);
         })?;
-    let mut command = tokio::process::Command::new(std::env::current_exe()?);
-    command
-        .arg("--operation-worker")
-        .args(std::env::args_os().skip(1))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(false);
-    #[cfg(unix)]
-    // SAFETY: setsid is async-signal-safe and accesses no Rust state.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    #[cfg(windows)]
-    command.creation_flags(
-        windows_sys::Win32::System::Threading::DETACHED_PROCESS
-            | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP
-            | windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB,
-    );
-    let child = command.spawn();
-    #[cfg(windows)]
-    let child = match child {
-        Err(error) if error.raw_os_error() == Some(5) => {
-            // A finite worker can remain in an enclosing Job: stopping this
-            // observer does not close somebody else's Job. External Job
-            // termination is ordinary crash recovery from committed state.
-            // Long-lived Host activation still requires independent ownership
-            // and refuses its own breakaway failure; do not weaken that rule.
-            command.creation_flags(
-                windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
-                    | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
-            );
-            command.spawn()
-        }
-        result => result,
-    };
-    let mut child = child?;
-    let stdout = child.stdout.take().ok_or("missing command stdout")?;
-    let stderr = child.stderr.take().ok_or("missing command stderr")?;
     let result = tokio::time::timeout_at(deadline, async {
+        // Read and validate bootstrap input before detaching any work. Incomplete
+        // input cannot leave a worker waiting on the caller after this deadline.
+        let input = if settings_stdin {
+            let bytes = crate::initialize::settings_input().await?;
+            crate::initialize::validate_settings_input(&bytes)?;
+            Some(bytes)
+        } else {
+            None
+        };
+        let mut command = tokio::process::Command::new(std::env::current_exe()?);
+        command
+            .arg("--operation-worker")
+            .args(std::env::args_os().skip(1))
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(false);
+        #[cfg(unix)]
+        // SAFETY: setsid is async-signal-safe and accesses no Rust state.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        #[cfg(windows)]
+        command.creation_flags(
+            windows_sys::Win32::System::Threading::DETACHED_PROCESS
+                | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP
+                | windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB,
+        );
+        let child = command.spawn();
+        #[cfg(windows)]
+        let child = match child {
+            Err(error) if error.raw_os_error() == Some(5) => {
+                // A finite worker can remain in an enclosing Job: stopping this
+                // observer does not close somebody else's Job. External Job
+                // termination is ordinary crash recovery from committed state.
+                // Long-lived Host activation still requires independent ownership
+                // and refuses its own breakaway failure; do not weaken that rule.
+                command.creation_flags(
+                    windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+                        | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
+                );
+                command.spawn()
+            }
+            result => result,
+        };
+        let mut child = child?;
+        if let Some(input) = input {
+            let mut stdin = child.stdin.take().ok_or("missing command stdin")?;
+            stdin.write_all(&input).await?;
+            // EOF marks the end of the complete, validated settings document.
+            drop(stdin);
+        }
+        let stdout = child.stdout.take().ok_or("missing command stdout")?;
+        let stderr = child.stderr.take().ok_or("missing command stderr")?;
         let (status, (), ()) =
             tokio::try_join!(child.wait(), forward(stdout, false), forward(stderr, true),)?;
         if !status.success() {

@@ -28,7 +28,11 @@ tokens, API cost, or a general advantage of one implementation language.
 The TS adapter currently targets main commit
 `0d19f242336a31e8aeb300372d3d3c896b1e99ef`. The initial Rust measurements use
 `97405171ea8f10cfc0ec8ae469cfca559402ed90`. Record different revisions explicitly;
-the public protocols may change. Production paths remain unchanged by the harness.
+the public protocols may change. The current harness uses public
+`host init --settings-stdin` and requires the CLI's settings-input forwarding fix.
+The initial frozen campaign used its recorded worker-entry workaround during
+untimed setup; retain that harness with those receipts. Production paths remain
+unchanged by the harness.
 
 ## Build and run
 

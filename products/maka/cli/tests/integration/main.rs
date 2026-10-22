@@ -22,6 +22,7 @@ mod candidate;
 mod code_command;
 #[cfg(unix)]
 mod desktop;
+mod initialize;
 #[allow(dead_code)]
 #[path = "../../../../../platform/transport/tests/support/mod.rs"]
 mod local_fixture;
