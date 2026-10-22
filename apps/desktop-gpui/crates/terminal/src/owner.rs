@@ -65,12 +65,15 @@ pub enum Inventory {
 pub enum StartState {
     Idle,
     /// `runtime.resource.start` is in flight, or waits for the selected
-    /// task's terminals to be read; one at a time.
+    /// task's terminals to be read, or (at the Host's limit) for a close
+    /// to be confirmed; one at a time.
     Starting,
     /// The live PTYs this window can see, across every task, are at the
     /// Host's limit ([`MAX_LIVE_PTY_RUNS`]), so none is started: the Host
     /// does not report its limit, and a start past it makes it drain and
-    /// restart. Clears when one of them ends.
+    /// restart. Clears when one of them ends. While a terminal of this
+    /// window is closing, a start waits for the close instead
+    /// ([`Self::Starting`]).
     LimitReached,
     /// The Host failed to start a shell (`internal_failure`) and is
     /// restarting; a reconnect follows.
@@ -146,6 +149,10 @@ pub struct Terminals {
     /// A start asked for before the selected task's terminals were read:
     /// it goes once they are, against the count they give.
     start_pending: bool,
+    /// A start asked for at the Host's limit while a terminal of this
+    /// window was closing: it goes once a close is confirmed (or fails, or
+    /// a PTY ends), against the count then.
+    start_after_close: bool,
     /// The connection terminals are acquired on, by generation; `None`
     /// while disconnected.
     connection: Option<u64>,
@@ -204,6 +211,7 @@ impl Terminals {
             recent: HashMap::new(),
             start: StartState::Idle,
             start_pending: false,
+            start_after_close: false,
             connection: connected.then_some(1),
             connections: u64::from(connected),
             _inventory: None,
@@ -218,7 +226,8 @@ impl Terminals {
     // What a view reads.
 
     /// The selected task's terminals, in the order the Host lists them,
-    /// those started here last.
+    /// those started here last. Those closing stay until the close is
+    /// confirmed; a view leaves them out ([`Terminal::is_closing`]).
     pub fn terminals(&self) -> &[Entity<Terminal>] {
         &self.terminals
     }
@@ -275,7 +284,9 @@ impl Terminals {
     /// and at the Host's limit ([`StartState::LimitReached`]). Until the
     /// task's terminals are read it waits for them (reading them again
     /// after a failed read), so that the limit counts them: a start before
-    /// that could be the Host's ninth.
+    /// that could be the Host's ninth. At the limit while a terminal of
+    /// this window is closing it waits for the close instead, and counts
+    /// again once it is confirmed.
     pub fn start(&mut self, cx: &mut Context<Self>) {
         if self.start == StartState::Starting {
             return;
@@ -298,8 +309,16 @@ impl Terminals {
             return;
         }
         if self.live_count() >= MAX_LIVE_PTY_RUNS {
-            log::info!("terminals: {} live, not starting another", self.live_count());
-            self.start = StartState::LimitReached;
+            if self.closing(cx) {
+                // Its PTY counts until the Host confirms; the person has
+                // already let it go.
+                log::info!("terminals: {} live, starting after a close", self.live_count());
+                self.start_after_close = true;
+                self.start = StartState::Starting;
+            } else {
+                log::info!("terminals: {} live, not starting another", self.live_count());
+                self.start = StartState::LimitReached;
+            }
             cx.notify();
             return;
         }
@@ -350,9 +369,14 @@ impl Terminals {
     }
 
     /// Closes `terminal`: stops its shell, or forgets it when it already
-    /// ended. It leaves the list once the close is confirmed.
+    /// ended. A view stops showing it at once, as terminal emulators do,
+    /// not when the Host answers the stop, which can take its whole grace
+    /// period. It stays in this list, with its stop and its place under
+    /// the limit, until the close is confirmed; a failed stop shows it
+    /// again.
     pub fn close(&mut self, terminal: &Entity<Terminal>, cx: &mut Context<Self>) {
         terminal.update(cx, |terminal, cx| terminal.close(cx));
+        cx.notify();
     }
 
     /// Reads the selected task's terminals again.
@@ -402,6 +426,9 @@ impl Terminals {
                         .update(cx, |terminal, cx| terminal.set_connection(self.connection, cx));
                 }
                 self.load_inventory(cx);
+                // The close it waited on may have gone with the previous
+                // task's terminals: it waits for the list read again.
+                self.resume_start(cx);
             }
             HostSessionEvent::StatusChanged
                 if self.connection.is_some() && !self.host.read(cx).is_connected() =>
@@ -435,8 +462,11 @@ impl Terminals {
             }
         }
         self.session_id = selected;
-        // A start waiting for the previous task's list was for that task.
-        if std::mem::take(&mut self.start_pending) || self.start != StartState::Starting {
+        // A start waiting for the previous task's list, or for a close, was
+        // for that task.
+        let listing = std::mem::take(&mut self.start_pending);
+        let closing = std::mem::take(&mut self.start_after_close);
+        if listing || closing || self.start != StartState::Starting {
             self.start = StartState::Idle;
         }
         self.load_inventory(cx);
@@ -513,6 +543,7 @@ impl Terminals {
             TerminalEvent::Exited => {
                 let resource_ref = terminal.read(cx).resource_ref().clone();
                 self.forget_live(&terminal, &resource_ref, cx);
+                self.resume_start(cx);
                 cx.notify();
             }
             TerminalEvent::Closed => {
@@ -523,6 +554,12 @@ impl Terminals {
                 self.retiring.retain(|held| *held != terminal);
                 self.terminal_subscriptions.remove(&terminal.entity_id());
                 self.update_interest(cx);
+                self.resume_start(cx);
+                cx.notify();
+            }
+            // It shows again; a start waiting on it counts again.
+            TerminalEvent::CloseFailed => {
+                self.resume_start(cx);
                 cx.notify();
             }
             TerminalEvent::Released if self.retiring.contains(&terminal) => {
@@ -538,6 +575,22 @@ impl Terminals {
     fn drop_retiring(&mut self) {
         for terminal in std::mem::take(&mut self.retiring) {
             self.terminal_subscriptions.remove(&terminal.entity_id());
+        }
+    }
+
+    /// Whether a terminal of this window is closing: the selected task's,
+    /// or the previous task's still stopping.
+    fn closing(&self, cx: &gpui_kit::App) -> bool {
+        self.terminals.iter().chain(&self.retiring).any(|terminal| terminal.read(cx).is_closing())
+    }
+
+    /// A start that waited on a close tries again, against the count now:
+    /// a close was confirmed or failed, or a PTY ended. Without a
+    /// connection it waits for the next one.
+    fn resume_start(&mut self, cx: &mut Context<Self>) {
+        if self.connection.is_some() && std::mem::take(&mut self.start_after_close) {
+            self.start = StartState::Idle;
+            self.start(cx);
         }
     }
 
@@ -614,6 +667,7 @@ impl Terminals {
             if self.start == StartState::LimitReached && self.live_count() < MAX_LIVE_PTY_RUNS {
                 self.start = StartState::Idle;
             }
+            self.resume_start(cx);
             cx.notify();
         } else if again && live.contains(&resource_ref) {
             self.check_live(session_id, resource_ref, cx);
@@ -756,7 +810,9 @@ impl Terminals {
                 self.inventory = Inventory::Failed(message);
                 // Without the list there is no count to start against;
                 // the failure shows, with Retry.
-                if std::mem::take(&mut self.start_pending) {
+                let listing = std::mem::take(&mut self.start_pending);
+                let closing = std::mem::take(&mut self.start_after_close);
+                if listing || closing {
                     self.start = StartState::Idle;
                 }
             }

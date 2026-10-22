@@ -52,6 +52,7 @@ mod corpus;
 mod edits_card;
 mod paging;
 mod paths;
+mod prompt_rail;
 mod queue;
 mod quiet_json;
 mod quotes;

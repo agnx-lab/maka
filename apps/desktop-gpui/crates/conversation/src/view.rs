@@ -23,6 +23,7 @@
 
 mod find;
 mod landing;
+mod prompt_rail;
 mod text_views;
 
 use std::collections::{HashMap, HashSet};
@@ -53,6 +54,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _, relative,
 };
 use host_protocol::{InteractionAnswer, PermissionDecision, ProviderRetryPhase};
+use shared::layout::{TRANSCRIPT_MARGIN_REMS, reading_column, transcript_inset};
 use transcript_model::edits::EditedTurns;
 use transcript_model::{ToolStatus, TurnViewStatus};
 
@@ -77,6 +79,7 @@ use crate::thinking_face::{self, thinking_face};
 use crate::turn_status::{self, RetryCountdown, RunningLine};
 use find::{Find, RowFind};
 use landing::Landing;
+use prompt_rail::Rail;
 use text_views::TextViews;
 
 /// Key context of the transcript. PageUp, PageDown, Home, and End scroll it
@@ -250,6 +253,9 @@ const TOP_FADE_SOLID: f32 = 6.;
 ///
 /// Find ([`Self::open_find`]): the view is the find bar's
 /// [`search::Searchable`] item; see [`find`].
+///
+/// The prompt rail ([`Self::set_prompt_rail`]): a tick per prompt on the
+/// transcript's right edge that jumps to it; see [`prompt_rail`].
 pub struct ConversationView {
     state: Entity<ConversationState>,
     scroller: Entity<MessageScrollerState>,
@@ -287,6 +293,8 @@ pub struct ConversationView {
     /// A passage of a search waiting for its message to be held
     /// ([`Self::open_at_passage`]).
     landing: Option<Landing>,
+    /// The prompt rail ([`Self::set_prompt_rail`]).
+    rail: Rail,
     /// The text view state of each reply row the list lays out.
     text_views: TextViews,
     /// The live running turn's scheduled provider retry, counted down from
@@ -355,6 +363,7 @@ impl ConversationView {
             wall_clock: Rc::new(system_time_ms),
             find: Find::default(),
             landing: None,
+            rail: Rail::default(),
             text_views: TextViews::default(),
             retry_countdown: None,
             side_chat_menu: false,
@@ -518,6 +527,7 @@ impl ConversationView {
             });
         }
         self.rows = rows;
+        self.sync_rail(session_changed, cx);
         self.sync_card_diffs(cx);
         if older == OlderHistory::Available {
             let view = cx.weak_entity();
@@ -1006,7 +1016,6 @@ impl ConversationView {
                 .id(id)
                 .test_support()
                 .w_full()
-                .max_w(column_max_width())
                 .min_h(dp(40.))
                 .px(dp(12.))
                 .gap(dp(10.))
@@ -1057,14 +1066,10 @@ impl ConversationView {
                 .into_any_element(),
             _ => return None,
         };
+        // In the transcript's column, which is inset in the view.
         Some(
-            h_flex()
-                .flex_shrink_0()
-                .w_full()
-                .justify_center()
-                .px(dp(COLUMN_GUTTER))
-                .pt(dp(8.))
-                .child(element)
+            transcript_inset(div().flex_shrink_0().w_full().pt(dp(8.)))
+                .child(reading_column(self.column_gutters(), element))
                 .into_any_element(),
         )
     }
@@ -1213,11 +1218,10 @@ impl ConversationView {
                     .shadow(shadow)
             }
         })
-        // Rows carry their own vertical spacing (see `render_row`), so each
-        // row's bounds cover its whole list item. The side inset keeps the
-        // centred column off the pane edge in a narrow window, while the
-        // scrollbar stays on that edge.
-        .with_row_style(StyleRefinement::default().pb_0().px(dp(COLUMN_GUTTER)))
+        // Rows carry their own vertical spacing and the reading column's
+        // gutters (see `render_row`), so each row's bounds cover its whole
+        // list item, and the scrollbar stays on the pane's edge.
+        .with_row_style(StyleRefinement::default().pb_0().px_0())
         .with_bottom_fade(cx.maka().plate)
         .size_full();
         let region = div()
@@ -1237,8 +1241,10 @@ impl ConversationView {
             .flex_1()
             .min_h_0()
             // Room for the focus ring, which is drawn outside the border and
-            // would be clipped at the window edge.
-            .m_1()
+            // would be clipped at the window edge. The status line, the
+            // composer and the strip over it take the same inset, so their
+            // column lines up with this one.
+            .m(gpui_kit::rems(TRANSCRIPT_MARGIN_REMS))
             .rounded(cx.theme().radius)
             .border_1()
             .border_color(cx.maka().plate)
@@ -1246,6 +1252,7 @@ impl ConversationView {
             .child(self.paging.viewport_probe())
             .child(self.text_views.frame_probe())
             .child(list)
+            .children(self.rail_probe(cx))
             // A 12pt fade at the top, so text scrolling under the header is
             // not cut mid-glyph: the first 6pt are the plate, hiding the clip
             // edge, then it clears within half a line, so no whole line
@@ -1258,6 +1265,7 @@ impl ConversationView {
                     gpui_kit::linear_color_stop(cx.maka().plate.opacity(0.), 1.),
                 ),
             ))
+            .children(self.render_prompt_rail(cx))
             .children(self.render_find_bar());
         if !self.side_chat_menu {
             return region.into_any_element();
@@ -1377,6 +1385,7 @@ fn render_row(
         wall_clock,
         countdown,
         (marks, marks_revision, reveal, text_views),
+        gutters,
     ) = {
         let this = this.read(cx);
         let row = this.rows.get(ix).cloned();
@@ -1404,6 +1413,7 @@ fn render_row(
             this.wall_clock.clone(),
             this.retry_countdown.clone(),
             (marks, this.find.marks.revision(), this.find.reveal.clone(), this.text_views.clone()),
+            this.column_gutters(),
         )
     };
     let Some(row) = row else {
@@ -1469,15 +1479,14 @@ fn render_row(
             render_footer(footer, turn_id, spinner_turns, now, copied, view.clone(), window, cx)
         }
     };
-    h_flex()
+    div()
         .relative()
         .w_full()
-        .justify_center()
         // The user message that opens the next turn adds its own space
         // above.
         .pb(dp(space_below))
         .child(probe)
-        .child(div().id(id).test_support().w_full().max_w(column_max_width()).child(content))
+        .child(reading_column(gutters, div().id(id).test_support().w_full().child(content)))
         .into_any_element()
 }
 

@@ -93,7 +93,8 @@ region done. Every rule below cites the reference that motivates it.
   "Finished" with a check icon. Failure and cancellation are shown as a muted line with the
   reason, no icon larger than the text.
 - Scroll: follow the tail while at the bottom; "Jump to latest" appears only when not
-  following; a minimap is out of scope.
+  following. The prompt rail on the right edge (Maka Desktop's, F47) has a tick per prompt that
+  jumps to it, the tick of the prompt being read widest; there is no minimap of the content.
 
 ## Composer
 

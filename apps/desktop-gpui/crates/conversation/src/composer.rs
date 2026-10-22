@@ -19,7 +19,9 @@
 
 //! The message composer under the transcript.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -33,7 +35,8 @@ use gpui_kit::{
     Anchor, AnyElement, App, AppContext as _, BoxShadow, ClipboardEntry, ClipboardItem, Context,
     ElementId, Entity, ExternalPaths, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Task, TestSupportExt as _, WeakEntity, Window, div, point, px, rems,
+    Styled as _, Subscription, Task, TestSupportExt as _, WeakEntity, Window, canvas, div, point,
+    px, rems,
 };
 use host_protocol::{
     AttachmentKind, ChangeNotice, MAX_ATTACHMENT_COUNT, MessageContent, MessagePlacement, Nullable,
@@ -43,6 +46,7 @@ use host_protocol::{
 use shared::copy::conversation as copy;
 use shared::copy::{self as shell_copy, Locale, Text};
 use shared::icons::MakaIcon;
+use shared::layout::{ColumnGutters, reading_column, transcript_inset};
 use shared::theme::{ActiveMakaPalette as _, DISABLED_OPACITY, MakaPalette};
 use workspace::actions::{AddConnection, OpenProjectSettings, SendMessage, StopTurn};
 use workspace::{
@@ -231,6 +235,13 @@ pub struct Composer {
     /// The placeholder the draft shows: "Ask anything…", or while a turn
     /// runs, when a message waits for it, "Queue a follow-up…".
     placeholder: &'static str,
+    /// The gutters of the reading column, which the task's conversation
+    /// keeps above (its rail's room on the right) and the strip over the
+    /// composer takes too: measured from the last frame's width, the
+    /// rail's room until then. A side chat's are even.
+    gutters: ColumnGutters,
+    /// What the column's probe measured last.
+    gutters_seen: Rc<Cell<Option<ColumnGutters>>>,
     _send: Option<Task<()>>,
     _stop: Option<Task<()>>,
     _configure: Option<Task<()>>,
@@ -330,6 +341,8 @@ impl Composer {
             configuring: None,
             error: None,
             placeholder: copy::COMPOSER_PLACEHOLDER.get(cx),
+            gutters: ColumnGutters::Rail,
+            gutters_seen: Rc::default(),
             _send: None,
             _stop: None,
             _configure: None,
@@ -357,7 +370,50 @@ impl Composer {
         this.draft_key = None;
         this._subscriptions.push(cx.observe(&chat, |_, _, cx| cx.notify()));
         this.side = Some(chat);
+        this.gutters = ColumnGutters::Even;
         this
+    }
+
+    /// The gutters of the composer's reading column: in the window, the
+    /// task's conversation's, which keep its prompt rail's room on the
+    /// right in a wide enough pane, also while a new task is drafted, so
+    /// nothing moves on the first send; a side chat's are even. The strip
+    /// over the composer takes them too.
+    pub fn column_gutters(&self) -> ColumnGutters {
+        self.gutters
+    }
+
+    /// An empty element over the composer's column row that, once painted,
+    /// hands the gutters its width keeps to the composer: the row is as
+    /// wide as the transcript above it, so they are the transcript's.
+    fn column_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let seen = self.gutters_seen.clone();
+        let composer = cx.weak_entity();
+        canvas(
+            |_, _, _| {},
+            move |bounds, _, window, cx| {
+                let width = f32::from(bounds.size.width) / f32::from(window.rem_size());
+                let gutters = ColumnGutters::for_transcript(true, width);
+                if seen.replace(Some(gutters)) == Some(gutters) {
+                    return;
+                }
+                let composer = composer.clone();
+                // Paint must not change state; the composer takes it after
+                // this frame.
+                cx.defer(move |cx| {
+                    composer
+                        .update(cx, |composer, cx| {
+                            if composer.gutters != gutters {
+                                composer.gutters = gutters;
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                });
+            },
+        )
+        .absolute()
+        .inset_0()
     }
 
     /// The side chat it sends for, when it is one's.
@@ -2070,23 +2126,30 @@ impl Render for Composer {
             (quotes, files) => quotes.or(files),
         };
         let action = self.render_action_button(window, cx);
-        // The outer row centres the dock in the reading column, 16 px above
-        // the plate's bottom edge; queued messages sit right above it.
-        h_flex()
+        let dock =
+            v_flex().w_full().child(self.render_dock(controls, chips, note, action, window, cx));
+        // The outer row puts the dock in the reading column, 16 px above the
+        // plate's bottom edge; queued messages sit right above it.
+        let row = h_flex()
             .key_context(COMPOSER_CONTEXT)
             .on_action(cx.listener(Self::on_enter))
             .flex_shrink_0()
             .w_full()
-            .justify_center()
-            .px(dp(COLUMN_GUTTER))
             .pt(dp(8.))
-            .pb(dp(16.))
-            .child(
-                v_flex()
-                    .w_full()
-                    .max_w(column_max_width())
-                    .child(self.render_dock(controls, chips, note, action, window, cx)),
-            )
+            .pb(dp(16.));
+        if self.side.is_some() {
+            // A side chat's: centred inside even gutters in its panel.
+            return row
+                .justify_center()
+                .px(dp(COLUMN_GUTTER))
+                .child(dock.max_w(column_max_width()))
+                .into_any_element();
+        }
+        // The task's: the transcript's column, from a row inset as the
+        // transcript is, whose width the probe measures.
+        transcript_inset(row)
+            .child(reading_column(self.gutters, dock).relative().child(self.column_probe(cx)))
+            .into_any_element()
     }
 }
 

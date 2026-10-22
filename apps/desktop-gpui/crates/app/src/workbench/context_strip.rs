@@ -56,7 +56,7 @@ use review::{ChangeSummary, ChangeTotals};
 use shared::copy::review as review_copy;
 use shared::copy::{self, Locale};
 use shared::icons::MakaIcon;
-use shared::layout::COLUMN_MAX_WIDTH_REMS;
+use shared::layout::{reading_column, transcript_inset};
 use shared::menu::{MenuPlacement, MenuSlot};
 use shared::theme::{ActiveMakaPalette as _, tabular_nums, tinted_button};
 use workspace::actions::ToggleReview;
@@ -116,8 +116,9 @@ impl Workbench {
         cx.notify();
     }
 
-    /// The strip above the composer, in the composer's column, for an
-    /// existing task; `None` in the new task's draft.
+    /// The strip above the composer, in the composer's column (the
+    /// transcript's, with its gutters), for an existing task; `None` in the
+    /// new task's draft.
     pub(super) fn render_context_strip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.catalog.read(cx).selected_id()?;
         let maka = cx.maka();
@@ -130,8 +131,6 @@ impl Workbench {
             .id("context-strip")
             .test_support()
             .w_full()
-            .max_w(rems(COLUMN_MAX_WIDTH_REMS))
-            .mx_auto()
             .h_8()
             .px(rems(COMPOSER_INSET_REMS))
             .gap_1()
@@ -192,13 +191,10 @@ impl Workbench {
                         ),
                 )
             });
+        let gutters = self.composer.read(cx).column_gutters();
         Some(
-            div()
-                .id("context-strip-row")
-                .flex_shrink_0()
-                .w_full()
-                .px_6()
-                .child(strip)
+            transcript_inset(div().id("context-strip-row").flex_shrink_0().w_full())
+                .child(reading_column(gutters, strip))
                 .into_any_element(),
         )
     }

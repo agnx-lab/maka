@@ -320,7 +320,9 @@ pub use session_transcript::{
     TranscriptAssemblyError, TranscriptDirection, TranscriptEntry,
 };
 pub use session_turns::{
-    SESSION_TURNS_QUERY_MAX_CONTRIBUTIONS, SessionTurnContribution, SessionTurnState,
+    SESSION_TURN_LANDMARK_MAX_ITEMS, SESSION_TURNS_QUERY_MAX_CONTRIBUTIONS,
+    SessionTurnContribution, SessionTurnLandmark, SessionTurnLandmarksQuery,
+    SessionTurnLandmarksQueryInput, SessionTurnLandmarksQueryResult, SessionTurnState,
     SessionTurnsQuery, SessionTurnsQueryInput, SessionTurnsQueryResult, latest_completed_turn,
 };
 pub use session_update::{

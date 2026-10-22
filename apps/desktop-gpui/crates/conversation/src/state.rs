@@ -31,9 +31,11 @@ use host_protocol::{
     SessionCatalogProjection, SessionCatalogQuery, SessionCatalogQueryInput,
     SessionCatalogQueryResult, SessionConfigurationPatch, SessionConfigurationUpdate,
     SessionConfigurationUpdateInput, SessionTranscriptPage, SessionTranscriptPageQuery,
-    SessionUpdateResult, SubscriptionClose, SubscriptionClosedReason, SubscriptionFrame,
-    SubscriptionIdInput, SubscriptionOpen, SubscriptionOpenInput, SubscriptionOpenResult,
-    SubscriptionReady, ThinkingLevel, TurnSnapshot, TurnStop, TurnStopInput,
+    SessionTurnLandmark, SessionTurnLandmarksQuery, SessionTurnLandmarksQueryInput,
+    SessionTurnLandmarksQueryResult, SessionUpdateResult, SubscriptionClose,
+    SubscriptionClosedReason, SubscriptionFrame, SubscriptionIdInput, SubscriptionOpen,
+    SubscriptionOpenInput, SubscriptionOpenResult, SubscriptionReady, ThinkingLevel, TurnSnapshot,
+    TurnStop, TurnStopInput,
 };
 use host_protocol::{
     MAX_ATTACHMENT_COUNT, MessagePlacement, MessageQueueEntryState, Operation, QueueEntryPromote,
@@ -390,6 +392,10 @@ pub enum SessionPtyEvent {
 /// ([`Self::set_whole_history_wanted`], and the find bar's
 /// [`Self::set_find_history_wanted`]). Background reads go one page at a
 /// time, never while a turn runs or starts, and resume when it ends.
+///
+/// While a view shows the prompt rail ([`Self::set_turn_index_wanted`]) and
+/// older history lies outside the transcript, the Session's index of every
+/// Turn is read once per transcript ([`Self::turn_index`]).
 pub struct ConversationState {
     host: Entity<HostSession>,
     session_id: Option<SharedString>,
@@ -423,6 +429,13 @@ pub struct ConversationState {
     /// The find bar wants the whole history
     /// ([`Self::set_find_history_wanted`]).
     find_history_wanted: bool,
+    /// A view shows the Session's index of every Turn
+    /// ([`Self::set_turn_index_wanted`]).
+    turn_index_wanted: bool,
+    /// The Session's index of every Turn, as the last read answered.
+    turn_index: Option<Arc<[SessionTurnLandmark]>>,
+    /// The open (`generation`) the index was last asked for.
+    turn_index_asked: Option<u64>,
     /// Changes applied since the last commit.
     pending: Vec<Change>,
     /// A commit was held back by the rate limit.
@@ -463,6 +476,7 @@ pub struct ConversationState {
     _ready: Option<Task<()>>,
     _page: Option<Task<()>>,
     _older: Option<Task<()>>,
+    _turn_index: Option<Task<()>>,
     _send: Option<Task<()>>,
     _upload: Option<Task<()>>,
     _queue: Option<Task<()>>,
@@ -527,6 +541,9 @@ impl ConversationState {
             background_pages: 0,
             whole_history_wanted: false,
             find_history_wanted: false,
+            turn_index_wanted: false,
+            turn_index: None,
+            turn_index_asked: None,
             pending: Vec::new(),
             commit_pending: false,
             session_changed: false,
@@ -550,6 +567,7 @@ impl ConversationState {
             _ready: None,
             _page: None,
             _older: None,
+            _turn_index: None,
             _send: None,
             _upload: None,
             _queue: None,
@@ -719,6 +737,7 @@ impl ConversationState {
         self._configure = None;
         self.whole_history_wanted = false;
         self.find_history_wanted = false;
+        self.forget_turn_index();
         self.pending.clear();
         self.session_changed = true;
         self.open(cx);
@@ -746,6 +765,9 @@ impl ConversationState {
         self.older_loading = false;
         self.older_in_background = false;
         self.older_failure = None;
+        // The index on screen stays until the next transcript's read
+        // answers.
+        self._turn_index = None;
     }
 
     fn open(&mut self, cx: &mut Context<Self>) {
@@ -1011,6 +1033,98 @@ impl ConversationState {
             self.older_loading = false;
             self.older_in_background = false;
             self.commit_now(cx);
+        }
+    }
+
+    /// Whether a view shows the Session's index of every Turn (the prompt
+    /// rail). While one does, `session.turn_landmarks.query` samples the
+    /// Session once per transcript, and only while older history lies
+    /// outside what the transcript holds: new Turns land in the tail, which
+    /// the transcript holds anyway. Desktop reads it the same way
+    /// (`transcript-reading-position-controller.tsx`), once per Session and
+    /// range generation. A failed read is left alone (logged); a reopen asks
+    /// again.
+    pub fn set_turn_index_wanted(&mut self, wanted: bool, cx: &mut Context<Self>) {
+        if self.turn_index_wanted == wanted {
+            return;
+        }
+        self.turn_index_wanted = wanted;
+        if !wanted {
+            self.forget_turn_index();
+        }
+        self.sync_turn_index(cx);
+    }
+
+    /// The Session's index of every Turn, oldest first, sampled by the Host
+    /// to at most [`host_protocol::SESSION_TURN_LANDMARK_MAX_ITEMS`]: empty
+    /// until it is read, and again once the transcript holds the Session's
+    /// first row.
+    pub fn turn_index(&self) -> &[SessionTurnLandmark] {
+        self.turn_index.as_deref().unwrap_or_default()
+    }
+
+    fn forget_turn_index(&mut self) {
+        self.turn_index = None;
+        self.turn_index_asked = None;
+        self._turn_index = None;
+    }
+
+    /// Asks for the index when it is wanted and this transcript has not
+    /// asked yet; drops it once the transcript holds the whole history.
+    fn sync_turn_index(&mut self, cx: &mut Context<Self>) {
+        let Some(transcript) = &self.transcript else { return };
+        if !transcript.has_older_history() {
+            if self.turn_index_asked.is_some() || self.turn_index.is_some() {
+                self.forget_turn_index();
+            }
+            return;
+        }
+        let generation = self.generation;
+        if !self.turn_index_wanted
+            || self.phase != ConversationPhase::Live
+            || self.turn_index_asked == Some(generation)
+        {
+            return;
+        }
+        let Some(session_id) = self.session_id.clone() else { return };
+        self.turn_index_asked = Some(generation);
+        let input = SessionTurnLandmarksQueryInput::sample(session_id.to_string());
+        let request = self.requester(cx).request::<SessionTurnLandmarksQuery>(&input);
+        self._turn_index = Some(cx.spawn(async move |this, cx| {
+            let result = request.await;
+            this.update(cx, |this, cx| this.finish_turn_index(generation, &session_id, result, cx))
+                .ok();
+        }));
+    }
+
+    fn finish_turn_index(
+        &mut self,
+        generation: u64,
+        session_id: &str,
+        result: Result<SessionTurnLandmarksQueryResult, HostRequestError>,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.generation || self.session_id.as_deref() != Some(session_id) {
+            return;
+        }
+        self._turn_index = None;
+        match result {
+            Ok(index) if index.session_id == session_id => {
+                log::info!(
+                    "session {session_id}: {} turn landmarks through {:?}",
+                    index.landmarks.len(),
+                    index.through_sequence
+                );
+                self.turn_index = Some(index.landmarks.into());
+                self.commit_now(cx);
+            }
+            Ok(index) => log::warn!(
+                "session {session_id}: session.turn_landmarks.query answered for {}",
+                index.session_id
+            ),
+            Err(error) => {
+                log::info!("session {session_id}: session.turn_landmarks.query failed: {error}")
+            }
         }
     }
 
@@ -1611,6 +1725,7 @@ impl ConversationState {
     }
 
     fn commit_now(&mut self, cx: &mut Context<Self>) {
+        self.sync_turn_index(cx);
         self.commit_pending = false;
         let changes = std::mem::take(&mut self.pending);
         if !changes.is_empty() {

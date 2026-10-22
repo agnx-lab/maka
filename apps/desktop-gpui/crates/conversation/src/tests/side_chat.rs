@@ -1294,3 +1294,46 @@ fn a_mode_the_new_fork_did_not_take_is_set_before_the_next_send(cx: &mut TestApp
     assert_eq!(submits[0]["sessionId"], fork.as_str());
     assert_eq!(bench.transport.requests("session.branch.create").len(), 1, "the same fork");
 }
+
+#[gpui_kit::test]
+fn a_side_chat_shows_no_prompt_rail(cx: &mut TestAppContext) {
+    let transport = Arc::new(ScriptedHost::default());
+    let saved = Arc::new(Mutex::new(None));
+    // No completed Turn: the fork is empty and hides nothing, so its tail
+    // shows the three Turns it holds.
+    let mut copied = turn_rows("t1", 1);
+    copied.extend(turn_rows("t2", 10));
+    copied.extend(turn_rows("t3", 20));
+    script(
+        &transport,
+        saved.clone(),
+        Script { turns: vec![turn("t0", 1, "running")], copied, conflict: false, model: None },
+    );
+    // Wide enough for the rail's room beside the column, and too narrow
+    // to centre the column with it.
+    let bench = Bench::open_at(transport, saved, px(710.), cx);
+    bench.send("Hi", cx);
+    bench.with_window(cx, |_, _| {});
+    bench.with_window(cx, |window, _| {
+        for turn in ["t1", "t2", "t3"] {
+            let row = item_element_id(turn, &ItemKey::User(turn.into()));
+            assert!(window.try_find(row).is_some(), "{turn} shows");
+        }
+        assert!(window.try_find("prompt-rail").is_none(), "no rail in a side chat");
+        // Nor its room: the column keeps its even gutters, as does the
+        // composer's in the panel.
+        let region = window.find("conversation-transcript").bounds();
+        let row = window.find(item_element_id("t1", &ItemKey::User("t1".into()))).bounds();
+        let left = row.left() - region.left() - px(1.);
+        let right = region.right() - px(1.) - row.right();
+        assert!((left - px(24.)).abs() < px(1.), "the left gutter: {left:?}");
+        assert!((right - px(24.)).abs() < px(1.), "the right gutter: {right:?}");
+        let dock = window.find("composer").bounds();
+        let width = window.viewport_size().width;
+        assert!((dock.left() - px(24.)).abs() < px(1.), "the composer's left: {dock:?}");
+        assert!((width - dock.right() - px(24.)).abs() < px(1.), "its right: {dock:?}");
+    });
+    let view = bench.panel.read_with(cx, |panel, _| panel.conversation().clone());
+    assert!(view.read_with(cx, |view, _| view.prompt_rail_ticks().is_empty()));
+    assert!(bench.transport.requests("session.turn_landmarks.query").is_empty());
+}

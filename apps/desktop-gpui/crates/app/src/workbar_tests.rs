@@ -159,6 +159,14 @@ impl Bench {
         self.harness.transport.requests("runtime.resource.start").len()
     }
 
+    /// The refs of the terminals the window holds, closing ones among them.
+    fn held_terminals(&self, cx: &mut TestAppContext) -> Vec<String> {
+        self.harness.workbench.read_with(cx, |workbench, cx| {
+            let terminals = workbench.terminals().read(cx).terminals().iter();
+            terminals.map(|terminal| terminal.read(cx).resource_ref().to_string()).collect()
+        })
+    }
+
     /// Everything typed into terminals so far.
     fn typed(&self) -> String {
         self.harness
@@ -262,16 +270,62 @@ fn a_tabs_close_button_closes_its_face_and_the_last_one_hides_the_panel(cx: &mut
     bench.click(close("changes"), cx);
     assert_eq!(bench.tabs(cx), [(r1.clone(), "Terminal".into(), true)]);
     assert!(bench.open_workbar(cx));
-    // The terminal's ×: its shell stops, without asking, and the tab goes
-    // when the Host confirms; it was the last, so the panel hides.
+    // The terminal's ×: its shell stops, without asking, and its tab goes at
+    // once, before the Host answers; it was the last, so the panel hides.
     let stop = bench.harness.transport.hold("runtime.resource.stop");
     bench.click(close(&r1), cx);
     assert_eq!(bench.harness.transport.requests("runtime.resource.stop").len(), 1);
-    assert!(bench.exists(shared::domain_element_id("workbar-tab-closing", &r1), cx));
-    stop.try_send(Ok(json!({}))).expect("stop");
-    bench.frame(cx);
     assert!(bench.tabs(cx).is_empty());
     assert!(!bench.open_workbar(cx), "the last face closed hides the panel");
+    assert_eq!(bench.held_terminals(cx), [r1.as_str()], "kept until the Host confirms");
+    // Ctrl+` with only that one: a new terminal starts and shows.
+    bench.press("ctrl-`", cx);
+    assert_eq!(bench.starts(), 1);
+    let started = terminal_ref("started-1");
+    assert_eq!(bench.tabs(cx), [(started.clone(), "Terminal".into(), true)]);
+    stop.try_send(Ok(json!({}))).expect("stop");
+    bench.frame(cx);
+    assert_eq!(bench.held_terminals(cx), [started.as_str()]);
+    assert_eq!(bench.tabs(cx), [(started, "Terminal".into(), true)]);
+}
+
+#[gpui_kit::test]
+fn a_terminal_whose_stop_fails_comes_back_with_a_way_to_close_it_again(cx: &mut TestAppContext) {
+    let bench = Bench::open(&["s1"], &[("s1", &["r1", "r2"])], cx);
+    bench.press("ctrl-`", cx);
+    let (r1, r2) = (terminal_ref("r1"), terminal_ref("r2"));
+    let keys = |bench: &Bench, cx: &mut TestAppContext| -> Vec<(String, bool)> {
+        bench.tabs(cx).into_iter().map(|(key, _, shown)| (key, shown)).collect()
+    };
+    assert_eq!(
+        keys(&bench, cx),
+        [("changes".into(), false), (r1.clone(), true), (r2.clone(), false)]
+    );
+    let stop = bench.harness.transport.hold("runtime.resource.stop");
+    bench.click(close(&r1), cx);
+    assert_eq!(keys(&bench, cx), [("changes".into(), false), (r2.clone(), true)]);
+    stop.try_send(Err(workspace::HostRequestError::Operation {
+        operation: "runtime.resource.stop",
+        code: host_protocol::HostOperationErrorCode::SessionArchived,
+        message: "Session is archived".into(),
+    }))
+    .expect("stop");
+    bench.frame(cx);
+    // Back at the end, not shown, with the failure's mark and its retry.
+    assert_eq!(
+        keys(&bench, cx),
+        [("changes".into(), false), (r2.clone(), true), (r1.clone(), false)]
+    );
+    let retry = shared::domain_element_id("workbar-tab-retry-close", &r1);
+    assert!(bench.exists(retry.clone(), cx));
+    let stop = bench.harness.transport.hold("runtime.resource.stop");
+    bench.click(retry, cx);
+    assert_eq!(bench.harness.transport.requests("runtime.resource.stop").len(), 2);
+    assert_eq!(keys(&bench, cx), [("changes".into(), false), (r2.clone(), true)]);
+    stop.try_send(Ok(json!({}))).expect("stop");
+    bench.frame(cx);
+    assert_eq!(bench.held_terminals(cx), [r2.as_str()]);
+    assert_eq!(keys(&bench, cx), [("changes".into(), false), (r2, true)]);
 }
 
 #[gpui_kit::test]

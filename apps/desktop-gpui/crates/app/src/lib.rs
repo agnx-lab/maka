@@ -280,6 +280,8 @@ mod host_switch_tests;
 #[cfg(test)]
 mod pet_tests;
 #[cfg(test)]
+mod prompt_rail_tests;
+#[cfg(test)]
 mod reply_path_tests;
 #[cfg(test)]
 mod review_tests;

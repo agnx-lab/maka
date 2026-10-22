@@ -23,7 +23,9 @@
 //! what the person does into what the PTY reads: keys, text and the IME,
 //! pastes, the mouse and the wheel. It keeps the tabs' order (the order the
 //! terminals opened in here, per task, by ref), the active terminal of each
-//! task, and a find over the active terminal's grid and scrollback.
+//! task, and a find over the active terminal's grid and scrollback. A
+//! terminal's tab goes as soon as the person closes it, as in Zed and
+//! Alacritty, while the Host stops the shell behind it.
 //!
 //! Keys. GPUI matches action bindings up the whole key-context stack
 //! before any key handler sees a key, so a key the app binds elsewhere
@@ -180,6 +182,8 @@ pub struct TerminalTab {
     /// The bell rang since the terminal was last typed in.
     pub bell: bool,
     pub exited: bool,
+    /// Open, or [`CloseState::Failed`] with the stop's failure: a terminal
+    /// being closed has no tab.
     pub close: CloseState,
 }
 
@@ -378,6 +382,14 @@ impl TerminalView {
         self.terminals.read(cx).session_id().cloned()
     }
 
+    /// The selected task's terminals the view shows: all but those closing,
+    /// whose tabs go when the person closes them, not when the Host
+    /// confirms.
+    fn shown_terminals<'a>(&self, cx: &'a App) -> impl Iterator<Item = &'a Entity<Terminal>> {
+        let terminals = self.terminals.read(cx).terminals().iter();
+        terminals.filter(|terminal| !terminal.read(cx).is_closing())
+    }
+
     /// The selected task's terminals in the tabs' order.
     fn ordered(&self, cx: &App) -> Vec<Entity<Terminal>> {
         let terminals = self.terminals.read(cx);
@@ -388,9 +400,7 @@ impl TerminalView {
         order
             .iter()
             .filter_map(|resource_ref| {
-                terminals
-                    .terminals()
-                    .iter()
+                self.shown_terminals(cx)
                     .find(|terminal| terminal.read(cx).resource_ref() == resource_ref)
                     .cloned()
             })
@@ -421,9 +431,10 @@ impl TerminalView {
             .collect()
     }
 
-    /// Whether the selected task has terminals.
+    /// Whether the selected task has terminals the view shows: one being
+    /// closed no longer counts.
     pub fn has_terminals(&self, cx: &App) -> bool {
-        !self.terminals.read(cx).terminals().is_empty()
+        self.shown_terminals(cx).next().is_some()
     }
 
     /// The selected task's active terminal: the one last made active, or
@@ -492,8 +503,9 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// Ctrl+`: a terminal to show. With none in the task one starts (once
-    /// the task's list is read, so a terminal it lists is not doubled).
+    /// Ctrl+`: a terminal to show. With none in the task (or only one
+    /// being closed) one starts, once the task's list is read, so a
+    /// terminal it lists is not doubled.
     pub fn ensure_terminal(&mut self, cx: &mut Context<Self>) {
         if self.has_terminals(cx) {
             return;
@@ -508,8 +520,10 @@ impl TerminalView {
     }
 
     /// Closes the terminal `resource_ref`: stops its shell, without asking
-    /// (the model cannot see what runs in it). Its tab goes when the Host
-    /// confirms; a failed stop can be closed again.
+    /// (the model cannot see what runs in it). Its tab goes at once, the
+    /// shell ending behind it, and its neighbour takes over when it was
+    /// active. A failed stop brings the tab back, at the end and without
+    /// taking over, to be closed again.
     pub fn close(&mut self, resource_ref: &SharedString, cx: &mut Context<Self>) {
         let Some(terminal) = self
             .ordered(cx)
@@ -519,7 +533,7 @@ impl TerminalView {
             return;
         };
         self.terminals.update(cx, |terminals, cx| terminals.close(&terminal, cx));
-        cx.notify();
+        self.sync(cx);
     }
 
     /// Restart on an exited terminal: it goes, and a new one starts in its
@@ -535,16 +549,23 @@ impl TerminalView {
     // Following the terminals.
 
     /// Follows the owner: the selected task's terminals join the order
-    /// (new ones at the end), closed ones leave it, and each is watched.
+    /// (new ones at the end), closed and closing ones leave it, and each
+    /// shown is watched. The owner tells of a close and of a failed stop,
+    /// whose terminal joins again at the end.
     fn sync(&mut self, cx: &mut Context<Self>) {
-        let (session, present, inventory) = {
+        let (session, present, closing, inventory) = {
             let terminals = self.terminals.read(cx);
-            let present: Vec<(SharedString, Entity<Terminal>)> = terminals
-                .terminals()
-                .iter()
-                .map(|terminal| (terminal.read(cx).resource_ref().clone(), terminal.clone()))
-                .collect();
-            (terminals.session_id().cloned(), present, terminals.inventory().clone())
+            let mut present: Vec<(SharedString, Entity<Terminal>)> = Vec::new();
+            let mut closing: Vec<SharedString> = Vec::new();
+            for terminal in terminals.terminals() {
+                let held = terminal.read(cx);
+                if held.is_closing() {
+                    closing.push(held.resource_ref().clone());
+                } else {
+                    present.push((held.resource_ref().clone(), terminal.clone()));
+                }
+            }
+            (terminals.session_id().cloned(), present, closing, terminals.inventory().clone())
         };
         let Some(session) = session else {
             self.terminal_subscriptions.clear();
@@ -561,13 +582,16 @@ impl TerminalView {
         if inventory != Inventory::Loading {
             order.retain(|resource_ref| present.iter().any(|(listed, _)| listed == resource_ref));
         }
+        // A terminal being closed leaves at once, whatever the list.
+        order.retain(|resource_ref| !closing.contains(resource_ref));
         for (resource_ref, _) in &present {
             if !order.contains(resource_ref) {
                 order.push(resource_ref.clone());
             }
         }
         let order = order.clone();
-        // The active terminal closed: its neighbour before it takes over.
+        // The active terminal closed, or is closing: its neighbour before
+        // it takes over.
         if let Some(active) = self.active.get(&session).cloned()
             && !order.contains(&active)
             && before.contains(&active)

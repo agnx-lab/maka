@@ -193,6 +193,9 @@ The version lives only in the workspace `Cargo.toml`. A release moves the
     are removed at the next launch.
 - Find in the conversation (⌘F), with match case and whole word; each
   Chinese character counts as a word.
+- Jump by prompt: a rail on the conversation's right edge with a tick per
+  prompt; hovering one shows the prompt and the start of its reply, and a
+  click scrolls to it.
 - Search every task (⇧⌘F, the sidebar's search button, or the palette): the
   Search page, which opens a task at the passage it found.
 - Syntax colours in code blocks, diffs and file previews.

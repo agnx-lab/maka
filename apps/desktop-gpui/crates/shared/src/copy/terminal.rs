@@ -52,8 +52,6 @@ texts! {
     BELL = "Bell", "响铃", "響鈴";
     /// The shell ended.
     EXITED = "Exited", "已退出", "已結束";
-    /// The stop is on its way to the Host; the tab goes when it confirms.
-    CLOSING = "Closing…", "正在关闭…", "正在關閉…";
     /// The stop failed; the tab's button tries again.
     CLOSE_FAILED = "Couldn’t close the terminal.", "无法关闭终端。", "無法關閉終端機。";
     RETRY_CLOSE = "Close again", "再次关闭", "再次關閉";

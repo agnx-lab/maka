@@ -922,12 +922,18 @@ fn another_session_closes_the_subscription_and_a_gap_reopens_it(cx: &mut TestApp
     );
     assert_eq!(harness.transport.requests("subscription.open").len(), 2);
     assert_eq!(harness.phase(cx), ConversationPhase::Opening);
+    // Narrower than the column with its gutters: the line still keeps the
+    // transcript's column, which is inset in the view.
+    cx.simulate_window_resize(harness.window.into(), size(px(610.), px(800.)));
+    settle(cx);
     harness.with_window(cx, |window, _| {
-        assert!(window.find("conversation-status").visible(), "the reopen is announced");
-        assert!(
-            window.find(item_element_id(TURN, &ItemKey::User(TURN.into()))).visible(),
-            "the last transcript stays visible meanwhile"
-        );
+        let status = window.find("conversation-status");
+        assert!(status.visible(), "the reopen is announced");
+        let user = window.find(item_element_id(TURN, &ItemKey::User(TURN.into())));
+        assert!(user.visible(), "the last transcript stays visible meanwhile");
+        let (status, user) = (status.bounds(), user.bounds());
+        assert_near(status.left(), user.left(), "the line's left edge");
+        assert_near(status.right(), user.right(), "the line's right edge");
     });
 
     reopened.try_send(Ok(open_result("sub-2"))).expect("release");
@@ -1988,6 +1994,7 @@ mod find;
 mod history;
 mod links;
 mod paths;
+mod prompt_rail;
 mod pty;
 mod queue;
 mod reasoning;

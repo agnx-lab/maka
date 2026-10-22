@@ -141,6 +141,37 @@ two reviewers (Opus and Fable) without a sign-off per step; each package is comm
   the default app; text, source, an HTML page or an image within the Files face's limits
   previews there, with Show in Finder and Copy Path. Nothing else is opened or launched. No
   right-click menu or tooltip on a path: the kit's text view has no hook for either.
+- **The prompt rail (F47)** is Desktop's (`prompt-anchor-rail.tsx`): a tick per Turn whose
+  prompt has text (Desktop leaves out a prompt of files only, as the Host's index does), sampled
+  to 64 past that, the tick of the Turn at the top of the transcript widest; a card after 120 ms
+  with the prompt and the first 140 characters of the final reply; a click scrolls the prompt to
+  the top. Turns the transcript does not hold come from `session.turn_landmarks.query`, read
+  once per transcript while older history lies outside it, and a click on one reads older pages
+  until it is held, as `open_at_passage` does. The kit's `MessageScroller` reports no scroll
+  position, so the Turn being read comes from the bounds the rows painted at (`Paging` records
+  them), read after the list paints and taken a frame later. The rail rests 16 px in, clear of
+  the list's scrollbar track (Desktop: 12 px, clear of macOS's overlay scrollbar). Desktop shows
+  its rail from an 825 px window, workbar open or not; here the task's conversation keeps the
+  hovered rail's 53 px right of its reading column from a 560 px transcript (the column keeps
+  483 px), whatever the number of prompts, so nothing moves when the third prompt brings the
+  rail: the column stays centred while that leaves 53 px beside it (from 826 px); narrower, it
+  keeps 53 px on the right and at least 24 on the left, and narrows once both are reached (from
+  797 px down, 24 and 53 exactly). The transcript's rows, its status line, the strip over the
+  composer and the composer (in a draft too, so the first send moves nothing) share that column;
+  the gutters are measured from the last frame's width. Under 560 px the gutters are even and
+  the rail hides. The kit's HoverCard opens for the pointer only, so a tick reached with Tab
+  says its prompt through its name and shows no card; the kit's Button carries no accessible
+  current or selected state, so which tick is active shows only on screen. A side chat has no
+  rail.
+- **A closed terminal's tab goes at once (F48)**, as in Zed and Alacritty, not when the Host
+  answers the stop as in Desktop. The Host's `runtime.resource.stop` sends SIGTERM to the shell's
+  process group, waits up to 2 s (`DEFAULT_PROCESS_TERMINATION_GRACE_MS`) for it to exit, then
+  SIGKILL, and answers only then; a terminal's interactive login shell ignores SIGTERM, so every
+  close took the whole grace (2.08 s measured on a dev Host). Sending SIGHUP first to a PTY run is
+  a separate Host fix, and would still leave a round trip. The owner keeps the terminal until the
+  close is confirmed (its stop, due again after a reconnect, and its place under the PTY limit
+  unchanged); a start at the limit meanwhile waits for the close rather than show the limit, and a
+  failed stop brings the tab back at the end, not active, with its retry.
 
 ## Packages
 
@@ -162,6 +193,8 @@ two reviewers (Opus and Fable) without a sign-off per step; each package is comm
 | F44 | Side chat fixes from an adversarial review: the ledger merged across runs and never overwritten unread, owner locks taken before they are named, `operation_conflict` settled, removals tried again, the picked mode set again | a754ada..cbbca54 | done |
 | F45 | A State Root whose disk identity changed (macOS remounted its volume): Desktop's repair prompt in the disconnected strip, Repair workspace beside Retry, the marker's `rootIdentity` replaced under Maka's marker lock with before and after checks | e6d0a25..b5ec632 | done |
 | F46 | File paths in replies open the file on a Host on this machine: previewed in Files, opened in the default app (documents only) or shown in Finder | bf7cd70..a527e4d | done |
+| F47 | The prompt rail: a tick per prompt on the transcript's right edge that jumps to it, with prompts not held yet from the Host's Turn index | 6531dd0..9caff64 | done |
+| F48 | A closed terminal's tab goes at once, the shell stopped behind it; a start at the PTY limit waits for the close | 8964432..4ce9811 | done |
 
 Later candidates: Browser (gpui-kit has a `webview` crate; the model's browser tools need
 client capabilities), and a webview for the Files face's HTML pages, which would run their

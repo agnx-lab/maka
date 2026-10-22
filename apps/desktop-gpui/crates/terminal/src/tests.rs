@@ -897,6 +897,63 @@ fn a_ninth_live_terminal_is_refused_here(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_start_waiting_on_a_close_counts_again_when_the_stop_fails_or_is_confirmed(
+    cx: &mut TestAppContext,
+) {
+    let live = |session: &str, names: std::ops::Range<u32>| -> Vec<Value> {
+        names.map(|n| terminal_resource(session, &format!("{session}-{n}"), "running")).collect()
+    };
+    let harness = Harness::new(live(SESSION, 0..8), cx);
+    let starts = |harness: &Harness| harness.transport.requests("runtime.resource.start");
+    let closing = harness.terminal(0, cx);
+    let close = |cx: &mut TestAppContext| {
+        harness.terminals.update(cx, |terminals, cx| terminals.close(&closing, cx));
+        settle(cx);
+    };
+    let start = |cx: &mut TestAppContext| {
+        harness.terminals.update(cx, |terminals, cx| terminals.start(cx));
+        settle(cx);
+    };
+    let stop = harness.transport.hold("runtime.resource.stop");
+    close(cx);
+    start(cx);
+    assert_eq!(harness.start_state(cx), StartState::Starting, "it waits for the close");
+    // The stop fails: nothing is closing and eight still run.
+    stop.try_send(operation_error(HostOperationErrorCode::SessionArchived, "Session is archived"))
+        .expect("stop");
+    settle(cx);
+    assert_eq!(harness.start_state(cx), StartState::LimitReached);
+    assert!(starts(&harness).is_empty());
+
+    // Closed again, then another task selected: the start that waited
+    // there is dropped.
+    harness.terminals.update(cx, |terminals, cx| terminals.dismiss_start(cx));
+    let stop = harness.transport.hold("runtime.resource.stop");
+    close(cx);
+    start(cx);
+    assert_eq!(harness.start_state(cx), StartState::Starting);
+    harness.select(OTHER, cx);
+    assert_eq!(harness.start_state(cx), StartState::Idle);
+
+    // The previous task's terminal is still closing: a start here waits
+    // for it too, and goes once it is confirmed.
+    start(cx);
+    assert_eq!(harness.start_state(cx), StartState::Starting);
+    assert!(starts(&harness).is_empty());
+    harness.transport.reply(
+        "runtime.resource.start",
+        Ok(json!({"resource": terminal_resource(OTHER, "new", "running")["result"]})),
+    );
+    stop.try_send(Ok(json!({}))).expect("stop");
+    settle(cx);
+    let started = starts(&harness);
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0]["sessionId"], OTHER);
+    assert_eq!(harness.start_state(cx), StartState::Idle);
+    assert_eq!(harness.terminals.read_with(cx, |terminals, _| terminals.live_count()), 8);
+}
+
+#[gpui_kit::test]
 fn another_tasks_terminal_ending_frees_its_place_under_the_limit(cx: &mut TestAppContext) {
     let live = |session: &str, names: std::ops::Range<u32>| -> Vec<Value> {
         names.map(|n| terminal_resource(session, &format!("{session}-{n}"), "running")).collect()

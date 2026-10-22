@@ -17,16 +17,21 @@
  * under the License.
  */
 
-//! A Session's Turns from its durable transcript: `session.turns.query`.
+//! A Session's Turns from its durable transcript: `session.turns.query`
+//! and its Turn index, `session.turn_landmarks.query`.
 //!
 //! Source: `packages/runtime-host/src/protocol/session-turns.ts`
 //! (`SESSION_TURNS_OPERATION_SPECS`, `decodeSessionTurnsQueryInput`,
 //! `decodeSessionTurnsQueryResult`, `mergeSessionTurnContributions`,
-//! `projectSessionTurnContribution`). Maka Desktop reads every page
+//! `projectSessionTurnContribution`, `decodeSessionTurnLandmarksQueryInput`,
+//! `decodeSessionTurnLandmarksQueryResult`). Maka Desktop reads every page
 //! (`listSessionTurns` in apps/desktop/src/main/runtime-host-client.ts) and
 //! forks a side chat through the latest completed Turn
 //! (`latestSettledTurnId` in
 //! apps/desktop/src/renderer/features/workbar/tools/side-chat/quote-companion-core.ts).
+//! It reads the Turn index (`listTurnLandmarks` there) for the prompt rail,
+//! once per Session while history lies outside the transcript it holds
+//! (apps/desktop/src/renderer/features/conversation/controller/transcript-reading-position-controller.tsx).
 
 use std::collections::HashMap;
 
@@ -127,6 +132,78 @@ impl Operation for SessionTurnsQuery {
     const NAME: &'static str = "session.turns.query";
     type Input = SessionTurnsQueryInput;
     type Output = SessionTurnsQueryResult;
+}
+
+/// `SESSION_TURN_LANDMARK_MAX_ITEMS`: the most landmarks one query asks
+/// for and one answer carries.
+pub const SESSION_TURN_LANDMARK_MAX_ITEMS: u32 = 64;
+
+/// `SessionTurnLandmarksQueryInput` (exactly these three fields; `turnId`
+/// is `null` to sample the Session, as Desktop's
+/// `listTurnLandmarks(sessionId, null)` asks with `maxLandmarks: 64`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(test, serde(deny_unknown_fields))]
+#[non_exhaustive]
+pub struct SessionTurnLandmarksQueryInput {
+    pub session_id: String,
+    /// 1 to [`SESSION_TURN_LANDMARK_MAX_ITEMS`].
+    pub max_landmarks: u32,
+    /// Look up this one Turn instead of sampling the Session.
+    pub turn_id: Option<String>,
+}
+
+impl SessionTurnLandmarksQueryInput {
+    /// Up to [`SESSION_TURN_LANDMARK_MAX_ITEMS`] of `session_id`'s Turns,
+    /// spread across the Session.
+    pub fn sample(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+            max_landmarks: SESSION_TURN_LANDMARK_MAX_ITEMS,
+            turn_id: None,
+        }
+    }
+}
+
+/// `SessionTurnLandmark`: where one Turn lies in its Session and what its
+/// prompt says. A sampled landmark always has a label: the Host leaves out
+/// a Turn whose prompt is empty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(test, serde(deny_unknown_fields))]
+#[non_exhaustive]
+pub struct SessionTurnLandmark {
+    pub turn_id: String,
+    /// No row of the Turn sits before this sequence.
+    pub sequence: u64,
+    /// Nor after this one.
+    pub last_sequence: u64,
+    /// The prompt (`displayText ?? text`), trimmed and cut to at most 96
+    /// UTF-8 bytes.
+    pub label: String,
+}
+
+/// `SessionTurnLandmarksQueryResult`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(test, serde(deny_unknown_fields))]
+#[non_exhaustive]
+pub struct SessionTurnLandmarksQueryResult {
+    pub session_id: String,
+    pub through_sequence: Option<u64>,
+    /// Oldest first; at most [`SESSION_TURN_LANDMARK_MAX_ITEMS`].
+    pub landmarks: Vec<SessionTurnLandmark>,
+}
+
+/// `session.turn_landmarks.query` (mode `query`). Errors include
+/// `not_found`.
+#[derive(Debug)]
+pub enum SessionTurnLandmarksQuery {}
+
+impl Operation for SessionTurnLandmarksQuery {
+    const NAME: &'static str = "session.turn_landmarks.query";
+    type Input = SessionTurnLandmarksQueryInput;
+    type Output = SessionTurnLandmarksQueryResult;
 }
 
 /// The id of the latest Turn that completed, in the order the Turns began:
@@ -238,5 +315,75 @@ mod tests {
         }))
         .expect("decode");
         assert_eq!(next.after(&stuck), None);
+    }
+
+    // The landmark shapes below are the ones the Host's own tests produce:
+    // packages/runtime-host/src/__tests__/session-turns.test.ts (a full
+    // sampled index of 64, each label cut to 96 bytes) and
+    // session-transcript-reader.test.ts (a sample of three prompts, and a
+    // looked-up Turn whose prompt is empty).
+
+    #[test]
+    fn a_landmark_query_samples_the_session_or_looks_up_one_turn() {
+        assert_eq!(
+            serde_json::to_value(SessionTurnLandmarksQueryInput::sample("s1")).expect("encode"),
+            json!({"sessionId": "s1", "maxLandmarks": 64, "turnId": null})
+        );
+        let lookup: SessionTurnLandmarksQueryInput = serde_json::from_value(
+            json!({"sessionId": "s1", "maxLandmarks": 1, "turnId": "turn-first"}),
+        )
+        .expect("decode");
+        assert_eq!(lookup.turn_id.as_deref(), Some("turn-first"));
+    }
+
+    #[test]
+    fn landmark_answers_round_trip() {
+        let sampled = json!({
+            "sessionId": "session-1", "throughSequence": 47,
+            "landmarks": [
+                {"turnId": "turn-0", "sequence": 0, "lastSequence": 7, "label": "prompt 0"},
+                {"turnId": "turn-2", "sequence": 16, "lastSequence": 23, "label": "prompt 2"},
+                {"turnId": "turn-4", "sequence": 32, "lastSequence": 47, "label": "prompt 4"}
+            ]
+        });
+        let result: SessionTurnLandmarksQueryResult =
+            serde_json::from_value(sampled.clone()).expect("decode");
+        assert_eq!(serde_json::to_value(&result).expect("encode"), sampled);
+        let labels: Vec<&str> = result.landmarks.iter().map(|l| l.label.as_str()).collect();
+        assert_eq!(labels, ["prompt 0", "prompt 2", "prompt 4"]);
+
+        let looked_up = json!({
+            "sessionId": "session-1", "throughSequence": 55,
+            "landmarks": [{"turnId": "turn-first", "sequence": 8, "lastSequence": 55, "label": ""}]
+        });
+        let result: SessionTurnLandmarksQueryResult =
+            serde_json::from_value(looked_up.clone()).expect("decode");
+        assert_eq!(serde_json::to_value(&result).expect("encode"), looked_up);
+        assert_eq!((result.landmarks[0].sequence, result.landmarks[0].last_sequence), (8, 55));
+
+        // An empty Session has no watermark and no landmarks.
+        let empty = json!({"sessionId": "session-1", "throughSequence": null, "landmarks": []});
+        let result: SessionTurnLandmarksQueryResult =
+            serde_json::from_value(empty).expect("decode");
+        assert_eq!((result.through_sequence, result.landmarks.len()), (None, 0));
+    }
+
+    #[test]
+    fn a_full_index_takes_the_largest_sequences() {
+        // `Number.MAX_SAFE_INTEGER - index`, the Host test's sequences.
+        let max_safe = (1_u64 << 53) - 1;
+        let landmarks: Vec<Value> = (0..u64::from(SESSION_TURN_LANDMARK_MAX_ITEMS))
+            .map(|index| {
+                json!({"turnId": format!("{index:t<128}"), "sequence": max_safe - index,
+                       "lastSequence": max_safe - index, "label": "\u{0}".repeat(96)})
+            })
+            .collect();
+        let full = json!({"sessionId": "session-1", "throughSequence": 1000,
+                          "landmarks": landmarks});
+        let result: SessionTurnLandmarksQueryResult =
+            serde_json::from_value(full.clone()).expect("decode");
+        assert_eq!(result.landmarks.len(), 64);
+        assert_eq!(result.landmarks[63].sequence, max_safe - 63);
+        assert_eq!(serde_json::to_value(&result).expect("encode"), full);
     }
 }

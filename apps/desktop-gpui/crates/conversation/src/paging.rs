@@ -160,6 +160,27 @@ impl Paging {
         rows.iter().min_by(|a, b| by_top(a, b)).map(|(key, _)| key.clone())
     }
 
+    /// The Turn the reader is at in the last painted frame: that of the
+    /// topmost painted row, other than the older-history row, that reaches
+    /// below the list's top line (Desktop's `layout.turnAt(scrollTop)`). A
+    /// row that ends on the line, as the one before a row `scroll_to_item`
+    /// put at the top does, lies above it. `None` when nothing is painted.
+    ///
+    /// The prompt rail reads it here because the kit's `MessageScroller`
+    /// keeps its list state private and reports no scroll position; the
+    /// rows' painted bounds are the frame's final layout, after any
+    /// autoscroll, and reading them needs no change to the kit. Call it
+    /// after the list has painted (a probe placed after the list).
+    pub(crate) fn reading_turn(&self) -> Option<String> {
+        let (viewport, padding) = self.0.viewport.get()?;
+        let line = viewport.top() + padding + px(0.5);
+        let rows = self.0.rows.borrow();
+        rows.iter()
+            .filter(|(key, bounds)| *key != RowKey::History && bounds.bottom() > line)
+            .min_by(|a, b| by_top(a, b))
+            .and_then(|(key, _)| key.turn_id().map(str::to_owned))
+    }
+
     /// Runs `action` (deferred, once) the next time the older-history row
     /// is painted inside the viewport, replacing an earlier one.
     pub(crate) fn when_history_visible(&self, action: impl FnOnce(&mut App) + 'static) {

@@ -490,7 +490,13 @@ impl Workbench {
         let state = cx.new(|cx| ConversationState::new(host.clone(), cx));
         let selected = catalog.read(cx).selected_id().cloned();
         state.update(cx, |state, cx| state.select_session(selected.clone(), cx));
-        let conversation = cx.new(|cx| ConversationView::new(state.clone(), cx));
+        let conversation = cx.new(|cx| {
+            let mut view = ConversationView::new(state.clone(), cx);
+            // The task's conversation has the prompt rail; a side chat's
+            // does not.
+            view.set_prompt_rail(true, cx);
+            view
+        });
         let connections = cx.new(|cx| ConnectionCatalog::new(host.clone(), cx));
         let composer = cx.new(|cx| {
             Composer::new(state.clone(), connections.clone(), projects.clone(), window, cx)

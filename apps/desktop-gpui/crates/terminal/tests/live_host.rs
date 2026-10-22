@@ -350,9 +350,11 @@ fn the_terminal_view_types_and_paints_on_a_real_host(cx: &mut TestAppContext) {
 
     let resource_ref = terminal.read_with(cx, |terminal, _| terminal.resource_ref().clone());
     view.update(cx, |view, cx| view.close(&resource_ref, cx));
+    frame(cx);
+    assert!(view.read_with(cx, |view, cx| view.tabs(cx).is_empty()), "the tab goes at once");
     live.wait(cx, "the close", |cx| {
         frame(cx);
-        view.read_with(cx, |view, cx| view.tabs(cx).is_empty())
+        terminals.read_with(cx, |terminals, _| terminals.terminals().is_empty())
     });
     let state = live.status_after_close();
     eprintln!("after the close: {}, exit code {}", state["status"], state["exitCode"]);

@@ -85,7 +85,6 @@ use conversation::{ConversationEvent, ConversationViewEvent, LocalPaths};
 use files::{FilesView, FilesViewEvent};
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     Icon, Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _, h_flex, v_flex,
 };
@@ -1075,8 +1074,8 @@ impl Workbench {
 
     /// A tab's ×, or unmarking it in [+]: the Changes face closes; a
     /// terminal stops (no confirmation: the model cannot see what runs in
-    /// it) and its tab goes once the Host confirms. The last face closed
-    /// hides the panel.
+    /// it) and its tab goes at once, before the Host confirms. The last
+    /// face closed hides the panel.
     fn close_face(&mut self, face: &Face, window: &mut Window, cx: &mut Context<Self>) {
         match face {
             Face::Changes => {
@@ -1606,9 +1605,9 @@ impl Workbench {
     /// A face's tab: its icon and name (a terminal's title, its bell and
     /// exited marks), the selected fill while it shows; its × while it is
     /// active or under the pointer, which does what unmarking it in [+]
-    /// does. A terminal being closed shows a spinner there; one whose close
-    /// failed, a way to close it again. `bare` drops the label (the strip
-    /// overflows), the name then in a tooltip.
+    /// does. A terminal whose close failed shows a way to close it again
+    /// there (one being closed has no tab). `bare` drops the label (the
+    /// strip overflows), the name then in a tooltip.
     fn render_tab(
         &self,
         face: &Face,
@@ -1633,9 +1632,6 @@ impl Workbench {
         }
         if exited {
             spoken.push(terminal_copy::EXITED.get(cx).to_owned());
-        }
-        if close_state == CloseState::Closing {
-            spoken.push(terminal_copy::CLOSING.get(cx).to_owned());
         }
         let spoken: SharedString =
             shell_copy::parts(locale, &spoken.iter().map(String::as_str).collect::<Vec<_>>())
@@ -1699,16 +1695,6 @@ impl Workbench {
                 this.activate_face(&face_for_click, window, cx);
             }));
         let trailing: AnyElement = match &close_state {
-            CloseState::Closing => div()
-                .id(domain_element_id("workbar-tab-closing", &key))
-                .test_support()
-                .size(rems(TAB_CLOSE_REMS))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(Spinner::new().xsmall().color(maka.ink_muted))
-                .into_any_element(),
             CloseState::Failed(reason) => {
                 let face = face.clone();
                 let label = shell_copy::sentences(

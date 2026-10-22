@@ -106,9 +106,12 @@ pub enum TerminalPhase {
 #[non_exhaustive]
 pub enum CloseState {
     Open,
-    /// `runtime.resource.stop` is in flight or due.
+    /// `runtime.resource.stop` is in flight or due. Views no longer show
+    /// the terminal; its owner keeps it, and its PTY counts toward the
+    /// Host's limit, until the close is confirmed.
     Closing,
-    /// The stop failed; [`Terminal::close`] tries again.
+    /// The stop failed: views show the terminal again, and
+    /// [`Terminal::close`] tries again.
     Failed(SharedString),
 }
 
@@ -127,6 +130,8 @@ pub enum TerminalEvent {
     Exited,
     /// The close is confirmed: the shell is gone and the terminal with it.
     Closed,
+    /// The stop failed ([`CloseState::Failed`]): the terminal shows again.
+    CloseFailed,
     /// It holds no controller and has nothing in flight.
     Released,
     /// The output it needs from the subscription changed
@@ -328,6 +333,12 @@ impl Terminal {
 
     pub fn close_state(&self) -> &CloseState {
         &self.close
+    }
+
+    /// Whether its close is under way ([`CloseState::Closing`]): a view no
+    /// longer shows it.
+    pub fn is_closing(&self) -> bool {
+        self.close == CloseState::Closing
     }
 
     /// The picture to paint, as of the last batch of output.
@@ -693,10 +704,12 @@ impl Terminal {
     }
 
     /// Stops the shell (`runtime.resource.stop`), after the request in
-    /// flight; queued input is dropped. The close is confirmed by the
-    /// stop's answer, by an exit seen meanwhile, or by the stop failing
-    /// `not_found` after the exit; then [`TerminalEvent::Closed`]. A failed
-    /// stop can be closed again.
+    /// flight; queued input is dropped. It is [`CloseState::Closing`] at
+    /// once, which views hide. The close is confirmed by the stop's answer,
+    /// by an exit seen meanwhile, or by the stop failing `not_found` after
+    /// the exit; then [`TerminalEvent::Closed`]. A failed stop
+    /// ([`TerminalEvent::CloseFailed`]) can be closed again. An exited
+    /// terminal closes at once.
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
         if self.is_exited() {
             self.close = CloseState::Open;
@@ -1035,6 +1048,7 @@ impl Terminal {
             failure => {
                 self.stop_due = false;
                 self.close = CloseState::Failed(error.to_string().into());
+                cx.emit(TerminalEvent::CloseFailed);
                 // A shell that is gone confirms the close once its state
                 // says so.
                 if failure == Failure::Host(RuntimeResourceFailure::NotFound) {

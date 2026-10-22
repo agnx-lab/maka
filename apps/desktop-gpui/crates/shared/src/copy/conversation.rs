@@ -42,6 +42,14 @@ texts! {
     SESSION_REMOVED = "This session was removed.", "此任务已被移除。", "此任務已被移除。";
     ACCESS_REVOKED = "This session is no longer available.", "此任务已不可用。", "此任務已無法使用。";
     JUMP_TO_LATEST = "Jump to latest", "跳到最新消息", "跳到最新訊息";
+    // The prompt rail on the transcript's right edge: Desktop's
+    // `promptRailAriaLabel`, `emptyPrompt` and `jumpToPrompt`
+    // (packages/ui/src/conversation-copy.ts).
+    PROMPT_RAIL = "Jump by prompt", "按提问跳转", "按提問跳轉";
+    /// A tick's card for a prompt with no text (files only).
+    EMPTY_PROMPT = "(empty prompt)", "（空提问）", "（空提問）";
+    /// A tick, named by its prompt.
+    JUMP_TO_PROMPT = "Jump to prompt: {preview}", "跳到提问：{preview}", "跳到提問：{preview}";
     // Older history, in a row above the first message.
     OLDER_HISTORY_LOADING = "Loading earlier messages", "正在加载更早的消息", "正在載入更早的訊息";
     OLDER_HISTORY_FAILED = "Couldn’t load earlier messages.", "无法加载更早的消息。", "無法載入更早的訊息。";
@@ -489,6 +497,11 @@ pub fn attach_unreadable(locale: Locale, name: &str) -> String {
 /// A chip's remove button.
 pub fn remove_attachment(locale: Locale, name: &str) -> String {
     REMOVE_ATTACHMENT.fill(locale, &[("name", name)])
+}
+
+/// A prompt rail tick, named by the prompt it jumps to.
+pub fn jump_to_prompt(locale: Locale, preview: &str) -> String {
+    JUMP_TO_PROMPT.fill(locale, &[("preview", preview)])
 }
 
 /// A staged quote's remove button, naming the start of its excerpt (at

@@ -32,12 +32,13 @@ use gpui_kit::{
     Modifiers, ModifiersChangedEvent, MouseMoveEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
     TestAppContext, VisualTestContext, Window, WindowHandle, point, px, size,
 };
+use host_client::ConnectionEvent;
 use host_protocol::HostOperationErrorCode;
 use serde_json::{Value, json};
 
 use crate::tests::{
-    Harness, OTHER, SESSION, ScriptedHost, acquire_result, get_result, operation_error, reference,
-    settle, terminal_resource,
+    Harness, OTHER, SESSION, ScriptedHost, acquire_result, get_result, operation_error, page,
+    reference, settle, terminal_resource,
 };
 use crate::view::{BLINK_INTERVAL, BLINK_PAUSE, GridGeometry};
 use crate::{CloseState, StartState, Terminal, TerminalView};
@@ -232,6 +233,33 @@ impl View {
     /// blinks.
     fn blink(&self, cx: &mut TestAppContext) -> (bool, bool) {
         self.view.read_with(cx, |view, _| view.cursor_blink_state())
+    }
+
+    /// The tabs' refs, by name, in the strip's order.
+    fn tab_names(&self, cx: &mut TestAppContext) -> Vec<String> {
+        let tabs = self.view.read_with(cx, |view, cx| view.tabs(cx));
+        tabs.iter().map(|tab| tab.resource_ref.trim_start_matches(&reference("")).into()).collect()
+    }
+
+    /// The active terminal's name.
+    fn active_name(&self, cx: &mut TestAppContext) -> Option<String> {
+        let active = self.view.read_with(cx, |view, cx| view.active_ref(cx));
+        active.map(|active| active.trim_start_matches(&reference("")).to_owned())
+    }
+
+    /// Closes the terminal `name` from its tab.
+    fn close(&self, name: &str, cx: &mut TestAppContext) {
+        let resource_ref = reference(name).into();
+        self.view.update(cx, |view, cx| view.close(&resource_ref, cx));
+        self.frame(cx);
+    }
+
+    fn stops(&self) -> usize {
+        self.harness.transport.requests("runtime.resource.stop").len()
+    }
+
+    fn starts(&self) -> usize {
+        self.harness.transport.requests("runtime.resource.start").len()
     }
 }
 
@@ -488,19 +516,151 @@ fn tabs_keep_their_open_order_and_show_the_title_bell_and_exit(cx: &mut TestAppC
     assert_eq!(refs, [reference("r1"), reference("r2")]);
 }
 
+fn three(cx: &mut TestAppContext) -> View {
+    let names = ["r1", "r2", "r3"];
+    View::open(names.iter().map(|name| terminal_resource(SESSION, name, "running")).collect(), cx)
+}
+
 #[gpui_kit::test]
-fn closing_stops_the_process_and_the_tab_goes_when_the_host_confirms(cx: &mut TestAppContext) {
-    let view = View::focused(cx);
+fn a_closed_tab_goes_at_once_and_the_owner_keeps_its_terminal_until_the_host_confirms(
+    cx: &mut TestAppContext,
+) {
+    let view = three(cx);
+    view.view.update(cx, |view, cx| view.activate(&reference("r2").into(), cx));
     let stop = view.harness.transport.hold("runtime.resource.stop");
-    let resource_ref = reference("r1").into();
-    view.view.update(cx, |view, cx| view.close(&resource_ref, cx));
-    view.frame(cx);
-    assert_eq!(view.harness.transport.requests("runtime.resource.stop").len(), 1);
-    let tabs = view.view.read_with(cx, |view, cx| view.tabs(cx));
-    assert_eq!(tabs[0].close, CloseState::Closing, "the tab waits for the Host");
+    view.close("r2", cx);
+    assert_eq!(view.stops(), 1);
+    assert_eq!(view.tab_names(cx), ["r1", "r3"], "the tab goes before the Host answers");
+    assert_eq!(view.active_name(cx).as_deref(), Some("r1"), "its neighbour before it takes over");
+    let closing = view.harness.terminal(1, cx);
+    assert_eq!(
+        closing.read_with(cx, |terminal, _| terminal.close_state().clone()),
+        CloseState::Closing
+    );
+    assert_eq!(view.harness.count(cx), 3, "the owner keeps it until the close is confirmed");
+    assert_eq!(view.harness.terminals.read_with(cx, |terminals, _| terminals.live_count()), 3);
+
     stop.try_send(Ok(json!({}))).expect("stop");
     view.frame(cx);
-    assert!(view.view.read_with(cx, |view, cx| view.tabs(cx)).is_empty());
+    assert_eq!(view.harness.count(cx), 2);
+    assert_eq!(view.harness.terminals.read_with(cx, |terminals, _| terminals.live_count()), 2);
+    assert_eq!(view.tab_names(cx), ["r1", "r3"]);
+    assert_eq!(view.active_name(cx).as_deref(), Some("r1"));
+
+    // The last one: no tab, no terminal to show, at once.
+    let _first = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r1", cx);
+    let _last = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r3", cx);
+    assert!(view.tab_names(cx).is_empty());
+    assert!(view.view.read_with(cx, |view, cx| !view.has_terminals(cx)));
+    assert_eq!(view.active_name(cx), None);
+    assert_eq!(view.harness.count(cx), 2);
+}
+
+#[gpui_kit::test]
+fn a_failed_stop_brings_the_tab_back_without_taking_over_and_retry_hides_it_again(
+    cx: &mut TestAppContext,
+) {
+    let view = three(cx);
+    let stop = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r1", cx);
+    assert_eq!(view.tab_names(cx), ["r2", "r3"]);
+    assert_eq!(view.active_name(cx).as_deref(), Some("r2"), "no neighbour before: the next");
+
+    stop.try_send(operation_error(HostOperationErrorCode::SessionArchived, "Session is archived"))
+        .expect("stop");
+    view.frame(cx);
+    assert_eq!(view.tab_names(cx), ["r2", "r3", "r1"], "back, at the end");
+    let tabs = view.view.read_with(cx, |view, cx| view.tabs(cx));
+    assert!(matches!(&tabs[2].close, CloseState::Failed(reason) if reason.contains("archived")));
+    assert_eq!(view.active_name(cx).as_deref(), Some("r2"), "the active tab stays");
+
+    // Close again: hidden again, and gone once the Host confirms.
+    let stop = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r1", cx);
+    assert_eq!(view.stops(), 2);
+    assert_eq!(view.tab_names(cx), ["r2", "r3"]);
+    stop.try_send(Ok(json!({}))).expect("stop");
+    view.frame(cx);
+    assert_eq!(view.tab_names(cx), ["r2", "r3"]);
+    assert_eq!(view.harness.count(cx), 2);
+}
+
+#[gpui_kit::test]
+fn a_close_while_disconnected_stays_hidden_and_its_stop_goes_after_reconnecting(
+    cx: &mut TestAppContext,
+) {
+    let view = three(cx);
+    view.harness.feed(ConnectionEvent::Disconnected { reason: "gone".into() }, cx);
+    view.close("r2", cx);
+    assert_eq!(view.stops(), 0, "nothing can go out");
+    assert_eq!(view.tab_names(cx), ["r1", "r3"]);
+    assert_eq!(view.harness.count(cx), 3);
+
+    let stop = view.harness.transport.hold("runtime.resource.stop");
+    view.harness.connect(cx);
+    view.frame(cx);
+    assert_eq!(view.stops(), 1, "the stop due goes on the new connection");
+    // The list read again still has it running: it does not come back.
+    assert_eq!(view.tab_names(cx), ["r1", "r3"]);
+    stop.try_send(Ok(json!({}))).expect("stop");
+    view.frame(cx);
+    assert_eq!(view.harness.count(cx), 2);
+    assert_eq!(view.tab_names(cx), ["r1", "r3"]);
+}
+
+#[gpui_kit::test]
+fn a_list_read_while_a_close_is_held_does_not_bring_its_tab_back(cx: &mut TestAppContext) {
+    let names = ["r1", "r2", "r3", "r4"];
+    let running = || names.map(|name| terminal_resource(SESSION, name, "running")).to_vec();
+    let view = View::open(running(), cx);
+    let first = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r1", cx);
+    // The Host still lists the shell as running while it stops it.
+    view.harness.terminals.update(cx, |terminals, cx| terminals.reload(cx));
+    view.frame(cx);
+    assert_eq!(view.tab_names(cx), ["r2", "r3", "r4"]);
+    assert_eq!(view.harness.count(cx), 4, "the same terminal, not a new one");
+
+    // Closed while the list is being read: gone at once all the same, its
+    // neighbour active, and not back when the list answers.
+    view.view.update(cx, |view, cx| view.activate(&reference("r4").into(), cx));
+    let list = view.harness.transport.hold("runtime.resource.query");
+    view.harness.terminals.update(cx, |terminals, cx| terminals.reload(cx));
+    view.frame(cx);
+    let second = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r4", cx);
+    assert_eq!(view.tab_names(cx), ["r2", "r3"]);
+    assert_eq!(view.active_name(cx).as_deref(), Some("r3"));
+    list.try_send(Ok(page(SESSION, running()))).expect("list");
+    view.frame(cx);
+    assert_eq!(view.tab_names(cx), ["r2", "r3"]);
+    assert_eq!(view.active_name(cx).as_deref(), Some("r3"));
+    assert_eq!(view.harness.count(cx), 4);
+
+    first.try_send(Ok(json!({}))).expect("stop");
+    second.try_send(Ok(json!({}))).expect("stop");
+    view.frame(cx);
+    assert_eq!(view.tab_names(cx), ["r2", "r3"]);
+    assert_eq!(view.harness.count(cx), 2);
+}
+
+#[gpui_kit::test]
+fn ctrl_backtick_with_only_a_closing_terminal_starts_one(cx: &mut TestAppContext) {
+    let view = View::focused(cx);
+    let _stop = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r1", cx);
+    assert!(view.view.read_with(cx, |view, cx| !view.has_terminals(cx)));
+    view.harness.transport.reply(
+        "runtime.resource.start",
+        Ok(json!({"resource": terminal_resource(SESSION, "r2", "running")["result"]})),
+    );
+    view.view.update(cx, |view, cx| view.ensure_terminal(cx));
+    view.frame(cx);
+    assert_eq!(view.starts(), 1);
+    assert_eq!(view.tab_names(cx), ["r2"]);
+    assert_eq!(view.active_name(cx).as_deref(), Some("r2"));
 }
 
 #[gpui_kit::test]
@@ -560,6 +720,38 @@ fn the_limit_of_live_terminals_shows_before_a_start(cx: &mut TestAppContext) {
     let line = view.line("terminal-limit", cx).expect("the limit");
     assert!(line.contains("limit of 8"), "{line}");
     assert!(view.harness.transport.requests("runtime.resource.start").is_empty());
+}
+
+#[gpui_kit::test]
+fn at_the_limit_a_start_waits_for_a_close_and_goes_once_it_is_confirmed(cx: &mut TestAppContext) {
+    let inventory =
+        (0..8).map(|n| terminal_resource(SESSION, &format!("r{n}"), "running")).collect();
+    let view = View::open(inventory, cx);
+    let start_state = |cx: &mut TestAppContext| {
+        view.harness.terminals.read_with(cx, |t, _| t.start_state().clone())
+    };
+    let stop = view.harness.transport.hold("runtime.resource.stop");
+    view.close("r0", cx);
+    assert_eq!(view.tab_names(cx).len(), 7);
+    // Its PTY is still the Host's: eight live, but the start waits rather
+    // than show the limit.
+    assert_eq!(view.harness.terminals.read_with(cx, |terminals, _| terminals.live_count()), 8);
+    view.view.update(cx, |view, cx| view.new_terminal(cx));
+    view.frame(cx);
+    assert_eq!(start_state(cx), StartState::Starting);
+    assert_eq!(view.line("terminal-limit", cx), None);
+    assert_eq!(view.starts(), 0);
+
+    view.harness.transport.reply(
+        "runtime.resource.start",
+        Ok(json!({"resource": terminal_resource(SESSION, "r8", "running")["result"]})),
+    );
+    stop.try_send(Ok(json!({}))).expect("stop");
+    view.frame(cx);
+    assert_eq!(view.starts(), 1, "it goes once the close is confirmed");
+    assert_eq!(start_state(cx), StartState::Idle);
+    assert_eq!(view.tab_names(cx).last().map(String::as_str), Some("r8"));
+    assert_eq!(view.active_name(cx).as_deref(), Some("r8"));
 }
 
 #[gpui_kit::test]
