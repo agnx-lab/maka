@@ -211,7 +211,7 @@ pub(super) async fn connect_or_launch(
             }
             if let Some(child) = &mut child {
                 if let Some(status) = child.try_wait()? {
-                    return Err(format!("Host candidate exited before Ready: {status}").into());
+                    return Err(format!("Host candidate exited before Ready: {status}. Read the startup error with maka host logs --root-id {}, resolve it, and retry opening Maka.", deployment.root_id).into());
                 }
             } else if !service_started {
                 match RootOwner::open(
