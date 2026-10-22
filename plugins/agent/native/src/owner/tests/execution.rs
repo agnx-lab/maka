@@ -415,7 +415,13 @@ async fn application_reactivation_resumes_sealed_source_through_original_engine(
                 Arc::new(move |context, configuration| {
                     let capture = capture.clone();
                     Box::pin(async move {
-                        let owner = Owner::open(context, configuration, crate::owner::tests::bundled_catalog()).await.unwrap();
+                        let owner = Owner::open(
+                            context,
+                            configuration,
+                            crate::owner::tests::bundled_catalog(),
+                        )
+                        .await
+                        .unwrap();
                         *capture.lock().unwrap() = Some(owner.clone());
                         let service = Arc::new(Agent(owner));
                         NativeActivation {

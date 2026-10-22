@@ -410,7 +410,13 @@ async fn activate_backend(
                 let capture = capture.clone();
                 Box::pin(async move {
                     let services = context.services();
-                    let owner = Owner::open(context, configuration, crate::owner::tests::bundled_catalog()).await.unwrap();
+                    let owner = Owner::open(
+                        context,
+                        configuration,
+                        crate::owner::tests::bundled_catalog(),
+                    )
+                    .await
+                    .unwrap();
                     *capture.lock().unwrap() = Some((owner.clone(), services));
                     let agent = Arc::new(Agent(owner));
                     NativeActivation {

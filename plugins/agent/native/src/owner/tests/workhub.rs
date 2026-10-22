@@ -308,7 +308,15 @@ async fn activate_worker_mode(
                     let behavior = behavior.clone();
                     Box::pin(async move {
                         let owner = Arc::new(Worker(
-                            Agent(Owner::open(context, settings, crate::owner::tests::bundled_catalog()).await.unwrap()),
+                            Agent(
+                                Owner::open(
+                                    context,
+                                    settings,
+                                    crate::owner::tests::bundled_catalog(),
+                                )
+                                .await
+                                .unwrap(),
+                            ),
                             behavior,
                         ));
                         NativeActivation {

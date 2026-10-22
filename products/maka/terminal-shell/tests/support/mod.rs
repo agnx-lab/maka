@@ -420,7 +420,9 @@ impl Fixture {
             .await
             .unwrap();
         let mut native = NativeRegistry::default();
-        let catalog = Arc::new(maka_product_native::catalog::Catalog::new(maka_product_native::catalog::Snapshot::bundled().unwrap()));
+        let catalog = Arc::new(maka_product_native::catalog::Catalog::new(
+            maka_product_native::catalog::Snapshot::bundled().unwrap(),
+        ));
         if terminals {
             // Use the product's original factories; composition still admits
             // only the services explicitly installed in this fixture.
