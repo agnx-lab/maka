@@ -238,7 +238,12 @@ export function QueueDock(props: { session: QueueSession }) {
   return (
     <If when={items().length > 0 || editing() !== null || error()}>
       <View
-        style={{ backgroundColor: C.surface, borderRadius: 12, marginTop: 8, overflow: 'hidden' }}
+        style={{
+          backgroundColor: C.surface,
+          borderRadius: platform.isTerminal ? 0 : 12,
+          marginTop: 8,
+          overflow: 'hidden',
+        }}
       >
         <If when={items().length > 1}>
           <Button

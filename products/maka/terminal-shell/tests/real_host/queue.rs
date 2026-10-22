@@ -21,7 +21,8 @@ use super::*;
 use nsh_platform_tui::ServiceOutput;
 
 async fn replace_input(view: &mut AppView, label: &str, text: &str) {
-    tab_to_label(view, label).await;
+    wait_enabled_node(view, label).await;
+    support::click_label(view, label);
     wait_focused_input(view, label).await;
     shortcut(view, 'a');
     assert!(view.handle_event(Event::Paste(text.into())));
