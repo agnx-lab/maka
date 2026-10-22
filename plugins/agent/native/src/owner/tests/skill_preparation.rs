@@ -199,7 +199,7 @@ async fn skill_preparation_survives_host_restart_without_preparing_again() {
         document(dir.path(), "CHANGED METADATA", "CHANGED INSTRUCTIONS");
         let mut native = NativeRegistry::default();
         crate::owner::tests::provide_all(&mut native).unwrap();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         // Restore has no native prepare grant: it must use the original durable message.
         let resumed = Application::start_from_store(f.store.clone(), deployment, native,
             f.issuer.clone(), Arc::new(Grant(f.issuer.clone(), None)), Some(maka_host_js::factory(Default::default()))).await.unwrap();

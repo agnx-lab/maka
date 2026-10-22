@@ -198,7 +198,7 @@ mod acceptance {
             let original_receipt = f.store.operation_observation(&original).await.unwrap().unwrap();
             f.app.shutdown().await.unwrap();
             let mut native = NativeRegistry::default();
-            maka_settings_native::provide(&mut native).unwrap();
+            maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
             provide_all(&mut native).unwrap();
             let policy = service_tools::Setup::health().policy();
             f.issuer = policy.issuer();

@@ -140,6 +140,7 @@ impl Owner {
         .await?;
         let (source, _) = crate::model::Source::select(
             self.configuration.clone(),
+            self.catalog.clone(),
             self.credentials.clone(),
             model,
             thinking,

@@ -42,7 +42,7 @@ pub(super) async fn publish_with_policy(
         .await
         .unwrap();
     let mut native = NativeRegistry::default();
-    maka_settings_native::provide(&mut native).unwrap();
+    maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
     crate::owner::tests::provide_all(&mut native).unwrap();
     fixture.app = Application::start_from_store(
         fixture.store.clone(),

@@ -220,7 +220,7 @@ struct LocalOwner {
 
 fn providers(setup: &Setup, capture: Arc<StdMutex<Option<Arc<Owner>>>>) -> NativeRegistry {
     let mut native = NativeRegistry::default();
-    maka_settings_native::provide(&mut native).unwrap();
+    maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
     setup.provide(&mut native);
     native
         .insert(
@@ -228,7 +228,7 @@ fn providers(setup: &Setup, capture: Arc<StdMutex<Option<Arc<Owner>>>>) -> Nativ
             Arc::new(move |context, configuration| {
                 let capture = capture.clone();
                 Box::pin(async move {
-                    let owner = Owner::open(context, configuration).await.unwrap();
+                    let owner = Owner::open(context, configuration, crate::owner::tests::bundled_catalog()).await.unwrap();
                     *capture.lock().unwrap() = Some(owner.clone());
                     let service = Arc::new(Agent(owner));
                     NativeActivation {

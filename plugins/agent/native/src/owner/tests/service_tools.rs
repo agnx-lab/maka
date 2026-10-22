@@ -2699,7 +2699,7 @@ async fn editing_policy_and_code_mode_survive_actual_host_restart_with_original_
         drop(raw);
         let mut native = NativeRegistry::default();
         provide_all(&mut native).unwrap();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         let restored = Application::start_from_store(
             fixture.store.clone(), deployment, native, fixture.issuer.clone(),
             Arc::new(Grant(fixture.issuer.clone(), Some(policy))), Some(maka_host_js::factory(Default::default())),
@@ -2757,7 +2757,7 @@ async fn queued_messages_resume_with_equivalent_native_service_targets_after_res
             drop(raw);
             let mut native = NativeRegistry::default();
             provide_all(&mut native).unwrap();
-            maka_settings_native::provide(&mut native).unwrap();
+            maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
             let restored = Application::start_from_store(
                 fixture.store.clone(), deployment, native, fixture.issuer.clone(),
                 Arc::new(Grant(fixture.issuer.clone(), Some(policy))), Some(maka_host_js::factory(Default::default())),

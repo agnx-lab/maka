@@ -408,14 +408,14 @@ async fn application_reactivation_resumes_sealed_source_through_original_engine(
         let captured = Arc::new(StdMutex::new(None));
         let capture = captured.clone();
         let mut native = NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         native
             .insert(
                 IMPLEMENTATION.into(),
                 Arc::new(move |context, configuration| {
                     let capture = capture.clone();
                     Box::pin(async move {
-                        let owner = Owner::open(context, configuration).await.unwrap();
+                        let owner = Owner::open(context, configuration, crate::owner::tests::bundled_catalog()).await.unwrap();
                         *capture.lock().unwrap() = Some(owner.clone());
                         let service = Arc::new(Agent(owner));
                         NativeActivation {

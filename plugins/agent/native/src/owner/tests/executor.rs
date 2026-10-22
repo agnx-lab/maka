@@ -394,7 +394,7 @@ async fn activate_backend(
             .unwrap();
     }
     let mut native = NativeRegistry::default();
-    maka_settings_native::provide(&mut native).unwrap();
+    maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
     if acp.is_some() {
         maka_acp_native::provide(&mut native).unwrap();
         maka_processes_native::provide(&mut native).unwrap();
@@ -410,7 +410,7 @@ async fn activate_backend(
                 let capture = capture.clone();
                 Box::pin(async move {
                     let services = context.services();
-                    let owner = Owner::open(context, configuration).await.unwrap();
+                    let owner = Owner::open(context, configuration, crate::owner::tests::bundled_catalog()).await.unwrap();
                     *capture.lock().unwrap() = Some((owner.clone(), services));
                     let agent = Arc::new(Agent(owner));
                     NativeActivation {

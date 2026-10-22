@@ -72,6 +72,7 @@ fn rejected(reason: CredentialRejection) -> Result<Value, String> {
 }
 pub(crate) async fn save(
     store: &Arc<ConfigurationStore>,
+    snapshot: Arc<maka_providers::catalog::Snapshot>,
     input: Value,
     context: Context,
 ) -> Result<Value, String> {
@@ -79,7 +80,7 @@ pub(crate) async fn save(
     let Ok(request) = serde_json::from_value::<SaveCredential>(input) else {
         return rejected(CredentialRejection::InvalidInput);
     };
-    let Ok(definition) = connections::definition(&request.expected.provider) else {
+    let Ok(definition) = connections::definition(&request.expected.provider, snapshot) else {
         return rejected(CredentialRejection::ProviderUnavailable);
     };
     if !definition
@@ -108,6 +109,7 @@ pub(crate) async fn save(
     }
     enroll(
         store,
+        definition,
         request,
         AuthenticationInput {
             method: "api-key".into(),
@@ -144,6 +146,7 @@ impl provider::authentication::Interaction for LoginInteraction {
 
 pub(crate) async fn login(
     store: &Arc<ConfigurationStore>,
+    snapshot: Arc<maka_providers::catalog::Snapshot>,
     input: Value,
     context: Context,
 ) -> Result<Value, String> {
@@ -151,7 +154,7 @@ pub(crate) async fn login(
     let Ok(input) = serde_json::from_value::<LoginCredential>(input) else {
         return rejected(CredentialRejection::InvalidInput);
     };
-    let Ok(definition) = connections::definition(&input.expected.provider) else {
+    let Ok(definition) = connections::definition(&input.expected.provider, snapshot) else {
         return rejected(CredentialRejection::ProviderUnavailable);
     };
     if !definition
@@ -164,6 +167,7 @@ pub(crate) async fn login(
     }
     enroll(
         store,
+        definition,
         SaveCredential {
             expected: input.expected,
             expected_credential: input.expected_credential,
@@ -180,13 +184,13 @@ pub(crate) async fn login(
 
 async fn enroll(
     store: &Arc<ConfigurationStore>,
+    definition: provider::Definition,
     request: SaveCredential,
     authentication: AuthenticationInput,
     context: Context,
     interactive: bool,
 ) -> Result<Value, String> {
     let operation = context.operation().ok_or("settings_mutation_required")?;
-    let definition = connections::definition(&request.expected.provider)?;
     let attempt_id = format!(
         "settings-{}",
         hex::encode(Sha256::digest(

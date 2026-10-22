@@ -24,6 +24,7 @@ use maka_host_runtime::application::{Context, Handler, NativeOwner};
 use serde_json::Value;
 use std::sync::Arc;
 pub(crate) struct Settings {
+    pub catalog: Arc<maka_providers::catalog::Catalog>,
     pub configuration: Arc<maka_config::ConfigurationStore>,
     pub log: Arc<maka_event_log::EventLog>,
     pub configured_locale: maka_agent_facts::language::LanguagePreference,
@@ -58,10 +59,17 @@ fn credential_result(
         Err(_) => Err("settings_effect_unknown".into()),
     }
 }
-fn selectable(row: &ConnectionCatalogEntry) -> bool {
-    row.enabled && maka_providers::definition(&row.provider).is_ok()
+fn selectable(
+    row: &ConnectionCatalogEntry,
+    snapshot: Arc<maka_providers::catalog::Snapshot>,
+) -> bool {
+    row.enabled && maka_providers::definition(&row.provider, snapshot).is_ok()
 }
-async fn model_choice(row: &ConnectionCatalogEntry, model: &str) -> Option<ModelChoice> {
+async fn model_choice(
+    row: &ConnectionCatalogEntry,
+    model: &str,
+    snapshot: Arc<maka_providers::catalog::Snapshot>,
+) -> Option<ModelChoice> {
     let info = row
         .models
         .iter()
@@ -75,7 +83,7 @@ async fn model_choice(row: &ConnectionCatalogEntry, model: &str) -> Option<Model
             .and_then(|all| all.get(model))
             .cloned();
         let default_thinking_level = overrides.as_ref().and_then(|o| o.default_thinking_level);
-        let resolved = maka_providers::definition(&row.provider)
+        let resolved = maka_providers::definition(&row.provider, snapshot.clone())
             .ok()?
             .prepare(maka_agent_ports::provider::Resolve {
                 connection: maka_agent_ports::provider::Connection {
@@ -97,6 +105,7 @@ async fn model_choice(row: &ConnectionCatalogEntry, model: &str) -> Option<Model
     } else {
         maka_providers::api::ApiProviders::model_metadata(
             &row.provider.name,
+            snapshot,
             maka_agent_ports::provider::Connection {
                 id: row.connection_id.clone(),
                 revision: row.revision,
@@ -142,14 +151,15 @@ async fn model_choice(row: &ConnectionCatalogEntry, model: &str) -> Option<Model
 async fn resolved_model(
     catalog: &ConnectionCatalogSnapshot,
     target: &ConnectionTarget,
+    snapshot: Arc<maka_providers::catalog::Snapshot>,
 ) -> DefaultModel {
     let row = catalog.connections.iter().find(|row| {
         row.connection_id == target.connection_id
-            && selectable(row)
+            && selectable(row, snapshot.clone())
             && row.enabled_model_ids.contains(&target.model_id)
     });
     let choice = match row {
-        Some(row) => model_choice(row, &target.model_id).await,
+        Some(row) => model_choice(row, &target.model_id, snapshot).await,
         None => None,
     };
     match choice {
@@ -159,10 +169,13 @@ async fn resolved_model(
         },
     }
 }
-async fn default_model(catalog: &ConnectionCatalogSnapshot) -> DefaultModel {
+async fn default_model(
+    catalog: &ConnectionCatalogSnapshot,
+    snapshot: Arc<maka_providers::catalog::Snapshot>,
+) -> DefaultModel {
     match &catalog.default_target {
         None => DefaultModel::None,
-        Some(target) => resolved_model(catalog, target).await,
+        Some(target) => resolved_model(catalog, target, snapshot).await,
     }
 }
 
@@ -174,6 +187,7 @@ impl Handler for Settings {
         context: Context,
     ) -> BoxFuture<'static, Result<Value, String>> {
         let store = self.configuration.clone();
+        let public_catalog = self.catalog.clone();
         let log = self.log.clone();
         let configured_locale = self.configured_locale;
         let native_language = self.native_language;
@@ -196,12 +210,50 @@ impl Handler for Settings {
                     context.operation().ok_or("settings_mutation_required")?;
                     super::preferences::update(&store, input).await
                 }
-                "connections" => super::connections::page(&store, input).await,
+                "connections" => {
+                    let snapshot = public_catalog
+                        .snapshot
+                        .read()
+                        .await
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
+                    super::connections::page(&store, input, snapshot).await
+                }
                 "connection" => super::connections::detail(&store, input).await,
-                "providers" => super::connections::providers(input),
-                "provider" => super::connections::provider(input),
-                "discoverModels" => super::setup::discover(&store, input, context).await,
-                "loginCredential" => super::credential::login(&store, input, context).await,
+                "providers" => {
+                    let snapshot = public_catalog
+                        .snapshot
+                        .read()
+                        .await
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
+                    super::connections::providers(input, snapshot)
+                }
+                "provider" => {
+                    let snapshot = public_catalog
+                        .snapshot
+                        .read()
+                        .await
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
+                    super::connections::provider(input, snapshot)
+                }
+                "discoverModels" => {
+                    super::setup::discover(&store, &public_catalog, input, context).await
+                }
+                "loginCredential" => {
+                    let snapshot = public_catalog
+                        .snapshot
+                        .read()
+                        .await
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
+                    super::credential::login(&store, snapshot, input, context).await
+                }
                 "create" => {
                     context.operation().ok_or("settings_mutation_required")?;
                     let Ok(mut input) =
@@ -209,7 +261,15 @@ impl Handler for Settings {
                     else {
                         return rejected(ConfigurationRejection::InvalidInput);
                     };
-                    let Ok(definition) = super::connections::definition(&input.connection.provider)
+                    let snapshot = public_catalog
+                        .snapshot
+                        .read()
+                        .await
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
+                    let Ok(definition) =
+                        super::connections::definition(&input.connection.provider, snapshot)
                     else {
                         return rejected(ConfigurationRejection::ProviderUnavailable);
                     };
@@ -235,7 +295,15 @@ impl Handler for Settings {
                             row.connection_id == input.expected.connection_id
                                 && row.revision == input.expected.revision
                         }) {
-                            let Ok(definition) = super::connections::definition(&row.provider)
+                            let snapshot = public_catalog
+                                .snapshot
+                                .read()
+                                .await
+                                .as_ref()
+                                .map_err(|_| "settings_store_unavailable")?
+                                .clone();
+                            let Ok(definition) =
+                                super::connections::definition(&row.provider, snapshot)
                             else {
                                 return rejected(ConfigurationRejection::ProviderUnavailable);
                             };
@@ -272,7 +340,16 @@ impl Handler for Settings {
                     };
                     credential_result(store.delete_credential(input).await)
                 }
-                "saveCredential" => super::credential::save(&store, input, context).await,
+                "saveCredential" => {
+                    let snapshot = public_catalog
+                        .snapshot
+                        .read()
+                        .await
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
+                    super::credential::save(&store, snapshot, input, context).await
+                }
                 "updateModelSettings" => {
                     context.operation().ok_or("settings_mutation_required")?;
                     let input: UpdateModelSettings =
@@ -334,19 +411,31 @@ impl Handler for Settings {
                 "resolveModel" => {
                     let target: ConnectionTarget =
                         serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
+                    let public_guard = public_catalog.snapshot.read().await;
+                    let snapshot = public_guard
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
                     let catalog = store
                         .catalog()
                         .await
                         .map_err(|_| "settings_store_unavailable")?;
-                    super::connections::encode(resolved_model(&catalog, &target).await)
+                    drop(public_guard);
+                    super::connections::encode(resolved_model(&catalog, &target, snapshot).await)
                 }
                 "models" => {
                     let input: ModelsRead =
                         serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
+                    let public_guard = public_catalog.snapshot.read().await;
+                    let snapshot = public_guard
+                        .as_ref()
+                        .map_err(|_| "settings_store_unavailable")?
+                        .clone();
                     let catalog = store
                         .catalog()
                         .await
                         .map_err(|_| "settings_store_unavailable")?;
+                    drop(public_guard);
                     let start = match input {
                         ModelsRead::Start { query } => ModelCursor {
                             query,
@@ -384,7 +473,7 @@ impl Handler for Settings {
                         .enumerate()
                         .skip(start.connection)
                     {
-                        if !selectable(row) {
+                        if !selectable(row, snapshot.clone()) {
                             continue;
                         }
                         for (at, model) in row.enabled_model_ids.iter().enumerate().skip(
@@ -402,7 +491,8 @@ impl Handler for Settings {
                                 });
                                 break 'rows;
                             }
-                            let Some(choice) = model_choice(row, model).await else {
+                            let Some(choice) = model_choice(row, model, snapshot.clone()).await
+                            else {
                                 continue;
                             };
                             let matches = terms.is_empty() || {
@@ -422,7 +512,7 @@ impl Handler for Settings {
                     }
                     serde_json::to_value(ModelsPage::Ready {
                         revision: catalog.revision,
-                        default_model: Box::new(default_model(&catalog).await),
+                        default_model: Box::new(default_model(&catalog, snapshot).await),
                         choices,
                         next,
                     })

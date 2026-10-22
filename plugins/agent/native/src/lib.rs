@@ -34,12 +34,16 @@ use maka_host_runtime::application::{NativeActivation, NativeContext, NativeRegi
 use maka_workspace_support as workspace;
 use std::sync::Arc;
 
-pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
+pub fn provide(
+    registry: &mut NativeRegistry,
+    catalog: Arc<maka_providers::catalog::Catalog>,
+) -> Result<(), String> {
     registry.insert(
         maka_agent_api::IMPLEMENTATION.into(),
-        Arc::new(|context, configuration| {
+        Arc::new(move |context, configuration| {
+            let catalog = catalog.clone();
             Box::pin(async move {
-                match owner::Owner::open(context, configuration).await {
+                match owner::Owner::open(context, configuration, catalog).await {
                     Ok(owner) => {
                         let service = Arc::new(service::Agent(owner));
                         NativeActivation {

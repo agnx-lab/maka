@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{ApiProvider, Configuration, Selection, metadata, route};
+use super::{ApiProvider, Configuration, Selection, route};
 use maka_agent_facts::configuration::ModelInfo;
 use maka_agent_ports::model::Credentials;
 use maka_agent_ports::model::ProviderKind;
@@ -34,11 +34,7 @@ pub(super) async fn discover(
     request: Discovery,
     context: Context,
 ) -> Result<Vec<ModelInfo>, Error> {
-    let inventory = super::discovery::discover(provider, request, context).await?;
-    Ok(inventory
-        .into_iter()
-        .map(|model| metadata::enrich(provider.id, provider.facts, model))
-        .collect())
+    super::discovery::discover(provider, request, context).await
 }
 
 pub(super) async fn verify(

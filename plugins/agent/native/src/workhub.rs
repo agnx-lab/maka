@@ -66,10 +66,14 @@ fn namespace() -> Namespace {
     Namespace::new(IMPLEMENTATION, maka_plugin_core::scope::Scope::Profile)
         .expect("built-in WorkHub namespace")
 }
-pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
+pub fn provide(
+    registry: &mut NativeRegistry,
+    catalog: Arc<maka_providers::catalog::Catalog>,
+) -> Result<(), String> {
     registry.insert(
         maka_agent_api::workhub::IMPLEMENTATION.into(),
-        Arc::new(|context, settings| {
+        Arc::new(move |context, settings| {
+            let catalog = catalog.clone();
             Box::pin(async move {
                 let prepared = tasks::prepare(&context, settings);
                 let (settings, tasks, additional, link) = match prepared {
@@ -84,11 +88,11 @@ pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
                 match Owner::open_behavior(
                     context,
                     settings,
-                    IMPLEMENTATION,
                     Some(crate::owner::BuiltinBehavior::WorkHub),
                     additional,
                     tasks.bindings(),
                     Some(tasks.graphs.clone()),
+                    catalog,
                 )
                 .await
                 {

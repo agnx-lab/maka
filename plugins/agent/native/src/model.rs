@@ -82,6 +82,9 @@ pub(crate) struct AcceptedModel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editing_tools: Option<EditingTools>,
     context: ModelRequestContext,
+    /// Public defaults at admission only; account reports and overrides stay live.
+    #[serde(deserialize_with = "Option::deserialize")]
+    public_model: Option<ModelInfo>,
     provider: maka_agent_facts::provider::Identity,
     provider_configuration: Value,
     basis: ExecutionBasis,
@@ -102,6 +105,7 @@ pub(crate) struct Source {
 impl Source {
     pub async fn select(
         configuration: Arc<ConfigurationStore>,
+        catalog: Arc<maka_providers::catalog::Catalog>,
         credentials: Credentials,
         selection: ModelSelection,
         thinking_level: Option<ThinkingLevel>,
@@ -111,6 +115,8 @@ impl Source {
         let span = tracing::warn_span!("agent_model_preparation", session_id = %session,
             connection_id = %selection.connection_id, activation = %revision.activation);
         async move {
+            let public_guard = catalog.snapshot.read().await;
+            let snapshot = public_guard.as_ref().map_err(|_| unavailable())?.clone();
             let material = configuration
                 .observe_selected_model(selection.clone())
                 .await
@@ -119,9 +125,14 @@ impl Source {
                     unavailable()
                 })?
                 .ok_or_else(unavailable)?;
+            drop(public_guard);
             let row = &material.connection;
+            let public_model = snapshot.get(&row.provider.name, &selection.model_id).cloned();
+            let snapshot = Arc::new(maka_providers::catalog::Snapshot::for_model(
+                &row.provider.name, &selection.model_id, public_model.clone(),
+            ).map_err(|_| unavailable())?);
             let definition =
-                Arc::new(maka_providers::definition(&row.provider).map_err(|_| {
+                Arc::new(maka_providers::definition(&row.provider, snapshot).map_err(|_| {
                     tracing::warn!(stage = "provider_definition", cause = "provider_definition_unavailable",
                         provider = %row.provider.name, "Model preparation failed");
                     unavailable()
@@ -133,6 +144,7 @@ impl Source {
                 credentials,
                 accepted: AcceptedModel {
                     context: request_context(row, &model.info)?,
+                    public_model,
                     editing_tools: Some(editing_tools(row, &selection.model_id, &model.base_url)),
                     tool_mode: ToolMode::for_model(
                         &selection.model_id,
@@ -171,8 +183,14 @@ impl Source {
         let _span = tracing::warn_span!("agent_model_preparation", session_id = %session,
             connection_id = %accepted.binding.connection_id, activation = %revision.activation)
         .entered();
+        let snapshot = maka_providers::catalog::Snapshot::for_model(
+            &accepted.provider.name,
+            &accepted.binding.model,
+            accepted.public_model.clone(),
+        )
+        .map_err(|_| unavailable())?;
         let definition =
-            Arc::new(maka_providers::definition(&accepted.provider).map_err(|_| {
+            Arc::new(maka_providers::definition(&accepted.provider, Arc::new(snapshot)).map_err(|_| {
                 tracing::warn!(stage = "restore_provider_definition", cause = "provider_definition_unavailable",
                     provider = %accepted.provider.name, "Model preparation failed");
                 unavailable()
@@ -420,9 +438,12 @@ impl ModelSource for Source {
 /// Resolve tool compatibility without preparing credentials or starting execution.
 pub(crate) async fn candidate_editing_tools(
     configuration: &Arc<ConfigurationStore>,
+    catalog: &maka_providers::catalog::Catalog,
     selection: ModelSelection,
     thinking_level: Option<ThinkingLevel>,
 ) -> Result<EditingTools, RunError> {
+    let public_guard = catalog.snapshot.read().await;
+    let snapshot = public_guard.as_ref().map_err(|_| unavailable())?.clone();
     let material = configuration
         .observe_selected_model(selection.clone())
         .await
@@ -435,8 +456,9 @@ pub(crate) async fn candidate_editing_tools(
             unavailable()
         })?
         .ok_or_else(unavailable)?;
+    drop(public_guard);
     let row = &material.connection;
-    let definition = maka_providers::definition(&row.provider).map_err(|_| {
+    let definition = maka_providers::definition(&row.provider, snapshot).map_err(|_| {
         tracing::warn!(stage = "provider_definition", cause = "provider_definition_unavailable", connection_id = %row.connection_id,
             provider = %row.provider.name, "Model preparation failed");
         unavailable()

@@ -64,7 +64,7 @@ pub(super) async fn reopen(f: &mut Fixture) {
     let deployment = f.app.source().unwrap().deployment;
     f.app.shutdown().await.unwrap();
     let mut native = NativeRegistry::default();
-    maka_settings_native::provide(&mut native).unwrap();
+    maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
     provide_all(&mut native).unwrap();
     f.app = Application::start_from_store(
         f.store.clone(),
@@ -188,7 +188,7 @@ async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool(
         let deployment = f.app.source().unwrap().deployment;
         f.app.shutdown().await.unwrap();
         let mut native = NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         provide_all(&mut native).unwrap();
         f.app = Application::start_from_store(
             f.store.clone(),

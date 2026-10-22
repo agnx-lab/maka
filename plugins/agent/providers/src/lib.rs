@@ -27,13 +27,14 @@ mod facts;
 /// code or change the provider scope accepted by a native application.
 pub fn definition(
     identity: &maka_agent_facts::provider::Identity,
+    snapshot: std::sync::Arc<catalog::Snapshot>,
 ) -> Result<maka_agent_ports::provider::Definition, String> {
     use maka_plugin_core::scope::Scope;
     if identity.scope != Scope::Profile || identity.package_id != identity.entry_id {
         return Err("provider is unavailable".into());
     }
     match identity.package_id.as_str() {
-        api::ID => api::ApiProviders::definition(&identity.name),
+        api::ID => api::ApiProviders::definition(&identity.name, snapshot),
         codex::ID if identity.name == "chatgpt" => codex::Codex::default()
             .definition()
             .map_err(|e| e.to_string()),

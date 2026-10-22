@@ -764,7 +764,7 @@ async fn saved_model_survives_restart_and_resolves_locally_at_the_current_revisi
         assert_eq!(current["choice"]["limits"]["contextWindow"], 100000);
         assert_eq!(overrides["fixture-model"].max_output_tokens, Some(4000));
         let (_, prepared) = crate::model::Source::select(
-            f.config.clone(), f.owner.credentials.clone(), f.selection().await,
+            f.config.clone(), f.owner.catalog.clone(), f.owner.credentials.clone(), f.selection().await,
             None, session.clone(), f.owner.revision.clone(),
         ).await.unwrap();
         assert_eq!(prepared.main_output_limit, Some(4000));

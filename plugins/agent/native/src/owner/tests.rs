@@ -483,6 +483,12 @@ fn log_text(file: &mut std::fs::File) -> String {
     text
 }
 
+fn bundled_catalog() -> Arc<maka_providers::catalog::Catalog> {
+    Arc::new(maka_providers::catalog::Catalog::new(
+        maka_providers::catalog::Snapshot::bundled().unwrap(),
+    ))
+}
+
 struct Fixture {
     services: maka_host_runtime::application::NativeServices,
     _dir: tempfile::TempDir,
@@ -647,7 +653,8 @@ impl Fixture {
         let capture = captured.clone();
         let replacement = Arc::new(StdMutex::new(model));
         let mut native = NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        let catalog = bundled_catalog();
+        maka_settings_native::provide(&mut native, catalog.clone()).unwrap();
         if let Some(tooling) = &tooling {
             tooling.provide(&mut native);
         }
@@ -658,10 +665,11 @@ impl Fixture {
                 IMPLEMENTATION.into(),
                 Arc::new(move |context, configuration| {
                     let capture = capture.clone();
+                    let catalog = catalog.clone();
                     let replacement = replacement.lock().unwrap().take();
                     Box::pin(async move {
                         let services = context.services();
-                        let mut owner = Owner::open(context, configuration).await.unwrap();
+                        let mut owner = Owner::open(context, configuration, catalog).await.unwrap();
                         if let Some(model) = replacement {
                             let store = owner.store.clone();
                             Arc::get_mut(&mut owner).unwrap().engine = Engine::new(
@@ -1499,7 +1507,7 @@ async fn public_availability_resumes_stable_sessions_and_separates_deployments()
         let deployment = fixture.app.source().unwrap().deployment;
         fixture.app.shutdown().await.unwrap();
         let mut native = NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         crate::owner::tests::provide_all(&mut native).unwrap();
         let resumed = Application::start_from_store(
             fixture.store.clone(),
@@ -1540,7 +1548,7 @@ async fn public_availability_resumes_stable_sessions_and_separates_deployments()
             .await
             .unwrap();
         let mut native = NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         crate::owner::tests::provide_all(&mut native).unwrap();
         let other = Application::start_from_store(
             fixture.store.clone(),
@@ -1894,7 +1902,7 @@ fn catalog_interaction(
 }
 
 fn provide_all(registry: &mut NativeRegistry) -> Result<(), String> {
-    crate::provide(registry)?;
+    crate::provide(registry, bundled_catalog())?;
     maka_acp_native::provide(registry)?;
     maka_files_native::provide(registry)?;
     maka_processes_native::provide(registry)?;
@@ -1903,6 +1911,6 @@ fn provide_all(registry: &mut NativeRegistry) -> Result<(), String> {
     maka_interactions_native::forms::provide(registry)?;
     maka_web::provide(registry)?;
     maka_jev_native::provide(registry)?;
-    crate::workhub::provide(registry)?;
+    crate::workhub::provide(registry, bundled_catalog())?;
     Ok(())
 }

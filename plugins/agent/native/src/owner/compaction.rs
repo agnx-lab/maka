@@ -118,6 +118,7 @@ impl Owner {
         }
         let (source, prepared) = crate::model::Source::select(
             self.configuration.clone(),
+            self.catalog.clone(),
             self.credentials.clone(),
             input.model,
             input.thinking_level,

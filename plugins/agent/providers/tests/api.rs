@@ -40,8 +40,12 @@ mod effects;
 #[path = "api/policy.rs"]
 mod policy;
 
+fn snapshot() -> std::sync::Arc<maka_providers::catalog::Snapshot> {
+    std::sync::Arc::new(maka_providers::catalog::Snapshot::bundled().unwrap())
+}
+
 fn binding(name: &str) -> Definition {
-    ApiProviders::definition(name).unwrap()
+    ApiProviders::definition(name, snapshot()).unwrap()
 }
 fn request(binding: &Definition, id: &str, overrides: ModelOverride) -> Resolve {
     let configuration = binding
@@ -212,10 +216,9 @@ async fn account_metadata_and_reply_capacity_survive_plugin_policy_resolution() 
     let input = request(&openai, "gpt-5.2", ModelOverride::default());
     let model = openai.prepare(input.clone()).await.unwrap();
     assert_eq!(
-        model.provider_options["openai"]["reasoningEffort"],
-        "medium"
+        model.provider_options,
+        json!({"openai":{"store":false,"parallelToolCalls":true}})
     );
-    assert_eq!(model.provider_options["openai"]["reasoningSummary"], "auto");
     let mut account = input;
     account.model.thinking_levels = Some(vec![High]);
     let model = openai.prepare(account).await.unwrap();
@@ -272,6 +275,7 @@ async fn catalog_metadata_and_execution_share_provider_facts_and_explicit_overri
         let mut input = request(&binding, "gpt-5.2", overrides.clone());
         let metadata = ApiProviders::model_metadata(
             "openai",
+            snapshot(),
             input.connection.clone(),
             reported.clone(),
             Some(overrides),
@@ -300,6 +304,7 @@ async fn selectable_thinking_choices_respect_native_encoder_and_invalid_default(
     );
     let metadata = ApiProviders::model_metadata(
         "anthropic-compatible",
+        snapshot(),
         input.connection.clone(),
         input.model.clone(),
         input.overrides.clone(),
@@ -327,6 +332,7 @@ async fn selectable_thinking_choices_respect_native_encoder_and_invalid_default(
     input.overrides.as_mut().unwrap().default_thinking_level = Some(High);
     let metadata = ApiProviders::model_metadata(
         "anthropic-compatible",
+        snapshot(),
         input.connection.clone(),
         input.model.clone(),
         input.overrides.clone(),
@@ -347,6 +353,7 @@ async fn selectable_thinking_choices_respect_native_encoder_and_invalid_default(
     assert!(
         ApiProviders::model_metadata(
             "anthropic-compatible",
+            snapshot(),
             input.connection.clone(),
             input.model.clone(),
             input.overrides.clone(),
@@ -357,6 +364,7 @@ async fn selectable_thinking_choices_respect_native_encoder_and_invalid_default(
     assert!(
         ApiProviders::model_metadata(
             "openai-compatible",
+            snapshot(),
             input.connection,
             input.model,
             input.overrides

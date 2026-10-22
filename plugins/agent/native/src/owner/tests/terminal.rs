@@ -717,7 +717,7 @@ async fn terminal_styled_display_survives_retirement_cancel_and_host_reopen_beyo
         f.store.shutdown().await.unwrap();
         f.store = Arc::new(EventLog::for_root(root).await.unwrap());
         let mut native = NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         provide_all(&mut native).unwrap();
         let tooling = service_tools::Setup::processes();
         f.app = Application::start_from_store(f.store.clone(), deployment, native, f.issuer.clone(),

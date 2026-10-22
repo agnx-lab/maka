@@ -34,37 +34,29 @@ mod relay;
 pub(super) fn resolve(
     row: &Selection<'_>,
     facts: &ProviderFacts,
+    thinking_levels: &[ThinkingLevel],
     thinking_level: Option<ThinkingLevel>,
     route: &Route,
 ) -> Result<Value, Error> {
-    let model = row.model.id.as_str();
     let wire = route.wire;
-    let known = facts.models.get(model);
-    let stored = Some(row.model);
     let parallel = row
-        .overrides
-        .and_then(|value| value.capabilities.as_ref())
-        .and_then(|value| value.parallel_tool_calls)
-        .or_else(|| {
-            stored
-                .and_then(|item| item.capabilities)
-                .and_then(|caps| caps.parallel_tool_calls)
-        })
-        .or_else(|| {
-            known
-                .and_then(|item| item.metadata.capabilities)
-                .and_then(|caps| caps.parallel_tool_calls)
-        });
+        .model
+        .capabilities
+        .and_then(|caps| caps.parallel_tool_calls);
     match &route.kind {
-        ProviderKind::Anthropic => Ok(anthropic(facts, model, thinking_level, parallel)),
+        ProviderKind::Anthropic => Ok(anthropic(
+            facts,
+            row.model,
+            thinking_levels,
+            thinking_level,
+            parallel,
+        )),
         ProviderKind::OpenaiResponses if row.provider == "openai-responses-compatible" => {
             relay::responses(row, thinking_level, parallel.unwrap_or(true))
         }
         ProviderKind::OpenaiChat | ProviderKind::OpenaiResponses => {
             // An explicit account capability can opt out; it never gates rendering.
-            let summary = stored
-                .and_then(|model| model.supports_reasoning_summary)
-                .unwrap_or(false);
+            let summary = row.model.supports_reasoning_summary.unwrap_or(false);
             Ok(openai(
                 wire,
                 thinking_level,
@@ -73,7 +65,7 @@ pub(super) fn resolve(
             ))
         }
         ProviderKind::OpenaiCompatible { name } => {
-            compatible::chat(row.provider, name, model, thinking_level, parallel)
+            Ok(compatible::chat(name, thinking_level, parallel))
         }
         ProviderKind::OpenResponses(contract) => {
             if parallel == Some(false) {
@@ -98,17 +90,6 @@ pub(super) fn resolve(
     }
 }
 
-fn default_medium(facts: &ProviderFacts, model: &str) -> bool {
-    let family = model.rsplit('/').next().unwrap_or(model);
-    facts.models.get(family).is_some_and(|item| {
-        item.metadata
-            .thinking_options
-            .as_ref()
-            .and_then(|thinking| thinking.efforts.as_ref())
-            .is_some_and(|efforts| efforts.iter().any(|effort| effort == "medium"))
-    })
-}
-
 fn openai(wire: Wire, level: Option<ThinkingLevel>, summary: bool, parallel: bool) -> Value {
     let mut options = json!({"store": false, "parallelToolCalls": parallel});
     if let Some(level) = level {
@@ -125,42 +106,35 @@ fn openai(wire: Wire, level: Option<ThinkingLevel>, summary: bool, parallel: boo
 
 fn anthropic(
     facts: &ProviderFacts,
-    model: &str,
+    model: &maka_agent_facts::configuration::ModelInfo,
+    levels: &[ThinkingLevel],
     level: Option<ThinkingLevel>,
     parallel: Option<bool>,
 ) -> Value {
-    let family = claude_family(model);
-    let known = facts.models.get(model);
+    let family = claude_family(&model.id);
+    let known = facts.models.get(&model.id);
     let family_facts = facts.models.get(family.as_ref());
     let metadata = known.map(|item| &item.metadata);
     let family_metadata = family_facts.map(|item| &item.metadata);
-    let thinking = metadata
+    // The SDK's off encoding and adaptive wire support remain compiled policy.
+    let off_behavior = metadata
         .and_then(|metadata| metadata.thinking_options.as_ref())
-        .or_else(|| family_metadata.and_then(|metadata| metadata.thinking_options.as_ref()));
+        .and_then(|thinking| thinking.off_behavior)
+        .or_else(|| {
+            family_metadata
+                .and_then(|metadata| metadata.thinking_options.as_ref())
+                .and_then(|thinking| thinking.off_behavior)
+        });
     let bare_legacy = matches!(family.as_ref(), "claude-opus-4" | "claude-sonnet-4");
     let visible = family.starts_with("claude-")
-        && (thinking.is_some_and(|thinking| {
-            thinking.toggle == Some(true)
-                || thinking
-                    .efforts
-                    .as_ref()
-                    .is_some_and(|efforts| !efforts.is_empty())
-        }) || metadata
-            .and_then(|metadata| metadata.capabilities)
-            .and_then(|caps| caps.reasoning)
-            == Some(true)
-            || family_metadata
-                .and_then(|metadata| metadata.capabilities)
-                .and_then(|caps| caps.reasoning)
-                == Some(true)
-            || bare_legacy);
+        && (model.capabilities.and_then(|caps| caps.reasoning) == Some(true)
+            || levels.iter().any(|level| *level != ThinkingLevel::Off));
     let mut options = json!({"cacheControl":{"type":"ephemeral"}});
     if parallel == Some(false) {
         options["disableParallelToolUse"] = json!(true);
     }
     if level == Some(ThinkingLevel::Off)
-        && thinking.and_then(|thinking| thinking.off_behavior)
-            == Some(ThinkingOffBehavior::AnthropicThinkingDisabled)
+        && off_behavior == Some(ThinkingOffBehavior::AnthropicThinkingDisabled)
     {
         options["thinking"] = json!({"type":"disabled"});
     } else if visible {

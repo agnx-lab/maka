@@ -183,6 +183,7 @@ async fn openrouter_discovery_preserves_reported_efforts_defaults_and_explicit_p
         resolve.model = model.clone();
         let metadata = ApiProviders::model_metadata(
             "openrouter",
+            snapshot(),
             resolve.connection.clone(),
             resolve.model.clone(),
             resolve.overrides.clone(),

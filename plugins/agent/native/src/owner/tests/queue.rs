@@ -329,7 +329,7 @@ use maka_agent_facts::execution::ThinkingLevel::High;
         drop(raw);
         let mut native = NativeRegistry::default();
         crate::owner::tests::provide_all(&mut native).unwrap();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         let app = Application::start_from_store(fixture.store.clone(), deployment, native, fixture.issuer.clone(), Arc::new(Grant(fixture.issuer.clone(), None)), Some(maka_host_js::factory(maka_js_runtime::plugin::Limits::default()))).await.unwrap();
         app.ready().await.unwrap();
         let mut efforts = Vec::new();

@@ -210,16 +210,19 @@ async fn discovery_survives_persistence_and_verification_does_not_require_stream
         let persisted: Vec<ModelInfo> =
             serde_json::from_slice(&serde_json::to_vec(&inventory).unwrap()).unwrap();
         input.model = persisted.into_iter().find(|model| model.id == id).unwrap();
+        assert_eq!(
+            serde_json::to_value(&input.model).unwrap(),
+            json!({"id":id})
+        );
         let model = binding.prepare(input.clone()).await.unwrap();
         if name == "openai" {
             assert_eq!(
-                model.provider_options["openai"]["reasoningEffort"],
-                "medium"
+                model.provider_options,
+                json!({"openai":{"store":false,"parallelToolCalls":true}})
             );
-            assert_eq!(model.provider_options["openai"]["reasoningSummary"], "auto");
         } else {
-            assert_eq!(model.info.capabilities.unwrap().vision, Some(true));
-            input.model.capabilities.as_mut().unwrap().vision = Some(false);
+            assert_eq!(model.info.capabilities, None);
+            input.model.capabilities.get_or_insert_default().vision = Some(false);
             assert_eq!(
                 binding
                     .prepare(input.clone())
@@ -312,7 +315,7 @@ async fn discovery_survives_persistence_and_verification_does_not_require_stream
 #[tokio::test]
 async fn compiled_definition_authenticates_without_legacy_registration_or_secret_diagnostics() {
     use maka_agent_ports::provider::authentication::Authenticate;
-    let definition = ApiProviders::definition("openai-compatible").unwrap();
+    let definition = ApiProviders::definition("openai-compatible", snapshot()).unwrap();
     let transport = Arc::new(Exchange::default());
     let context = Context {
         transport: transport.clone(),

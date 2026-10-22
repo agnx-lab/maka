@@ -18,7 +18,6 @@
  */
 
 use super::{Error, Selection, ThinkingLevel, Value, Wire};
-use crate::facts::provider_facts;
 
 pub(super) fn responses(
     row: &Selection<'_>,
@@ -26,13 +25,10 @@ pub(super) fn responses(
     parallel: bool,
 ) -> Result<Value, Error> {
     let model = row.model.id.as_str();
-    // Relay catalogs may have no models. Defaults and summaries follow canonical
-    // OpenAI family facts, never the relay's declared thinking levels.
-    let facts = provider_facts("openai").map_err(|_| Error::ProviderFactsUnavailable)?;
     let mut options = super::openai(
         Wire::OpenaiResponses,
-        level.or_else(|| super::default_medium(facts, model).then_some(ThinkingLevel::Medium)),
-        super::default_medium(facts, model),
+        level,
+        row.model.supports_reasoning_summary.unwrap_or(false),
         parallel,
     );
     options["openai"]["forceReasoning"] = Value::Bool(true);

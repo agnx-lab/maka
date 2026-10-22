@@ -34,13 +34,26 @@ use std::{
 
 pub(crate) async fn discover(
     store: &Arc<ConfigurationStore>,
+    catalog: &maka_providers::catalog::Catalog,
     input: Value,
     context: Context,
 ) -> Result<Value, String> {
     context.operation().ok_or("settings_mutation_required")?;
     let expected: ConnectionCredentialTarget =
         serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
-    let Ok(definition) = crate::connections::definition(&expected.provider) else {
+    // Explicit refresh schedules the Root-owned public sources without waiting
+    // for an unrelated public endpoint. Account discovery uses last-good facts.
+    if let Ok(completed) = catalog.request_refresh() {
+        drop(completed);
+    }
+    let snapshot = catalog
+        .snapshot
+        .read()
+        .await
+        .as_ref()
+        .map_err(|_| "settings_store_unavailable")?
+        .clone();
+    let Ok(definition) = crate::connections::definition(&expected.provider, snapshot) else {
         return encode(SetupResult::Failed);
     };
     let ticket = match store

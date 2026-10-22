@@ -46,7 +46,10 @@ fn configuration_schema() -> serde_json::Value {
 
 pub const IMPLEMENTATION: &str = "maka.settings";
 pub const EXPORT: &str = "Settings";
-pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
+pub fn provide(
+    registry: &mut NativeRegistry,
+    catalog: Arc<maka_providers::catalog::Catalog>,
+) -> Result<(), String> {
     for (implementation, export, contract) in [
         (IMPLEMENTATION, EXPORT, contract::contract()),
         ("maka.settings.setup", "Setup", contract::setup_contract()),
@@ -56,10 +59,12 @@ pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
             contract::authentication_contract(),
         ),
     ] {
+        let catalog = catalog.clone();
         registry.insert(
             implementation.into(),
             Arc::new(move |context, input| {
                 let contract = contract.clone();
+                let catalog = catalog.clone();
                 Box::pin(async move {
                     let opened = async {
                         let configuration: Configuration = serde_json::from_value(input)
@@ -76,6 +81,7 @@ pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
                             .await
                             .map_err(|_| "settings_store_unavailable")?;
                         Ok::<_, String>(Arc::new(service::Settings {
+                            catalog,
                             configuration: Arc::new(store),
                             log: persistence.store().clone(),
                             configured_locale: LanguagePreference::from_locale(

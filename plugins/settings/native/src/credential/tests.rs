@@ -110,7 +110,11 @@ async fn chatgpt_login_saves_privately_and_rejects_cancelled_or_changed_connecti
             Arc::new(RootOwner::create(&directory.path().join("root"), &namespaces).unwrap());
         let store = Arc::new(ConfigurationStore::for_root(root).await.unwrap());
         let identity: provider::Identity = serde_json::from_value(json!({"packageId":"maka.codex","entryId":"maka.codex","scope":"profile","name":"chatgpt"})).unwrap();
-        let definition = connections::definition(&identity).unwrap();
+        let definition = connections::definition(
+            &identity,
+            Arc::new(maka_providers::catalog::Snapshot::bundled().unwrap()),
+        )
+        .unwrap();
         let revision = store.catalog().await.unwrap().revision;
         store.create_connection(serde_json::from_value(json!({"expectedCatalogRevision":revision,"connection":{"slug":"chatgpt","name":"ChatGPT","provider":identity,"configuration":definition.descriptor().configuration_defaults,"enabled":true,"enabledModelIds":[]}})).unwrap()).await.unwrap();
         let row = store.catalog().await.unwrap().connections.remove(0);
@@ -207,7 +211,11 @@ async fn chatgpt_login_saves_privately_and_rejects_cancelled_or_changed_connecti
                 }
                 let discovered = crate::setup::discover_prepared(
                     ticket,
-                    connections::definition(&identity).unwrap(),
+                    connections::definition(
+                        &identity,
+                        Arc::new(maka_providers::catalog::Snapshot::bundled().unwrap()),
+                    )
+                    .unwrap(),
                     provider::Context {
                         transport: Arc::new(Script {
                             fail: discovery == "network",
@@ -290,7 +298,11 @@ fn compiled_catalog_projects_search_metadata_and_resolves_selected_provider() {
     let mut offset = 0;
     let mut found = false;
     loop {
-        let page = connections::providers(json!({"offset":offset})).unwrap();
+        let page = connections::providers(
+            json!({"offset":offset}),
+            Arc::new(maka_providers::catalog::Snapshot::bundled().unwrap()),
+        )
+        .unwrap();
         let rows = page["providers"].as_array().unwrap();
         assert!(page.to_string().len() <= 128 * 1024 || rows.len() == 1);
         for row in rows {
@@ -299,7 +311,11 @@ fn compiled_catalog_projects_search_metadata_and_resolves_selected_provider() {
                 assert_eq!(row["label"], "ChatGPT Subscription");
                 assert_eq!(row["authentication"][0]["interactive"], true);
                 assert!(row.get("descriptor").is_none());
-                let selected = connections::provider(row["identity"].clone()).unwrap();
+                let selected = connections::provider(
+                    row["identity"].clone(),
+                    Arc::new(maka_providers::catalog::Snapshot::bundled().unwrap()),
+                )
+                .unwrap();
                 assert_eq!(selected["identity"], row["identity"]);
                 assert_eq!(selected["descriptor"]["label"], "ChatGPT Subscription");
                 assert_eq!(selected["descriptor"]["authentication"][0]["id"], "chatgpt");

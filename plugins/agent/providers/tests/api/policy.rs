@@ -68,6 +68,7 @@ async fn kimi_catalog_choices_and_supported_default_remain_selectable() {
         );
         let metadata = ApiProviders::model_metadata(
             "kimi-coding-plan",
+            snapshot(),
             input.connection.clone(),
             input.model.clone(),
             input.overrides.clone(),

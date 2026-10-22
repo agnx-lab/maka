@@ -58,7 +58,7 @@ async fn reopen(f: &mut Fixture) {
     let deployment = f.app.source().unwrap().deployment;
     f.app.shutdown().await.unwrap();
     let mut native = NativeRegistry::default();
-    maka_settings_native::provide(&mut native).unwrap();
+    maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
     crate::owner::tests::provide_all(&mut native).unwrap();
     f.app = Application::start_from_store(
         f.store.clone(),

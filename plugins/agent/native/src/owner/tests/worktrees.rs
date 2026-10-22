@@ -141,7 +141,7 @@ async fn isolated_native_files_and_immutable_patch_survive_successor_and_restart
         let deployment=f.app.source().unwrap().deployment;
         f.app.shutdown().await.unwrap();
         let mut native=NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         crate::owner::tests::provide_all(&mut native).unwrap();
         f.app=Application::start_from_store(f.store.clone(),deployment,native,f.issuer.clone(),Arc::new(Grant(f.issuer.clone(),None)),Some(maka_host_js::factory(Default::default()))).await.unwrap();
         f.app.ready().await.unwrap();
@@ -314,7 +314,7 @@ async fn large_completed_isolated_patch_is_complete_and_immutable_after_successo
         let deployment = f.app.source().unwrap().deployment;
         f.app.shutdown().await?;
         let mut native = NativeRegistry::default();
-        maka_settings_native::provide(&mut native).unwrap();
+        maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
         crate::owner::tests::provide_all(&mut native).unwrap();
         f.app = Application::start_from_store(
             f.store.clone(),

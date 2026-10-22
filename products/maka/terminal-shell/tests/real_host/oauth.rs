@@ -46,7 +46,12 @@ impl Handler for Authentication {
                 let identity = serde_json::from_value(input)
                     .map_err(|_| "invalid provider identity".to_owned());
                 identity.and_then(|identity| {
-                    let descriptor = maka_providers::definition(&identity)?.descriptor().clone();
+                    let descriptor = maka_providers::definition(
+                        &identity,
+                        std::sync::Arc::new(maka_providers::catalog::Snapshot::bundled()?),
+                    )?
+                    .descriptor()
+                    .clone();
                     serde_json::to_value(maka_settings_native::contract::Provider {
                         identity,
                         descriptor,

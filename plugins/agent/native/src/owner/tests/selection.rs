@@ -198,8 +198,28 @@ async fn captured_execution_ignores_catalog_labels_and_other_models_but_rejects_
 {
     let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
     let session = fixture.create("Original execution basis").await;
+    let public = ModelInfo {
+        context_window: Some(128_000),
+        max_output_tokens: Some(4096),
+        thinking_levels: Some(vec![ThinkingLevel::Low, ThinkingLevel::High]),
+        default_thinking_level: Some(ThinkingLevel::High),
+        capabilities: Some(ModelCapabilities {
+            vision: Some(true),
+            ..Default::default()
+        }),
+        ..ModelInfo::new("fixture-model")
+    };
+    *fixture.owner.catalog.snapshot.write().await = Ok(Arc::new(
+        maka_providers::catalog::Snapshot::for_model(
+            "openai-compatible",
+            "fixture-model",
+            Some(public.clone()),
+        )
+        .unwrap(),
+    ));
     let (mut source, _) = crate::model::Source::select(
         fixture.config.clone(),
+        fixture.owner.catalog.clone(),
         fixture.owner.credentials.clone(),
         fixture.selection().await,
         None,
@@ -210,6 +230,43 @@ async fn captured_execution_ignores_catalog_labels_and_other_models_but_rejects_
     .unwrap();
     let persisted = serde_json::to_string(&source.accepted).unwrap();
     assert!(!persisted.contains("private-fixture-key"));
+    let stored: Value = serde_json::from_str(&persisted).unwrap();
+    assert_eq!(stored["public_model"]["maxOutputTokens"], 4096);
+    let mut missing = stored.clone();
+    missing.as_object_mut().unwrap().remove("public_model");
+    assert!(
+        serde_json::from_value::<crate::model::AcceptedModel>(missing).is_err(),
+        "captured absence must be explicit null, never inferred from a missing field"
+    );
+    let refreshed_public = ModelInfo {
+        context_window: Some(1_000_000),
+        max_output_tokens: Some(8192),
+        default_thinking_level: Some(ThinkingLevel::Low),
+        capabilities: Some(ModelCapabilities {
+            vision: Some(false),
+            ..Default::default()
+        }),
+        ..public
+    };
+    *fixture.owner.catalog.snapshot.write().await = Ok(Arc::new(
+        maka_providers::catalog::Snapshot::for_model(
+            "openai-compatible",
+            "fixture-model",
+            Some(refreshed_public),
+        )
+        .unwrap(),
+    ));
+    for prepared in [
+        source.capture().await.unwrap(),
+        source.capture_auxiliary().await.unwrap(),
+    ] {
+        assert_eq!(prepared.main_output_limit, Some(4096));
+        assert_eq!(
+            prepared.context.unwrap().model_context_window,
+            Some(128_000)
+        );
+        assert!(prepared.supports_vision);
+    }
     source = crate::model::Source::restore(
         fixture.config.clone(),
         fixture.owner.credentials.clone(),
@@ -218,6 +275,39 @@ async fn captured_execution_ignores_catalog_labels_and_other_models_but_rejects_
         fixture.owner.revision.clone(),
     )
     .unwrap();
+    let recovered = source.capture().await.unwrap();
+    assert_eq!(recovered.main_output_limit, Some(4096));
+    assert_eq!(
+        recovered
+            .options
+            .as_object()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![json!({"reasoningEffort":"high"})],
+    );
+    assert!(recovered.supports_vision);
+    let choices = models(&fixture, json!({"kind":"start","query":"fixture-model"}))
+        .await
+        .unwrap();
+    assert_eq!(choices["choices"][0]["limits"]["contextWindow"], 1_000_000);
+    assert_eq!(choices["choices"][0]["limits"]["maxOutputTokens"], 8192);
+    assert_eq!(choices["choices"][0]["defaultThinkingLevel"], "low");
+    let (_, next) = crate::model::Source::select(
+        fixture.config.clone(),
+        fixture.owner.catalog.clone(),
+        fixture.owner.credentials.clone(),
+        fixture.selection().await,
+        None,
+        "new-public-defaults".into(),
+        fixture.owner.revision.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(next.main_output_limit, Some(8192));
+    assert_eq!(next.context.unwrap().model_context_window, Some(1_000_000));
+    assert!(!next.supports_vision);
     edit(&fixture, |changes| {
         changes.name = Some("A different label".into());
         changes
@@ -286,6 +376,7 @@ async fn captured_execution_ignores_catalog_labels_and_other_models_but_rejects_
     assert!(source.capture().await.is_err());
     let (current, _) = crate::model::Source::select(
         fixture.config.clone(),
+        fixture.owner.catalog.clone(),
         fixture.owner.credentials.clone(),
         fixture.selection().await,
         None,
@@ -301,6 +392,7 @@ async fn captured_execution_ignores_catalog_labels_and_other_models_but_rejects_
     assert!(current.capture().await.is_err());
     let (current, _) = crate::model::Source::select(
         fixture.config.clone(),
+        fixture.owner.catalog.clone(),
         fixture.owner.credentials.clone(),
         fixture.selection().await,
         None,
@@ -678,6 +770,7 @@ async fn restored_thinking_preserves_explicit_choice_and_refuses_changed_default
     for level in [None, Some(High)] {
         let (source, prepared) = crate::model::Source::select(
             fixture.config.clone(),
+            fixture.owner.catalog.clone(),
             fixture.owner.credentials.clone(),
             fixture.selection().await,
             level,
@@ -865,6 +958,7 @@ async fn accepted_code_mode_survives_settings_changes_and_legacy_messages_remain
     .await;
     let (source, prepared) = crate::model::Source::select(
         fixture.config.clone(),
+        fixture.owner.catalog.clone(),
         fixture.owner.credentials.clone(),
         fixture.selection().await,
         None,
@@ -883,6 +977,19 @@ async fn accepted_code_mode_survives_settings_changes_and_legacy_messages_remain
     assert_eq!(context.context_window, Some(900_000));
     assert_eq!(context.declared_window, Some(700_000));
     let stored = serde_json::to_value(&source.accepted).unwrap();
+    assert!(stored.as_object().unwrap().contains_key("public_model"));
+    assert!(stored["public_model"].is_null());
+    *fixture.owner.catalog.snapshot.write().await = Ok(Arc::new(
+        maka_providers::catalog::Snapshot::for_model(
+            "openai-compatible",
+            "fixture-model",
+            Some(ModelInfo {
+                max_output_tokens: Some(4096),
+                ..ModelInfo::new("fixture-model")
+            }),
+        )
+        .unwrap(),
+    ));
     edit(&fixture, |changes| {
         changes.model_overrides = Patch::Set(BTreeMap::from([(
             "fixture-model".into(),
@@ -912,6 +1019,7 @@ async fn accepted_code_mode_survives_settings_changes_and_legacy_messages_remain
     );
     let (next, prepared) = crate::model::Source::select(
         fixture.config.clone(),
+        fixture.owner.catalog.clone(),
         fixture.owner.credentials.clone(),
         fixture.selection().await,
         None,

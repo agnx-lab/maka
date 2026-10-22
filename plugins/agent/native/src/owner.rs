@@ -171,6 +171,7 @@ pub(crate) struct Owner {
     pub prefix: String,
     pub data_source: DataSource,
     pub(crate) configuration: Arc<ConfigurationStore>,
+    pub(crate) catalog: Arc<maka_providers::catalog::Catalog>,
     credentials: crate::model::Credentials,
     revision: SourceRevision,
     behavior: Option<BuiltinBehavior>,
@@ -221,27 +222,26 @@ impl Owner {
         self.executors.setup(input, context).await
     }
 
-    pub async fn open(context: NativeContext, input: Value) -> Result<Arc<Self>, String> {
-        Self::open_behavior(
-            context,
-            input,
-            IMPLEMENTATION,
-            None,
-            vec![],
-            BTreeMap::new(),
-            None,
-        )
-        .await
+    pub async fn open(
+        context: NativeContext,
+        input: Value,
+        catalog: Arc<maka_providers::catalog::Catalog>,
+    ) -> Result<Arc<Self>, String> {
+        Self::open_behavior(context, input, None, vec![], BTreeMap::new(), None, catalog).await
     }
     pub(crate) async fn open_behavior(
         context: NativeContext,
         input: Value,
-        implementation: &'static str,
         behavior: Option<BuiltinBehavior>,
         mut additional: Vec<maka_agent_facts::tools::ToolRegistration>,
         internal_bindings: BTreeMap<String, Option<String>>,
         graphs: Option<Arc<crate::workhub::tasks::graph::Graphs>>,
+        catalog: Arc<maka_providers::catalog::Catalog>,
     ) -> Result<Arc<Self>, String> {
+        let implementation = match behavior {
+            Some(BuiltinBehavior::WorkHub) => maka_agent_api::workhub::IMPLEMENTATION,
+            None => IMPLEMENTATION,
+        };
         if !jsonschema_valid(&input) {
             return Err("agent_configuration_invalid".into());
         }
@@ -463,6 +463,7 @@ impl Owner {
             internal_bindings,
             settings,
             configuration,
+            catalog,
             credentials,
             engine,
             tools,
@@ -911,6 +912,7 @@ impl Owner {
             Selection::Model(selection, thinking_level) => PreparedBackend::Model(Box::new(
                 crate::model::Source::select(
                     self.configuration.clone(),
+                    self.catalog.clone(),
                     self.credentials.clone(),
                     selection,
                     thinking_level,

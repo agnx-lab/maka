@@ -119,13 +119,17 @@ impl Owner {
         else {
             return Ok(SkillCandidates::default());
         };
-        let editing =
-            match crate::model::candidate_editing_tools(&self.configuration, model, thinking_level)
-                .await
-            {
-                Ok(editing) => editing,
-                Err(_) => return Ok(SkillCandidates::default()),
-            };
+        let editing = match crate::model::candidate_editing_tools(
+            &self.configuration,
+            &self.catalog,
+            model,
+            thinking_level,
+        )
+        .await
+        {
+            Ok(editing) => editing,
+            Err(_) => return Ok(SkillCandidates::default()),
+        };
         workspace::validate(
             &self.workspace_roots,
             &session.configuration.workspace,

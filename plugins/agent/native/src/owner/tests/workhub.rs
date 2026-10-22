@@ -308,7 +308,7 @@ async fn activate_worker_mode(
                     let behavior = behavior.clone();
                     Box::pin(async move {
                         let owner = Arc::new(Worker(
-                            Agent(Owner::open(context, settings).await.unwrap()),
+                            Agent(Owner::open(context, settings, crate::owner::tests::bundled_catalog()).await.unwrap()),
                             behavior,
                         ));
                         NativeActivation {
@@ -326,7 +326,7 @@ async fn activate_worker_mode(
             )
             .unwrap();
     }
-    maka_settings_native::provide(&mut native).unwrap();
+    maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
     fixture.app = Application::start_from_store(
         fixture.store.clone(),
         source.deployment,

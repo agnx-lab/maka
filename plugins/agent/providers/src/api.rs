@@ -57,8 +57,11 @@ pub struct ApiProviders;
 impl ApiProviders {
     /// A compiled API implementation for a native application owner. Availability
     /// does not activate legacy contributions or grant execution authority.
-    pub fn definition(id: &str) -> Result<Definition, String> {
-        Self::provider(id)?.definition()
+    pub fn definition(
+        id: &str,
+        snapshot: Arc<crate::catalog::Snapshot>,
+    ) -> Result<Definition, String> {
+        Self::provider(id, snapshot)?.definition()
     }
 
     /// Selectable model metadata, checked by the same preparation policy as
@@ -66,11 +69,12 @@ impl ApiProviders {
     /// configured default is an error, never silently replaced by another level.
     pub fn model_metadata(
         id: &str,
+        snapshot: Arc<crate::catalog::Snapshot>,
         connection: Connection,
         model: ModelInfo,
         overrides: Option<ModelOverride>,
     ) -> Result<ModelMetadata, String> {
-        let provider = Self::provider(id)?;
+        let provider = Self::provider(id, snapshot)?;
         let mut metadata = provider.model_metadata(model.clone(), overrides.as_ref());
         let mut request = Resolve {
             connection,
@@ -88,7 +92,7 @@ impl ApiProviders {
         Ok(metadata)
     }
 
-    fn provider(id: &str) -> Result<ApiProvider, String> {
+    fn provider(id: &str, snapshot: Arc<crate::catalog::Snapshot>) -> Result<ApiProvider, String> {
         let (id, facts) = facts::all()
             .map_err(|error| error.to_string())?
             .iter()
@@ -99,6 +103,7 @@ impl ApiProviders {
         Ok(ApiProvider {
             id: id.as_str(),
             facts,
+            snapshot,
         })
     }
 
@@ -117,6 +122,7 @@ impl ApiProviders {
 struct ApiProvider {
     id: &'static str,
     facts: &'static ProviderFacts,
+    snapshot: Arc<crate::catalog::Snapshot>,
 }
 
 #[derive(Deserialize, Serialize, schemars::JsonSchema)]
@@ -179,7 +185,7 @@ impl ApiProvider {
     }
 
     fn model_metadata(&self, model: ModelInfo, overrides: Option<&ModelOverride>) -> ModelMetadata {
-        let reported = metadata::enrich(self.id, self.facts, model);
+        let reported = metadata::enrich(&self.snapshot, self.id, model);
         let info =
             overrides.map_or_else(|| reported.clone(), |overrides| overrides.apply(&reported));
         let thinking_levels = overrides
@@ -216,7 +222,7 @@ impl ApiProvider {
         if level.is_some_and(|level| !thinking_levels.contains(&level)) {
             return Err(Error::UnsupportedThinkingLevel);
         }
-        let options = options::resolve(&selection, self.facts, level, &route)?;
+        let options = options::resolve(&selection, self.facts, &thinking_levels, level, &route)?;
         let output = output::resolve(&selection, route.wire, &options)?;
         let adapter = request
             .overrides

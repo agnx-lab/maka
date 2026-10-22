@@ -145,7 +145,7 @@ async fn update_preferences(
 
 async fn start_settings_app(fixture: &Fixture, deployment: Uuid) -> Application {
     let mut native = NativeRegistry::default();
-    maka_settings_native::provide(&mut native).unwrap();
+    maka_settings_native::provide(&mut native, crate::owner::tests::bundled_catalog()).unwrap();
     provide_all(&mut native).unwrap();
     let app = Application::start_from_store(
         fixture.store.clone(),

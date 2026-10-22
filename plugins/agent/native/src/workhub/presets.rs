@@ -64,6 +64,11 @@ impl Hub {
             .get(&preset.worker)
             .and_then(Option::as_ref)
             .ok_or("workhub_worker_unavailable")?;
+        let public_guard = self.agent.0.catalog.snapshot.read().await;
+        let snapshot = public_guard
+            .as_ref()
+            .map_err(|_| "workhub_configuration_unavailable")?
+            .clone();
         let connection = self
             .agent
             .0
@@ -77,7 +82,8 @@ impl Hub {
                 connection.connection_id == preset.model.connection_id && connection.enabled
             })
             .ok_or("workhub_preset_connection_unavailable")?;
-        if maka_providers::definition(&connection.provider).is_err() {
+        drop(public_guard);
+        if maka_providers::definition(&connection.provider, snapshot).is_err() {
             return Err("workhub_preset_connection_unavailable".into());
         }
         if !connection

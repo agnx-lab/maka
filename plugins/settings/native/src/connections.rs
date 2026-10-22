@@ -23,18 +23,28 @@ use maka_agent_facts::provider::Identity;
 use maka_agent_ports::provider::Definition;
 use maka_config::ConfigurationStore;
 use maka_plugin_core::scope::Scope;
+use maka_providers::catalog::Snapshot;
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::Arc;
 
 pub(crate) fn encode(value: impl Serialize) -> Result<Value, String> {
     let value = serde_json::to_value(value).map_err(|_| "settings_output_invalid")?;
     Ok(value)
 }
-pub(crate) fn definition(identity: &Identity) -> Result<Definition, String> {
-    maka_providers::definition(identity).map_err(|_| "settings_provider_unavailable".into())
+pub(crate) fn definition(
+    identity: &Identity,
+    snapshot: Arc<Snapshot>,
+) -> Result<Definition, String> {
+    maka_providers::definition(identity, snapshot)
+        .map_err(|_| "settings_provider_unavailable".into())
 }
 
-pub(crate) async fn page(store: &ConfigurationStore, input: Value) -> Result<Value, String> {
+pub(crate) async fn page(
+    store: &ConfigurationStore,
+    input: Value,
+    snapshot: Arc<Snapshot>,
+) -> Result<Value, String> {
     let input: ConnectionsRead =
         serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
     let catalog = store
@@ -59,7 +69,7 @@ pub(crate) async fn page(store: &ConfigurationStore, input: Value) -> Result<Val
     let connections = catalog.connections[offset..end]
         .iter()
         .map(|row| ConnectionSummary {
-            editable: definition(&row.provider).is_ok(),
+            editable: definition(&row.provider, snapshot.clone()).is_ok(),
             basis: ConnectionVersionBasis {
                 connection_id: row.connection_id.clone(),
                 revision: row.revision,
@@ -117,7 +127,7 @@ pub(crate) async fn detail(store: &ConfigurationStore, input: Value) -> Result<V
         }),
     }
 }
-pub(crate) fn providers(input: Value) -> Result<Value, String> {
+pub(crate) fn providers(input: Value, snapshot: Arc<Snapshot>) -> Result<Value, String> {
     let input: ProvidersRead =
         serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
     let mut identities = vec![Identity {
@@ -151,7 +161,7 @@ pub(crate) fn providers(input: Value) -> Result<Value, String> {
     .map_err(|_| "settings_output_invalid")?
     .len();
     for (offset, identity) in identities.into_iter().enumerate().skip(input.offset) {
-        let provider = definition(&identity)?;
+        let provider = definition(&identity, snapshot.clone())?;
         let descriptor = provider.descriptor();
         let summary = ProviderSummary {
             identity,
@@ -180,9 +190,9 @@ pub(crate) fn providers(input: Value) -> Result<Value, String> {
     encode(ProvidersPage { providers, next })
 }
 
-pub(crate) fn provider(input: Value) -> Result<Value, String> {
+pub(crate) fn provider(input: Value, snapshot: Arc<Snapshot>) -> Result<Value, String> {
     let identity = serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
-    let descriptor = definition(&identity)?.descriptor().clone();
+    let descriptor = definition(&identity, snapshot)?.descriptor().clone();
     encode(Provider {
         identity,
         descriptor,
