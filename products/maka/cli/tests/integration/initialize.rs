@@ -52,7 +52,8 @@ async fn public_init_persists_settings_from_stdin_and_rejects_reconfiguration() 
     let root = directory.path().join("root");
     let mut child = initialize(&root, "15000");
     let mut input = br#"{"privacy":{"incognitoActive":true}}"#.to_vec();
-    input.resize(65536, b' ');
+    // Complete valid input remains accepted beyond the former byte ceiling.
+    input.resize(128 * 1024, b' ');
     child.stdin.take().unwrap().write_all(&input).unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(
@@ -85,15 +86,15 @@ async fn public_init_persists_settings_from_stdin_and_rejects_reconfiguration() 
 }
 
 #[test]
-fn public_init_rejects_invalid_and_oversized_settings_without_exposing_input() {
-    let mut oversized = br#"{"privacy":{"incognitoActive":true}}"#.to_vec();
-    oversized.resize(65537, b' ');
+fn public_init_rejects_invalid_settings_without_exposing_input() {
     let mut invalid_suffix = br#"{"privacy":{"incognitoActive":true}}"#.to_vec();
-    invalid_suffix.resize(60000, b' ');
+    // JSON must be checked through EOF, including past the former byte ceiling.
+    invalid_suffix.resize(128 * 1024, b' ');
     invalid_suffix.extend_from_slice(b"private-secret-invalid-suffix");
     for input in [
+        Vec::new(),
+        b"{}".to_vec(),
         b"private-secret-invalid-json".to_vec(),
-        oversized,
         invalid_suffix,
     ] {
         let directory = tempfile::tempdir().unwrap();
@@ -105,11 +106,7 @@ fn public_init_rejects_invalid_and_oversized_settings_without_exposing_input() {
         assert!(!output.status.success());
         let diagnostic = String::from_utf8_lossy(&output.stderr);
         assert!(
-            diagnostic.contains(if input.len() > 65536 {
-                "initial settings exceed 64 KiB"
-            } else {
-                "invalid initial settings"
-            }),
+            diagnostic.contains("invalid initial settings"),
             "{diagnostic}"
         );
         assert!(!diagnostic.contains("private-secret"));

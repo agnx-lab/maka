@@ -44,8 +44,6 @@ pub(super) struct Init {
     pub(super) settings_stdin: bool,
 }
 
-pub(crate) const SETTINGS_LIMIT: u64 = 65536;
-
 /// Bootstrap secrets travel through stdin, never command arguments or diagnostics.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -93,10 +91,7 @@ impl Init {
 pub(crate) async fn settings_input() -> Result<Vec<u8>, HostError> {
     Ok(tokio::task::spawn_blocking(|| {
         let mut bytes = Vec::new();
-        std::io::stdin()
-            .lock()
-            .take(SETTINGS_LIMIT + 1)
-            .read_to_end(&mut bytes)?;
+        std::io::stdin().lock().read_to_end(&mut bytes)?;
         Ok::<_, std::io::Error>(bytes)
     })
     .await??)
@@ -110,9 +105,6 @@ pub(crate) fn validate_settings_input(bytes: &[u8]) -> std::io::Result<()> {
 
 impl Settings {
     fn parse(bytes: &[u8]) -> std::io::Result<Self> {
-        if bytes.len() as u64 > SETTINGS_LIMIT {
-            return Err(std::io::Error::other("initial settings exceed 64 KiB"));
-        }
         serde_json::from_slice(bytes).map_err(|_| std::io::Error::other("invalid initial settings"))
     }
 
