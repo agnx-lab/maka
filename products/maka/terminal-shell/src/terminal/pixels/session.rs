@@ -693,8 +693,19 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
         } else {
             slots.first
         };
+        let capabilities = inbox.capabilities;
         inbox.in_flight = Some(candidate.frame.token());
-        (candidate, image, previous, inbox.capabilities, tracing)
+        if let Some(trace) = &mut state.trace {
+            let at = Instant::now();
+            trace.record(
+                &candidate.frame.token(),
+                candidate.geometry,
+                "codec_queued",
+                at,
+                at,
+            );
+        }
+        (candidate, image, previous, capabilities, tracing)
     };
     let presentation = presentation.clone();
     background
