@@ -123,7 +123,7 @@ fn run(
                         start,
                         Instant::now(),
                         frame.token(),
-                        frame.pixels().len(),
+                        frame.pixel_len(),
                         frame.size(),
                     )
                 });
@@ -152,6 +152,7 @@ fn run(
                     inbox.pending = Some(super::input::Candidate {
                         frame,
                         geometry: drawn_geometry.get(),
+                        pump_started: timing.as_ref().map(|(start, ..)| *start),
                     });
                     admitted = true;
                 }
@@ -161,7 +162,7 @@ fn run(
                     let sample = trace.record(
                         &token,
                         drawn_geometry.get(),
-                        "pump_until_candidate",
+                        "pump_until_submission",
                         start,
                         end,
                     );
@@ -663,9 +664,9 @@ fn run(
     result
 }
 
-/// Admit one CPU encoding job on the existing background executor. The native
-/// input/GPU owner keeps pumping while the same in-flight token retains its
-/// snapshot. Neither encoding nor executor shutdown can hold terminal cleanup.
+/// Admit one readback-and-encoding job on the existing background executor.
+/// The native input/GPU owner keeps pumping while the same in-flight token
+/// retains its snapshot. The job and executor shutdown cannot hold cleanup.
 fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExecutor) -> bool {
     if presentation.stop.load(Ordering::Acquire) {
         return false;
@@ -711,67 +712,107 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
     background
         .spawn(async move {
             let (candidate, image, previous, caps, tracing) = work;
+            let token = candidate.frame.token();
+            let geometry = candidate.geometry;
             let size = caps.size;
             use super::{input::WireFrame, probe::Protocol};
             use nsh_gpui_terminal::inline::{InlineFrame, InlineProtocol};
-            let started = tracing.then(Instant::now);
-            let result = match caps.protocol.expect("negotiated pixel transport") {
-                Protocol::Kitty => nsh_gpui_terminal::kitty::KittyFrame::encode(
-                    &candidate.frame,
-                    image,
-                    previous,
-                    size.cols,
-                    size.rows,
-                )
-                .map(WireFrame::Kitty),
-                protocol @ (Protocol::Sixel | Protocol::Iterm2) => InlineFrame::encode(
-                    &candidate.frame,
-                    match protocol {
-                        Protocol::Sixel => InlineProtocol::Sixel,
-                        _ => InlineProtocol::Iterm2,
-                    },
-                    size.cols,
-                    size.rows,
-                    caps.synchronized,
-                )
-                .map(WireFrame::Inline),
-            }
-            .map(|frame| super::input::Encoded {
-                frame,
-                geometry: candidate.geometry,
-            })
-            .map_err(|error| error.to_string());
-            let ended = started.map(|_| Instant::now());
+            let readback_started = tracing.then(Instant::now);
+            let frame = candidate
+                .frame
+                .complete()
+                .map_err(|error| error.to_string());
+            let readback_ended = readback_started.map(|_| Instant::now());
+            let current = {
+                let mut state = presentation.state.lock().unwrap();
+                // A GPU failure is session-wide even if resize superseded the
+                // frame while readback was running.
+                if let Err(error) = &frame
+                    && !state.quit
+                    && !presentation.stop.load(Ordering::Acquire)
+                {
+                    state.error.get_or_insert_with(|| error.clone());
+                }
+                let current = !state.quit
+                    && state.error.is_none()
+                    && !presentation.stop.load(Ordering::Acquire)
+                    && state.pixels.as_ref().unwrap().geometry == geometry;
+                if let (Some(start), Some(end), Some(trace)) =
+                    (readback_started, readback_ended, &mut state.trace)
+                {
+                    let sample = trace.record(&token, geometry, "readback", start, end);
+                    sample.bytes = frame.as_ref().ok().map(|frame| frame.pixels().len());
+                    sample.outcome = if frame.is_err() {
+                        "error"
+                    } else if !current {
+                        "discarded"
+                    } else {
+                        "ok"
+                    };
+                    if let (Some(start), Ok(frame)) = (candidate.pump_started, &frame) {
+                        let sample =
+                            trace.record(&token, geometry, "pump_until_candidate", start, end);
+                        sample.bytes = Some(frame.pixels().len());
+                        let size = frame.size();
+                        sample.pixel_size = Some((size.width.0, size.height.0));
+                        sample.outcome = if current { "admitted" } else { "discarded" };
+                    }
+                }
+                current
+            };
+            let mut started = None;
+            let mut ended = None;
+            let result = match frame {
+                Ok(frame) if current => {
+                    started = tracing.then(Instant::now);
+                    let result = match caps.protocol.expect("negotiated pixel transport") {
+                        Protocol::Kitty => nsh_gpui_terminal::kitty::KittyFrame::encode(
+                            &frame, image, previous, size.cols, size.rows,
+                        )
+                        .map(WireFrame::Kitty),
+                        protocol @ (Protocol::Sixel | Protocol::Iterm2) => InlineFrame::encode(
+                            &frame,
+                            match protocol {
+                                Protocol::Sixel => InlineProtocol::Sixel,
+                                _ => InlineProtocol::Iterm2,
+                            },
+                            size.cols,
+                            size.rows,
+                            caps.synchronized,
+                        )
+                        .map(WireFrame::Inline),
+                    }
+                    .map(|frame| super::input::Encoded { frame, geometry })
+                    .map_err(|error| error.to_string());
+                    ended = started.map(|_| Instant::now());
+                    Some(result)
+                }
+                _ => None,
+            };
             let bytes = if tracing {
-                result.as_ref().ok().map(|encoded| match &encoded.frame {
-                    WireFrame::Kitty(frame) => frame.wire().len(),
-                    WireFrame::Inline(frame) => frame.bytes().len(),
-                })
+                result.as_ref().and_then(|result| result.as_ref().ok()).map(
+                    |encoded| match &encoded.frame {
+                        WireFrame::Kitty(frame) => frame.wire().len(),
+                        WireFrame::Inline(frame) => frame.bytes().len(),
+                    },
+                )
             } else {
                 None
             };
-            let failed = result.is_err();
+            let failed = result.as_ref().is_some_and(Result::is_err);
             let mut state = presentation.state.lock().unwrap();
             let cancelled =
                 state.quit || state.error.is_some() || presentation.stop.load(Ordering::Acquire);
             let inbox = state.pixels.as_mut().unwrap();
-            let discarded = cancelled || inbox.geometry != candidate.geometry;
-            if discarded {
-                if inbox.in_flight.as_ref() == Some(&candidate.frame.token()) {
-                    inbox.in_flight = None;
-                }
-            } else {
+            let discarded = !current || cancelled || inbox.geometry != geometry;
+            if let Some(result) = result.filter(|_| !discarded) {
                 inbox.encoded = Some(result);
+            } else if inbox.in_flight.as_ref() == Some(&token) {
+                inbox.in_flight = None;
             }
             let wake = inbox.wake.clone();
             if let (Some(start), Some(end), Some(trace)) = (started, ended, &mut state.trace) {
-                let sample = trace.record(
-                    &candidate.frame.token(),
-                    candidate.geometry,
-                    "codec",
-                    start,
-                    end,
-                );
+                let sample = trace.record(&token, geometry, "codec", start, end);
                 sample.bytes = bytes;
                 sample.image = (caps.protocol == Some(Protocol::Kitty)).then_some(image);
                 sample.outcome = if failed {

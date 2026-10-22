@@ -18,7 +18,7 @@
  */
 
 use super::probe::{Capabilities, SixelGeometry};
-use nsh_gpui_terminal::{CandidateFrame, FrameToken};
+use nsh_gpui_terminal::{FrameToken, SubmittedFrame};
 use std::{
     collections::{HashSet, VecDeque},
     time::Instant,
@@ -44,8 +44,10 @@ pub(super) struct Offer {
 }
 
 pub(super) struct Candidate {
-    pub frame: CandidateFrame,
+    pub frame: SubmittedFrame,
     pub geometry: u64,
+    /// Present only for the existing opt-in frame trace.
+    pub pump_started: Option<Instant>,
 }
 
 pub(super) enum WireFrame {
