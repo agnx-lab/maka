@@ -50,8 +50,14 @@ test('thinking summary retains the last nonempty paragraph and its Unicode text'
 test('unchanged history pages retain rows while fragments and fenced metadata still advance', () => {
   const first = {
     position: { sourceSequence: 10, itemIndex: 0 },
-    messageId: 'message', turnId: 'turn', timestamp: 100,
-    field: 'body', role: 'user', offset: 0, text: '界', totalBytes: 7,
+    messageId: 'message',
+    turnId: 'turn',
+    timestamp: 100,
+    field: 'body',
+    role: 'user',
+    offset: 0,
+    text: '界',
+    totalBytes: 7,
   };
   const initial = mergeChunks([], [first], false, 20);
   assert.equal(initial[0].text, '界');
@@ -61,7 +67,10 @@ test('unchanged history pages retain rows while fragments and fenced metadata st
 
   const extended = mergeChunks(initial, [{ ...first, offset: 3, text: '🙂' }], false, 21);
   assert.equal(extended[0].text, '界🙂');
-  assert.deepEqual(extended[0].fragments, [{ offset: 0, text: '界' }, { offset: 3, text: '🙂' }]);
+  assert.deepEqual(extended[0].fragments, [
+    { offset: 0, text: '界' },
+    { offset: 3, text: '🙂' },
+  ]);
   assert.equal(extended[0].metadataThrough, 21);
   const refreshed = {
     ...first,
@@ -69,8 +78,12 @@ test('unchanged history pages retain rows while fragments and fenced metadata st
     attachments: [{ name: 'notes.txt', mimeType: 'text/plain', bytes: 12, kind: 'doc' }],
   };
   const reply = {
-    ...first, position: { sourceSequence: 11, itemIndex: 0 },
-    messageId: 'reply', role: 'assistant', text: 'reply', totalBytes: 5,
+    ...first,
+    position: { sourceSequence: 11, itemIndex: 0 },
+    messageId: 'reply',
+    role: 'assistant',
+    text: 'reply',
+    totalBytes: 5,
   };
   const withReply = mergeChunks(extended, [reply], false, 21);
   const completed = {
@@ -82,13 +95,25 @@ test('unchanged history pages retain rows while fragments and fenced metadata st
   const updated = updateHistoryMetadata(withReply, [refreshed, completed], 22);
   assert.equal(updated[0].text, '界🙂');
   assert.strictEqual(updated[0].fragments, extended[0].fragments);
-  assert.deepEqual(updated[0].attachments, [{ name: 'notes.txt', mimeType: 'text/plain', bytes: 12, kind: 'doc' }]);
-  assert.deepEqual(updated[1].timing, { startedAt: 100, finished: { at: 200, outcome: 'completed' } });
-  assert.deepEqual(updated[1].model, { kind: 'native', requestedModelId: 'requested', reportedModelId: 'reported' });
+  assert.deepEqual(updated[0].attachments, [
+    { name: 'notes.txt', mimeType: 'text/plain', bytes: 12, kind: 'doc' },
+  ]);
+  assert.deepEqual(updated[1].timing, {
+    startedAt: 100,
+    finished: { at: 200, outcome: 'completed' },
+  });
+  assert.deepEqual(updated[1].model, {
+    kind: 'native',
+    requestedModelId: 'requested',
+    reportedModelId: 'reported',
+  });
   assert.equal(updated[1].finalOutput, true);
   assert.equal(updated[0].metadataThrough, 22);
   assert.strictEqual(updateHistoryMetadata(updated, [], 99), updated);
-  assert.strictEqual(updateHistoryMetadata(updated, structuredClone([refreshed, completed]), 22), updated);
+  assert.strictEqual(
+    updateHistoryMetadata(updated, structuredClone([refreshed, completed]), 22),
+    updated,
+  );
   assert.strictEqual(updateHistoryMetadata(updated, [{ ...first, attachments: [] }], 21), updated);
   const advanced = updateHistoryMetadata(updated, [refreshed, completed], 23);
   assert.equal(advanced[0].metadataThrough, 23);
