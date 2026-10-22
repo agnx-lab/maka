@@ -540,6 +540,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         let session = sessions["sessions"][0]["id"].as_str().unwrap().to_owned();
         let observed = client.query("agent", "observe", json!({"sessionId":session})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":basis["connectionId"],"modelId":"manual-ui-agent","thinkingLevel":null}));
+        tab_to_label(&mut view, "Message composer").await;
         editable(&mut view, "Message composer").await;
         view.handle_event(Event::Paste("Use my new connection exactly once".into()));
         support::wait_draft(&client, &session, "Use my new connection exactly once").await;
@@ -3220,7 +3221,20 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             child_path.canonicalize().unwrap()
         );
         terminal.send(b"\x1b");
-        terminal.wait_for("Reasoning effort").await;
+        let model_menu = terminal.wait_for("Choose a model ›").await;
+        assert!(model_menu.contains("Models") && !model_menu.contains("Search models…"));
+        assert!(
+            !model_menu.contains("Reasoning effort"),
+            "an unselected backend must not expose an empty effort pane"
+        );
+        let observed = client
+            .query("agent", "observe", json!({"sessionId":created["id"]}))
+            .await
+            .unwrap();
+        assert!(
+            observed["session"]["backend"].is_null(),
+            "browsing and dismissing choices must not select a model"
+        );
         terminal.send(b"\x1b");
         terminal.wait_for_absent("Models").await;
         terminal.wait_for("Message or run a task…").await;
