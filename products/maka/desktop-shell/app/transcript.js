@@ -257,6 +257,11 @@ export class Transcript {
     this.lastOutcome = null;
     /** The session's backend preference from `agent.observe`, or null. */
     this.backend = null;
+    /**
+     * The session revision at which the composer last set `backend` itself
+     * (selectBackend), so an observation read before that is not taken.
+     */
+    this.backendRevision = 0;
     /** Keys of the thinking and tool rows the reader opened; `expandedVersion` counts changes. */
     this.expanded = new Set();
     this.expandedVersion = 0;
@@ -699,7 +704,9 @@ export class Transcript {
   acceptObservation(observed) {
     this.latestKnown = Math.max(this.latestKnown, observed.through);
     // The model the TUI would send with: the session's own, else the one the owner remembers.
-    this.backend = observed.session.backend ?? observed.rememberedBackend ?? null;
+    if (observed.session.revision >= this.backendRevision) {
+      this.backend = observed.session.backend ?? observed.rememberedBackend ?? null;
+    }
     if (observed.through >= this.runThrough) {
       const run = observed.run ?? null;
       if (this.run !== null && run === null) this.runsEnded += 1;

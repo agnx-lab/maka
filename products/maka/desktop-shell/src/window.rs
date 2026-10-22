@@ -47,8 +47,10 @@ pub fn components() -> Result<gpui_shell::FrozenComponentRegistry, gpui_shell::R
 /// (maka-gpui `TRAFFIC_LIGHTS`): on the centre line of the 56px strip.
 const TRAFFIC_LIGHTS: (f32, f32) = (16., 25.);
 
-/// The smallest window the sidebar and the reading column fit in.
-const MIN_SIZE: (f32, f32) = (960., 600.);
+/// The smallest window, as Maka Desktop's (`SHELL_WINDOW_MIN_WIDTH`): the
+/// reading column alone; the sidebar folds away at 820 wide or less
+/// (app/main.js `layout`).
+const MIN_SIZE: (f32, f32) = (600., 400.);
 
 fn open(
     cx: &mut App,

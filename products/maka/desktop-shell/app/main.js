@@ -70,6 +70,12 @@ const LIGHTS_END = 80;
 /** The sidebar's width, beside the plate. */
 const SIDEBAR_WIDTH = 256;
 
+/**
+ * At this width or less the sidebar folds away unless it is asked for, as
+ * Maka Desktop's does (`SHELL_SIDEBAR_COMPACT_QUERY`); see layout.
+ */
+const SIDEBAR_COMPACT_WIDTH = 820;
+
 /** The narrowest the conversation's plate gets while the Workbar's divider is dragged. */
 const CONVERSATION_MIN = 420;
 
@@ -78,7 +84,8 @@ const SPLIT_GAP = 4;
 
 /**
  * The narrowest it gets in a window too narrow for both plates at their
- * usual minimums (960 wide with the sidebar leaves them 696).
+ * usual minimums; narrower than that, the sidebar or the conversation gives
+ * the Workbar room (see layout).
  */
 const CONVERSATION_FLOOR = 320;
 
@@ -229,7 +236,24 @@ export default class MakaDesktop extends View {
     this.forkSources = new Map();
     this.creating = false;
     this.error = null;
+    /** Whether the user hid the sidebar, for windows wider than SIDEBAR_COMPACT_WIDTH. */
     this.sidebarHidden = false;
+    /** Whether the window was SIDEBAR_COMPACT_WIDTH wide or less at the last layout. */
+    this.narrow = false;
+    /**
+     * Whether the sidebar was toggled hidden (true) or shown (false) since the
+     * window got that narrow; undefined when it was not toggled.
+     */
+    this.narrowSidebarHidden = undefined;
+    /**
+     * Whether the Workbar was asked for after the sidebar was: in a window
+     * too narrow for everything side by side, only then does it take room
+     * from the sidebar or the conversation (see layout). Not at first, so a
+     * Workbar left open last time gives way in a window opened narrow.
+     */
+    this.workbarAsked = false;
+    /** The Workbar's count of requests at the last layout, to see a new one. */
+    this.workbarRequests = this.workbar.requests;
     /**
      * The places Back and Forward go to: a session id, WORKHUB, SEARCH, or
      * null for the start pane. The current place is not on either list.
@@ -391,9 +415,60 @@ export default class MakaDesktop extends View {
     this.cx.notify();
   }
 
+  /**
+   * ⌘B and the window controls' button: hides the sidebar when it shows,
+   * else shows it, taking its room back from the Workbar (see layout).
+   */
   toggleSidebar() {
-    this.sidebarHidden = !this.sidebarHidden;
+    const hidden = this.layout().sidebar;
+    if (this.narrow) this.narrowSidebarHidden = hidden;
+    else this.sidebarHidden = hidden;
+    if (!hidden) this.workbarAsked = false;
     this.cx.notify();
+  }
+
+  /**
+   * What the window's width has room for: `{ sidebar, workbar }`, `sidebar`
+   * whether the sidebar shows (Settings keep their navigation in its place
+   * regardless, see render), `workbar` null, 'beside' the conversation, or
+   * 'alone' in its place.
+   *
+   * At SIDEBAR_COMPACT_WIDTH or less the sidebar folds away; toggling it
+   * there is the narrow window's choice, which becomes the user's once the
+   * window widens, so widening neither brings back a sidebar hidden while
+   * narrow nor takes away one shown, as Maka Desktop's rail behaves. Where
+   * the sidebar, the conversation and the Workbar do not fit side by side,
+   * the Workbar takes the room only when it was asked for after the sidebar
+   * (workbarAsked): the sidebar gives way, and where even the conversation
+   * and the Workbar do not fit, the Workbar shows in the conversation's
+   * place until it is closed. Otherwise the Workbar gives way, without being
+   * closed, until there is room or it is asked for again.
+   */
+  layout() {
+    const width = window.viewport_size().width;
+    const narrow = width <= SIDEBAR_COMPACT_WIDTH;
+    if (narrow !== this.narrow) {
+      if (!narrow && this.narrowSidebarHidden !== undefined) {
+        this.sidebarHidden = this.narrowSidebarHidden;
+      }
+      this.narrow = narrow;
+      this.narrowSidebarHidden = undefined;
+    }
+    if (this.workbar.requests !== this.workbarRequests) {
+      this.workbarRequests = this.workbar.requests;
+      this.workbarAsked = true;
+    }
+    let sidebar = !(narrow ? (this.narrowSidebarHidden ?? true) : this.sidebarHidden);
+    let workbar = null;
+    if (this.workbar.shown()) {
+      if (fits(width, sidebar)) workbar = 'beside';
+      else if (this.workbarAsked) {
+        sidebar = false;
+        workbar = fits(width, false) ? 'beside' : 'alone';
+      }
+    }
+    this.workbar.yielded = this.workbar.shown() && workbar === null;
+    return { sidebar, workbar };
   }
 
   /**
@@ -539,7 +614,12 @@ export default class MakaDesktop extends View {
 
   /** F2: renames the selected task in the sidebar, which shows its row first. */
   renameSelected() {
-    if (this.settings.open || this.sidebarHidden || this.workhub.open || this.transcript === null) {
+    if (
+      this.settings.open ||
+      !this.layout().sidebar ||
+      this.workhub.open ||
+      this.transcript === null
+    ) {
       return;
     }
     const session = this.catalog.sessions.find((entry) => entry.id === this.transcript.id);
@@ -562,9 +642,10 @@ export default class MakaDesktop extends View {
   render(cx) {
     const m = palette(cx);
     const settings = this.settings.open;
+    const layout = this.layout();
     // Settings keep their navigation in the sidebar's place even while the
     // sidebar is hidden: it is the only way between their pages.
-    const column = settings || !this.sidebarHidden;
+    const column = settings || layout.sidebar;
     const plate = v_flex()
       .size_full()
       .rounded(12)
@@ -636,7 +717,7 @@ export default class MakaDesktop extends View {
           .py(8)
           .pr(8)
           .when(!column, (el) => el.pl(8))
-          .child(this.withWorkbar(plate, column, cx)),
+          .child(this.withWorkbar(plate, column, settings ? null : layout.workbar, cx)),
       );
   }
 
@@ -645,10 +726,26 @@ export default class MakaDesktop extends View {
    * shows: two panels whose divider drags, in the middle of the 8 between
    * them. The width it is dragged to is kept (Workbar.resized), and the
    * conversation keeps at least CONVERSATION_MIN, less in a narrow window
-   * (see workbarSplit). `column` says whether the sidebar's column shows.
+   * (see workbarSplit). `column` says whether the sidebar's column shows,
+   * and `place` where the Workbar goes (layout): null, 'beside' or 'alone',
+   * in the conversation's place, with the window controls before its tools.
    */
-  withWorkbar(plate, column, cx) {
-    if (!this.workbar.shown()) return plate;
+  withWorkbar(plate, column, place, cx) {
+    if (place === null) return plate;
+    if (place === 'alone') {
+      const controls = h_flex()
+        .flex_none()
+        .h_full()
+        .items_center()
+        .child(
+          dragArea()
+            .w(LIGHTS_END - 12)
+            .h_full(),
+        )
+        .child(this.windowControls(cx))
+        .child(dragArea().w(8).h_full());
+      return workbarPane(this.workbar, cx, controls);
+    }
     // Each panel holds half the gap, so the divider sits in its middle.
     const gap = SPLIT_GAP;
     const { conversation, workbar } = this.workbarSplit(column, gap);
@@ -697,9 +794,9 @@ export default class MakaDesktop extends View {
    * beside the Workbar in a narrow window (see workbarSplit).
    */
   narrowConversation() {
+    const { sidebar, workbar } = this.layout();
     return (
-      this.workbar.shown() &&
-      this.workbarSplit(!this.sidebarHidden, SPLIT_GAP).conversation < CONVERSATION_MIN
+      workbar === 'beside' && this.workbarSplit(sidebar, SPLIT_GAP).conversation < CONVERSATION_MIN
     );
   }
 
@@ -1032,7 +1129,7 @@ export default class MakaDesktop extends View {
    */
   header(title, state, controls, cx, origin = null) {
     const m = palette(cx);
-    const hidden = this.sidebarHidden;
+    const hidden = !this.layout().sidebar;
     const toggle = this.workbarTarget() === null ? null : workbarButton(this.workbar, cx);
     // The parts around the buttons move the window; the buttons are outside
     // them, so a press on one never starts a move.
@@ -1133,7 +1230,7 @@ export default class MakaDesktop extends View {
       .items_center()
       .child(
         control('window-sidebar', 'sidebar', true, () => this.toggleSidebar()).tooltip(
-          this.sidebarHidden
+          !this.layout().sidebar
             ? t('showSidebar', { shortcut: '⌘B' })
             : t('hideSidebar', { shortcut: '⌘B' }),
         ),
@@ -1239,6 +1336,15 @@ function composerBar(glyph, words, buttons, cx) {
         .child(text(words, 'body', m.ink).flex_1().min_w_0())
         .children(buttons),
     );
+}
+
+/**
+ * Whether the conversation and the Workbar fit side by side at their least
+ * widths in a window `width` wide, beside the sidebar or not.
+ */
+function fits(width, sidebar) {
+  const shared = width - (sidebar ? SIDEBAR_WIDTH : 8) - 8;
+  return shared >= CONVERSATION_FLOOR + WORKBAR_WIDTH.min + 2 * SPLIT_GAP;
 }
 
 /** An empty part of the window chrome that moves the window. */

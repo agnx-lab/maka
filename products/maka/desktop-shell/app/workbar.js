@@ -78,6 +78,14 @@ export class Workbar {
     this.focus = cx.focus_handle();
     /** The conversation it serves (a Transcript), or null where there is none. */
     this.transcript = null;
+    /**
+     * Whether the window gave the Workbar's room to the sidebar (main.js
+     * layout): open, but not on screen, so asking for a tool shows it again
+     * rather than closing it.
+     */
+    this.yielded = false;
+    /** How many times a tool was asked for, so the window sees each request (main.js layout). */
+    this.requests = 0;
     /** Its Changes, Files and Terminals, made with it. */
     this.changes = null;
     this.files = null;
@@ -157,17 +165,19 @@ export class Workbar {
    */
   toggle(tool) {
     if (this.transcript === null) return;
-    if (this.open && this.tool === tool) this.open = false;
-    else {
-      this.open = true;
-      this.tool = tool;
-    }
-    this.changedState();
+    if (this.open && this.tool === tool && !this.yielded) {
+      this.open = false;
+      this.changedState();
+    } else this.choose(tool);
   }
 
-  /** Shows `tool` (the header's segments). */
+  /** Shows `tool` (the header's segments), asking the window for room. */
   choose(tool) {
-    if (this.open && this.tool === tool) return;
+    this.requests += 1;
+    if (this.open && this.tool === tool) {
+      this.hooks.changed();
+      return;
+    }
     this.open = true;
     this.tool = tool;
     this.changedState();
@@ -236,7 +246,7 @@ export function workbarButton(workbar, cx) {
     .gap(4)
     .justify_center()
     .rounded(8)
-    .when(workbar.open, (el) => el.bg(m.selected))
+    .when(workbar.open && !workbar.yielded, (el) => el.bg(m.selected))
     .tooltip(t('workbarChangesTip', { shortcut: CHANGES_SHORTCUT }))
     .on_click(() => workbar.toggle('changes'))
     .child(icon('file-diff', 16, m.inkMuted))
@@ -245,9 +255,10 @@ export function workbarButton(workbar, cx) {
 
 /**
  * The Workbar's plate: a 48px header with the tools, Refresh (Changes) and
- * Close, then the tool.
+ * Close, then the tool. `leading`, when given, goes before the tools (the
+ * window controls, where the plate stands in the conversation's place).
  */
-export function workbarPane(workbar, cx) {
+export function workbarPane(workbar, cx, leading = null) {
   const m = palette(cx);
   const changes = workbar.changes;
   const reading = changes?.reading === true;
@@ -266,6 +277,7 @@ export function workbarPane(workbar, cx) {
         .px(12)
         .gap(4)
         .items_center()
+        .when(leading !== null, (el) => el.child(leading))
         .child(
           segmentedControl(
             'workbar-tool',

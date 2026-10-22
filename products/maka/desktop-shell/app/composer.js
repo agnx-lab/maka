@@ -18,7 +18,8 @@
  */
 
 // The composer: a multi-line draft in a rounded dock, the files attached to
-// it, the model menu, the folder a new task starts in, and Send or Stop.
+// it, the model and thinking level menus, the folder a new task starts in,
+// and Send or Stop.
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex, Button, Textarea, TextareaState, Popover } from 'gpui-base';
@@ -106,6 +107,8 @@ export class Composer {
     this.draftFocus = cx.focus_handle();
     /** The default model's choice, or the first offered one, for sessions without their own. */
     this.model = null;
+    /** That choice as the Host offers it, with its thinking levels, or null. */
+    this.defaultChoice = null;
     /** That model's name, or null when there is none (the footer then says so). */
     this.modelLabel = null;
     /** Whether the model list has been read once, so "no model" is known rather than pending. */
@@ -123,8 +126,16 @@ export class Composer {
     this.unanswered = null;
     /** Whether the model menu is open. */
     this.menuOpen = false;
-    /** sessionId (or '' for a new task) -> the model chosen in the menu, which the next send uses. */
-    this.chosen = new Map();
+    /** Whether the thinking level menu is open. */
+    this.levelOpen = false;
+    /**
+     * The model and thinking level picked for a new task, `{ choice,
+     * thinkingLevel }`, or null for the default model at its default level.
+     * A task's own pick is saved as its backend preference (selectBackend).
+     */
+    this.newBackend = null;
+    /** The tasks whose model or thinking level change is under way, by session id. */
+    this.changing = new Set();
     /** Whether the permission menu is open. */
     this.accessOpen = false;
     /** The permission level picked for a new task, or null for the Host's default. */
@@ -323,12 +334,117 @@ export class Composer {
     }
   }
 
-  /** Picks the model the next message in `transcript` (or a new task) is sent with. */
+  /**
+   * Picks the model `transcript` (or a new task) is sent with. The thinking
+   * level stays when the model does; another model starts at its default.
+   */
   choose(transcript, choice) {
-    this.chosen.set(transcript?.id ?? '', choice);
     this.menuOpen = false;
-    log(`composer: chose ${choiceLabel(choice)}`);
+    const { choice: was, thinkingLevel } = this.current(transcript);
+    // A level the model no longer offers is dropped, so picking the model again clears it.
+    const kept =
+      was !== null &&
+      sameModel(choice.selection, was.selection) &&
+      (thinkingLevel === null || choice.thinkingLevels.includes(thinkingLevel));
+    return this.pick(transcript, choice, kept ? thinkingLevel : null);
+  }
+
+  /** Picks the thinking level `transcript` (or a new task) is sent with: a level, or null for the model's default. */
+  chooseLevel(transcript, thinkingLevel) {
+    this.levelOpen = false;
+    const { choice } = this.current(transcript);
+    if (choice === null) {
+      this.hooks.changed();
+      return false;
+    }
+    return this.pick(transcript, choice, thinkingLevel);
+  }
+
+  /**
+   * Makes `choice` at `thinkingLevel` what `transcript` is sent with, as the
+   * TUI saves it: the task's backend preference (`agent.selectBackend`), which
+   * Send, Continue and Compact then read, and which outlives the app. With no
+   * transcript, it is kept for the next new task (send). Resolves to whether
+   * it is now; a failure has been reported.
+   */
+  async pick(transcript, choice, thinkingLevel) {
+    if (transcript === null) {
+      this.newBackend = { choice, thinkingLevel };
+      log(`composer: new task with ${choiceLabel(choice)} at ${thinkingLevel ?? 'default'}`);
+      this.hooks.changed();
+      return true;
+    }
+    const backend = {
+      kind: 'model',
+      connectionId: choice.selection.connectionId,
+      modelId: choice.selection.modelId,
+      thinkingLevel,
+    };
+    if (sameBackend(transcript.backend, backend)) {
+      this.hooks.changed();
+      return true;
+    }
+    // The chips wait while a change to this task is under way (locked).
+    if (this.changing.has(transcript.id)) return false;
+    this.changing.add(transcript.id);
     this.hooks.changed();
+    try {
+      // The Host commits against the session's revision itself; a read marker
+      // or a run moving it meanwhile is answered with a conflict, tried once more.
+      for (let attempt = 0; ; attempt += 1) {
+        const result = await operation(transcript.endpoint, 'selectBackend', {
+          sessionId: transcript.id,
+          backend,
+        });
+        if (result.kind === 'committed') {
+          transcript.session = result.session;
+          transcript.backend = result.session.backend ?? backend;
+          transcript.backendRevision = result.session.revision;
+          log(
+            `composer: ${transcript.id} uses ${choiceLabel(choice)} at ${thinkingLevel ?? 'default'}`,
+          );
+          return true;
+        }
+        if (result.kind === 'rejected') {
+          throw new Error(t('hostRefused', { value: JSON.stringify(result.reason) }));
+        }
+        if (attempt > 0) throw new Error(t('taskChangedMeanwhile'));
+      }
+    } catch (error) {
+      this.hooks.report(t('modelChangeFailed', { value: error.message }));
+      return false;
+    } finally {
+      this.changing.delete(transcript.id);
+      this.hooks.changed();
+    }
+  }
+
+  /**
+   * Whether the model and thinking level chips wait for `transcript`: until
+   * its own model is read (an earlier pick would replace it unseen), and
+   * while a change to it is under way.
+   */
+  locked(transcript) {
+    return transcript !== null && (!transcript.ready || this.changing.has(transcript.id));
+  }
+
+  /**
+   * The model and thinking level `transcript` (or a new task) is sent with:
+   * `{ choice, thinkingLevel }`, `choice` being the Host's offer for the
+   * model with its levels, or null when it offers none or an executor runs
+   * the task; `thinkingLevel` null for the model's default.
+   */
+  current(transcript) {
+    if (transcript === null) {
+      return this.newBackend ?? { choice: this.defaultChoice, thinkingLevel: null };
+    }
+    const backend = transcript.backend;
+    if (backend?.kind === 'executor') return { choice: null, thinkingLevel: null };
+    if (backend?.kind !== 'model') return { choice: this.defaultChoice, thinkingLevel: null };
+    return {
+      choice: this.choices.find((c) => sameModel(c.selection, backend)) ?? null,
+      thinkingLevel: backend.thinkingLevel ?? null,
+    };
   }
 
   /**
@@ -343,18 +459,24 @@ export class Composer {
       const fallback =
         models.defaultModel.kind === 'ready' ? models.defaultModel.choice : models.choices[0];
       this.model = fallback?.selection ?? null;
+      this.defaultChoice = fallback ?? null;
       this.modelLabel = fallback ? choiceLabel(fallback) : null;
       // No model yet is not an error: the start pane offers Settings.
       log(`composer: default model ${this.modelLabel ?? 'none'}`);
-      // A model chosen in the menu is kept as the Host offers it now, with
-      // its connection's current revision; one whose connection was removed
-      // is dropped, and the task's own model or the default applies again.
-      for (const [id, choice] of this.chosen) {
-        const current = await this.offered(choice.selection);
-        if (current !== null) this.chosen.set(id, current);
-        else {
-          this.chosen.delete(id);
-          log(`composer: ${choiceLabel(choice)} is not offered any more`);
+      // A model picked for a new task is kept as the Host offers it now, with
+      // its connection's current revision and levels; one whose connection
+      // was removed is dropped, and the default applies again.
+      const picked = this.newBackend;
+      if (picked !== null) {
+        const current = await this.offered(picked.choice.selection);
+        // A pick changed or used by a send meanwhile is left as it is now.
+        if (this.newBackend === picked && current === null) {
+          this.newBackend = null;
+          log(`composer: ${choiceLabel(picked.choice)} is not offered any more`);
+        } else if (this.newBackend === picked) {
+          const level = picked.thinkingLevel;
+          const kept = level === null || current.thinkingLevels.includes(level) ? level : null;
+          this.newBackend = { choice: current, thinkingLevel: kept };
         }
       }
     } catch (error) {
@@ -367,8 +489,7 @@ export class Composer {
 
   /** What the footer names for `transcript`: its own model when it has one (as the TUI picks it). */
   label(transcript) {
-    const chosen = this.chosen.get(transcript?.id ?? '');
-    if (chosen) return choiceLabel(chosen);
+    if (transcript === null && this.newBackend !== null) return choiceLabel(this.newBackend.choice);
     const backend = transcript?.backend ?? null;
     if (backend?.kind === 'executor') return t('executorModel');
     if (backend?.kind !== 'model') return this.modelLabel ?? t('noModel');
@@ -382,15 +503,6 @@ export class Composer {
    * The backend has no connection revision, so its choice is looked up.
    */
   async selection(transcript) {
-    const chosen = this.chosen.get(transcript.id);
-    if (chosen) {
-      const current = await this.offered(chosen.selection);
-      if (current === null) {
-        this.chosen.delete(transcript.id);
-        throw new Error(t('modelNotOffered', { model: choiceLabel(chosen) }));
-      }
-      return { model: current.selection, thinkingLevel: null };
-    }
     const backend = transcript.backend;
     if (backend?.kind === 'executor') {
       throw new Error(t('executorCannotStart'));
@@ -435,13 +547,7 @@ export class Composer {
         transcript = await this.start();
         // Starting it failed; the app has said why.
         if (transcript === null) return;
-        // A model chosen for the new task stays with the task.
-        const chosen = this.chosen.get('');
-        if (chosen) {
-          this.chosen.set(transcript.id, chosen);
-          this.chosen.delete('');
-        }
-        // So do its files, uploaded to the new task below.
+        // Its files go with the task, uploaded to the new task below.
         if (files.length > 0) {
           this.attached.set(transcript.id, files);
           this.attached.delete('');
@@ -453,6 +559,13 @@ export class Composer {
           const access = this.newAccess;
           this.newAccess = null;
           if (!(await this.setAccess(transcript, access))) return;
+        }
+        // And so do a model and thinking level picked for it, saved as the
+        // task's own before the message goes.
+        if (this.newBackend !== null) {
+          const { choice, thinkingLevel } = this.newBackend;
+          this.newBackend = null;
+          if (!(await this.pick(transcript, choice, thinkingLevel))) return;
         }
       }
       const { model, thinkingLevel } = await this.selection(transcript);
@@ -631,6 +744,7 @@ export function composerPane(composer, transcript, context, cx) {
   const unsent = !composer.empty || files.length > 0;
   const canSend = !inactive && !composer.sending && composer.model !== null && unsent;
   const stop = running && !unsent;
+  const thinking = executor ? null : thinkingMenu(composer, transcript, cx);
   return h_flex()
     .flex_none()
     .w_full()
@@ -681,14 +795,22 @@ export function composerPane(composer, transcript, context, cx) {
                     cx,
                   ),
                 )
-                // The model's chip gives way first where the row is short of room.
+                // The chips give way where the row is short of room (a narrow
+                // window), each truncating its label; Send keeps its place.
                 .child(
                   div()
                     .min_w_0()
                     .child(modelMenu(composer, transcript, context, cx)),
                 )
-                .child(permissionMenu(composer, transcript, context, cx))
-                .when(context.picker !== null, (el) => el.child(context.picker))
+                .when(thinking !== null, (el) => el.child(div().min_w_0().child(thinking)))
+                .child(
+                  div()
+                    .min_w_0()
+                    .child(permissionMenu(composer, transcript, context, cx)),
+                )
+                .when(context.picker !== null, (el) =>
+                  el.child(div().min_w_0().child(context.picker)),
+                )
                 .child(note(context, executor, cx))
                 .when(context.usage !== null, (el) => el.child(context.usage))
                 .child(
@@ -769,10 +891,14 @@ function chip(id, label, cx) {
 /** The model chip and the menu it opens upward: models by connection, then Add connection. */
 function modelMenu(composer, transcript, context, cx) {
   const current = composer.label(transcript);
-  const chosen = composer.chosen.get(transcript?.id ?? '');
   const selected =
-    chosen?.selection ??
-    (transcript?.backend?.kind === 'model' ? transcript.backend : composer.model);
+    transcript === null
+      ? (composer.newBackend?.choice.selection ?? composer.model)
+      : transcript.backend?.kind === 'model'
+        ? transcript.backend
+        : transcript.backend?.kind === 'executor'
+          ? null
+          : composer.model;
   const byConnection = new Map();
   for (const choice of composer.choices) {
     const name = choice.connectionName ?? '';
@@ -807,7 +933,11 @@ function modelMenu(composer, transcript, context, cx) {
       composer.menuOpen = open;
       composer.hooks.changed();
     })
-    .trigger(chip('model-chip', current.split(' · ')[0], cx).tooltip(current))
+    .trigger(
+      chip('model-chip', current.split(' · ')[0], cx)
+        .disabled(composer.locked(transcript))
+        .tooltip(current),
+    )
     .content(
       menuSurface(cx)
         .id('model-menu-rows')
@@ -817,6 +947,79 @@ function modelMenu(composer, transcript, context, cx) {
         .mb(8)
         .children(rows),
     );
+}
+
+/** The thinking levels a model may offer, by the Host's value, with the TUI's names. */
+const LEVELS = {
+  off: 'thinkingOff',
+  minimal: 'thinkingMinimal',
+  low: 'thinkingLow',
+  medium: 'thinkingMedium',
+  high: 'thinkingHigh',
+  xhigh: 'thinkingXhigh',
+  max: 'thinkingMax',
+  ultra: 'thinkingUltra',
+};
+
+function levelName(level) {
+  return LEVELS[level] !== undefined ? t(LEVELS[level]) : level;
+}
+
+/**
+ * The thinking level chip beside the model's, and the menu it opens upward:
+ * the model's default (naming the level it stands for when the Host says),
+ * then the levels the model offers. A saved level the model no longer
+ * offers is marked unavailable, as terminal-shell marks it, so it can be
+ * changed before a send fails on it. Null when the model offers no levels
+ * and none is saved, or when the Host offers no such model.
+ */
+function thinkingMenu(composer, transcript, cx) {
+  const { choice, thinkingLevel } = composer.current(transcript);
+  const levels = choice?.thinkingLevels ?? [];
+  if (choice === null || (levels.length === 0 && thinkingLevel === null)) return null;
+  const fallback = choice.defaultThinkingLevel ?? null;
+  const rows = [
+    menuRow(
+      'thinking-default',
+      t('thinkingModelDefault'),
+      {
+        checked: thinkingLevel === null,
+        ...(fallback !== null ? { detail: levelName(fallback) } : {}),
+      },
+      cx,
+    ).on_click(() => composer.chooseLevel(transcript, null)),
+    menuSeparator(cx),
+    ...levels.map((level) =>
+      menuRow(
+        `thinking-${level}`,
+        levelName(level),
+        { checked: thinkingLevel === level },
+        cx,
+      ).on_click(() => composer.chooseLevel(transcript, level)),
+    ),
+  ];
+  // At the model's default the chip says which level that is, when known.
+  const shown =
+    thinkingLevel !== null
+      ? levels.includes(thinkingLevel)
+        ? levelName(thinkingLevel)
+        : t('thinkingUnavailable', { level: levelName(thinkingLevel) })
+      : fallback !== null
+        ? levelName(fallback)
+        : t('thinkingDefault');
+  return Popover.new('thinking-menu')
+    .anchor('bottom_left')
+    .open(composer.levelOpen)
+    .on_open_change((open) => {
+      composer.levelOpen = open;
+      composer.hooks.changed();
+    })
+    .trigger(
+      chip('thinking-chip', t('thinkingChip', { level: shown }), cx)
+        .disabled(composer.locked(transcript))
+        .tooltip(t('thinkingLevel')),
+    )
+    .content(menuSurface(cx).id('thinking-menu-rows').w(200).mb(8).children(rows));
 }
 
 /**
@@ -921,6 +1124,15 @@ function choiceLabel(choice) {
 
 function sameModel(selection, backend) {
   return selection.connectionId === backend.connectionId && selection.modelId === backend.modelId;
+}
+
+/** Whether a task's `backend` is already `wanted`: the same model at the same thinking level. */
+function sameBackend(backend, wanted) {
+  return (
+    backend?.kind === 'model' &&
+    sameModel(wanted, backend) &&
+    (backend.thinkingLevel ?? null) === wanted.thinkingLevel
+  );
 }
 
 /** A control button; `primary` fills it with the primary color (see theme.js controlButton). */

@@ -230,11 +230,6 @@ export const MESSAGES = {
     '執行器（請從終端機應用程式傳送）',
   ],
   noModel: ['No model', '无模型', '無模型'],
-  modelNotOffered: [
-    'the model {model} is not offered any more',
-    '模型 {model} 已不再提供',
-    '模型 {model} 已不再提供',
-  ],
   executorCannotStart: [
     'this session runs on an executor, which the desktop cannot start yet',
     '此任务在执行器上运行，桌面端暂时无法启动它',
@@ -246,6 +241,25 @@ export const MESSAGES = {
     '此任务的模型 {model} 已不再提供',
     '此任務的模型 {model} 已不再提供',
   ],
+  modelChangeFailed: [
+    'Couldn’t change the model: {value}',
+    '切换模型失败：{value}',
+    '切換模型失敗：{value}',
+  ],
+  // The thinking levels, named as the TUI names them (locale-messages.ts).
+  thinkingLevel: ['Thinking level', '思考等级', '思考等級'],
+  thinkingChip: ['Thinking: {level}', '思考：{level}', '思考：{level}'],
+  thinkingDefault: ['Default', '默认', '預設'],
+  thinkingUnavailable: ['{level} (unavailable)', '{level}（不可用）', '{level}（不可用）'],
+  thinkingModelDefault: ['Model default', '模型默认', '模型預設'],
+  thinkingOff: ['Off', '关闭', '關閉'],
+  thinkingMinimal: ['Minimal', '最低', '最低'],
+  thinkingLow: ['Low', '低', '低'],
+  thinkingMedium: ['Medium', '中', '中'],
+  thinkingHigh: ['High', '高', '高'],
+  thinkingXhigh: ['Extra high', '很高', '很高'],
+  thinkingMax: ['Maximum', '最高', '最高'],
+  thinkingUltra: ['Ultra', '极高', '極高'],
   modelListChanging: [
     'the model list is changing; try again',
     '模型列表正在变化，请重试',
