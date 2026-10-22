@@ -22,6 +22,7 @@ import { host } from './host';
 import { applyLanguagePreference, tr } from './locale';
 import { message, UiError } from './text';
 import type {
+  AgentGlobalInstructionsView,
   LanguagePreference,
   SettingsAssistantPreferences,
   SettingsPreferencesMutation,
@@ -29,13 +30,12 @@ import type {
 } from '../../../../packages/plugin-sdk/src/index.js';
 import type { SettingsOperations } from './settingsOperations';
 
-type Editor =
+type PreferencesEditor =
   | {
       kind: 'personalization';
       id: number;
       basis: SettingsAssistantPreferences;
       displayName: string;
-      assistantTone: string;
     }
   | {
       kind: 'compaction';
@@ -44,11 +44,25 @@ type Editor =
       prompt: string;
       useDefault: boolean;
     };
-export type GeneralAction = {
-  view: number;
-  revision: number | null;
-  kind: 'root' | Editor['kind'];
+type GlobalInstructions = Extract<AgentGlobalInstructionsView, { kind: 'available' }>;
+type GlobalEditor = {
+  kind: 'globalInstructions';
+  id: number;
+  document: { basis: GlobalInstructions; content: string; conflict: boolean } | null;
 };
+type Editor = PreferencesEditor | GlobalEditor;
+type PreferencesAction = {
+  view: number;
+  policyRevision: number | null;
+  kind: 'root' | PreferencesEditor['kind'];
+};
+export type GeneralAction =
+  | PreferencesAction
+  | {
+      view: number;
+      kind: 'globalInstructions';
+      fileBasis: Pick<GlobalInstructions, 'source' | 'revision'> | null;
+    };
 export const assistantLanguages = (): { value: LanguagePreference; label: string }[] => [
   { value: 'auto', label: tr('Automatic') },
   { value: 'en', label: 'English' },
@@ -65,27 +79,46 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
   let enabled = false;
   let read = 0;
   const visible = () => alive && enabled && active();
-  const action = (): GeneralAction => ({
-    view: view(),
-    revision: editor()?.basis.revision ?? facts()?.revision ?? null,
-    kind: editor()?.kind ?? 'root',
-  });
+  const action = (): GeneralAction => {
+    const form = editor();
+    if (form?.kind === 'globalInstructions')
+      return {
+        view: view(),
+        kind: form.kind,
+        fileBasis: form.document
+          ? { source: form.document.basis.source, revision: form.document.basis.revision }
+          : null,
+      };
+    return {
+      view: view(),
+      policyRevision: form?.basis.revision ?? facts()?.revision ?? null,
+      kind: form?.kind ?? 'root',
+    };
+  };
   const current = (request: GeneralAction) => {
     const selected = action();
-    return (
-      visible() &&
-      request.view === selected.view &&
-      request.revision === selected.revision &&
-      request.kind === selected.kind
-    );
+    if (!visible() || request.view !== selected.view || request.kind !== selected.kind)
+      return false;
+    return request.kind === 'globalInstructions'
+      ? selected.kind === 'globalInstructions' &&
+          request.fileBasis?.source === selected.fileBasis?.source &&
+          request.fileBasis?.revision === selected.fileBasis?.revision
+      : selected.kind !== 'globalInstructions' &&
+          request.policyRevision === selected.policyRevision;
   };
-  const disabled = () =>
+  const blocked = () =>
     !visible() ||
     loading() ||
     operations.busy() ||
     !operations.pendingKnown() ||
-    operations.pending().length > 0 ||
-    facts() === null;
+    operations.pending().length > 0;
+  const globalDocument = () => {
+    const form = editor();
+    return form?.kind === 'globalInstructions' ? form.document : null;
+  };
+  const disabled = () =>
+    blocked() ||
+    (editor()?.kind === 'globalInstructions' ? globalDocument() === null : facts() === null);
   const cancelRead = () => {
     read += 1;
     view.set(view() + 1);
@@ -115,12 +148,12 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
     }
   };
   const mutate = (
-    request: GeneralAction,
+    request: PreferencesAction,
     mutation: SettingsPreferencesMutation,
-    submitted: Editor | null = null,
+    submitted: PreferencesEditor | null = null,
   ) => {
-    if (!current(request) || disabled() || request.revision === null) return;
-    const expectedRevision = request.revision;
+    if (!current(request) || disabled() || request.policyRevision === null) return;
+    const expectedRevision = request.policyRevision;
     return operations.run(async () => {
       if (!current(request)) return;
       const result: SettingsPreferencesUpdated = await operations.mutate(
@@ -153,7 +186,68 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
       }
     });
   };
-  const open = (request: GeneralAction, kind: Editor['kind']) => {
+  const loadGlobal = async (id: number) => {
+    const form = editor();
+    if (!visible() || form?.kind !== 'globalInstructions' || form.id !== id) return;
+    const generation = ++read;
+    const capturedView = view();
+    const owns = () =>
+      visible() &&
+      generation === read &&
+      capturedView === view() &&
+      editor()?.kind === 'globalInstructions' &&
+      editor()?.id === id;
+    loading.set(true);
+    try {
+      const result = await host.query('agent', 'globalInstructions', {});
+      if (!owns()) return;
+      if (result.kind !== 'available')
+        throw new UiError('Source unavailable. Reload to try again.');
+      editor.set({
+        kind: 'globalInstructions',
+        id,
+        document: { basis: result, content: result.content, conflict: false },
+      });
+    } catch (reason) {
+      if (owns()) operations.report(reason);
+    } finally {
+      if (owns()) loading.set(false);
+    }
+  };
+  const settleGlobal = async (value: unknown) => {
+    if (!alive) return;
+    const kind = value !== null && typeof value === 'object' && 'kind' in value ? value.kind : null;
+    const form = editor();
+    switch (kind) {
+      case 'saved':
+        if (form?.kind === 'globalInstructions') {
+          // The committed draft cannot be submitted again, even if this read fails.
+          batch(() => {
+            cancelRead();
+            editor.set({ kind: form.kind, id: form.id, document: null });
+          });
+          if (visible()) await loadGlobal(form.id);
+        }
+        if (alive) operations.notice.set(message('Global instructions saved.'));
+        return;
+      case 'changed':
+        if (form?.kind === 'globalInstructions' && form.document) {
+          const document = form.document;
+          batch(() => {
+            cancelRead();
+            editor.set({ ...form, document: { ...document, conflict: true } });
+          });
+        }
+        throw new UiError(
+          'Source changed. Your draft is preserved. Reload the source before saving again.',
+        );
+      case 'unavailable':
+        throw new UiError('Source unavailable. Reload to try again.');
+      default:
+        throw new UiError('The Host returned an invalid global instructions result.');
+    }
+  };
+  const open = (request: GeneralAction, kind: PreferencesEditor['kind']) => {
     const basis = facts();
     if (!basis || request.kind !== 'root' || !current(request) || disabled()) return;
     cancelRead();
@@ -164,7 +258,6 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
             id: view(),
             basis,
             displayName: basis.displayName,
-            assistantTone: basis.assistantTone,
           }
         : { kind, id: view(), basis, prompt: basis.compactionPrompt, useDefault: false },
     );
@@ -172,11 +265,11 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
   const dirty = () => {
     const form = editor();
     return form?.kind === 'personalization'
-      ? form.displayName !== form.basis.displayName ||
-          form.assistantTone !== form.basis.assistantTone
+      ? form.displayName !== form.basis.displayName
       : form?.kind === 'compaction'
         ? form.useDefault || form.prompt !== form.basis.compactionPrompt
-        : false;
+        : !!form?.document &&
+          (!form.document.basis.exists || form.document.content !== form.document.basis.content);
   };
   const back = () => {
     if (operations.busy()) return false;
@@ -199,12 +292,17 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
     action,
     navigation: () => JSON.stringify(action()),
     disabled,
+    blocked,
+    globalDocument,
+    saveDisabled: () => disabled() || !dirty() || !!globalDocument()?.conflict,
     dirty,
     activate() {
       if (!alive || enabled) return;
       enabled = true;
       cancelRead();
-      if (!editor()) void load();
+      const form = editor();
+      if (form?.kind === 'globalInstructions' && !form.document) void loadGlobal(form.id);
+      else if (!form) void load();
     },
     deactivate() {
       enabled = false;
@@ -220,11 +318,47 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
     title: () =>
       editor()?.kind === 'personalization'
         ? tr('Personalization')
-        : editor()?.kind === 'compaction'
-          ? tr('Compaction prompt')
-          : tr('General settings'),
-    open: ({ request, kind }: { request: GeneralAction; kind: Editor['kind'] }) =>
+        : editor()?.kind === 'globalInstructions'
+          ? tr('Global instructions')
+          : editor()?.kind === 'compaction'
+            ? tr('Compaction prompt')
+            : tr('General settings'),
+    open: ({ request, kind }: { request: GeneralAction; kind: PreferencesEditor['kind'] }) =>
       open(request, kind),
+    openGlobal(request: GeneralAction) {
+      if (request.kind !== 'root' || !current(request) || blocked()) return;
+      batch(() => {
+        cancelRead();
+        editor.set({ kind: 'globalInstructions', id: view(), document: null });
+      });
+      void loadGlobal(view());
+    },
+    reloadGlobal(request: GeneralAction) {
+      const form = editor();
+      if (
+        request.kind !== 'globalInstructions' ||
+        !current(request) ||
+        blocked() ||
+        form?.kind !== 'globalInstructions'
+      )
+        return;
+      operations.error.set('');
+      cancelRead();
+      void loadGlobal(form.id);
+    },
+    editGlobal(request: GeneralAction, content: string) {
+      const form = editor();
+      if (
+        request.kind !== 'globalInstructions' ||
+        !current(request) ||
+        disabled() ||
+        form?.kind !== 'globalInstructions' ||
+        !form.document
+      )
+        return;
+      editor.set({ ...form, document: { ...form.document, content } });
+    },
+    recovered: settleGlobal,
     reload(request: GeneralAction) {
       if (!current(request) || request.kind !== 'root' || operations.busy() || loading()) return;
       operations.error.set('');
@@ -255,10 +389,10 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
       if (request.kind !== 'root' || facts()?.language === preference) return;
       return mutate(request, { kind: 'language', preference });
     },
-    editName(request: GeneralAction, field: 'displayName' | 'assistantTone', text: string) {
+    editName(request: GeneralAction, displayName: string) {
       const form = editor();
       if (!current(request) || disabled() || form?.kind !== 'personalization') return;
-      editor.set({ ...form, [field]: text });
+      editor.set({ ...form, displayName });
     },
     editPrompt(request: GeneralAction, prompt: string) {
       const form = editor();
@@ -273,13 +407,26 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
     save(request: GeneralAction) {
       const form = editor();
       if (!form || !current(request) || disabled() || !dirty()) return;
+      if (request.kind === 'globalInstructions') {
+        if (form.kind !== 'globalInstructions' || !form.document || form.document.conflict) return;
+        const document = form.document;
+        return operations.run(async () => {
+          if (!current(request)) return;
+          const result = await operations.mutate('agent', 'updateGlobalInstructions', {
+            source: document.basis.source,
+            revision: document.basis.revision,
+            content: document.content,
+          });
+          await settleGlobal(result);
+        });
+      }
+      if (form.kind === 'globalInstructions') return;
       if (form.kind === 'personalization') {
         return mutate(
           request,
           {
             kind: 'personalization',
             displayName: form.displayName,
-            assistantTone: form.assistantTone,
           },
           form,
         );

@@ -109,7 +109,6 @@ export const settingsMessages = {
     '适用于新请求。正在运行的请求会保留原有设置。',
     '適用於新請求。正在執行的請求會保留原有設定。',
   ],
-  'Assistant tone': ['Assistant tone', '助手语气', '助理語氣'],
   Automatic: ['Automatic', '自动', '自動'],
   'Automatic bypass: {domains}': [
     'Automatic bypass: {domains}',
@@ -250,11 +249,6 @@ export const settingsMessages = {
     '捨棄編輯並重新載入',
   ],
   'Display name': tui_model_profile_name,
-  'Display name and assistant tone': [
-    'Display name and assistant tone',
-    '显示名称和助手语气',
-    '顯示名稱和助理語氣',
-  ],
   'Earlier settings actions must be resolved before another change.': [
     'Earlier settings actions must be resolved before another change.',
     '必须先解决先前的设置操作，才能进行其他更改。',
@@ -336,11 +330,6 @@ export const settingsMessages = {
     'Hostname or IP address; enter the port separately.',
     '主机名或 IP 地址；端口请单独输入。',
     '主機名稱或 IP 位址；連接埠請另行輸入。',
-  ],
-  'How the assistant should respond.': [
-    'How the assistant should respond.',
-    '助手应如何回应。',
-    '助理應如何回應。',
   ],
   Include: ['Include', '包含', '包含'],
   'Include {label}': ['Include {label}', '包含 {label}', '包含 {label}'],
@@ -865,5 +854,53 @@ export const settingsMessages = {
     '{status} · {count} models',
     '{status} · {count} 个模型',
     '{status} · {count} 個模型',
+  ],
+  'Global instructions': ['Global instructions', '全局指令', '全域指令'],
+  'Edit global instructions': ['Edit global instructions', '编辑全局指令', '編輯全域指令'],
+  'Reading global instructions…': [
+    'Reading global instructions…',
+    '正在读取全局指令…',
+    '正在讀取全域指令…',
+  ],
+  'Edit the global AGENTS.md used by the assistant.': [
+    'Edit the global AGENTS.md used by the assistant.',
+    '编辑助手使用的全局 AGENTS.md。',
+    '編輯助理使用的全域 AGENTS.md。',
+  ],
+  'Workspace instructions are off, so global instructions are not applied.': [
+    'Workspace instructions are off, so global instructions are not applied.',
+    '工作区指令已关闭，因此不会应用全局指令。',
+    '工作區指令已關閉，因此不會套用全域指令。',
+  ],
+  'This file does not exist. Saving will create it.': [
+    'This file does not exist. Saving will create it.',
+    '此文件尚不存在，保存时会创建。',
+    '此檔案尚不存在，儲存時會建立。',
+  ],
+  'Save global instructions': ['Save global instructions', '保存全局指令', '儲存全域指令'],
+  'Reload (discard edits)': [
+    'Reload (discard edits)',
+    '重新加载（放弃编辑）',
+    '重新載入（捨棄編輯）',
+  ],
+  'Global instructions saved.': [
+    'Global instructions saved.',
+    '全局指令已保存。',
+    '全域指令已儲存。',
+  ],
+  'Source changed. Your draft is preserved. Reload the source before saving again.': [
+    'Source changed. Your draft is preserved. Reload the source before saving again.',
+    '源文件已更改，草稿已保留。请重新加载源文件后再保存。',
+    '來源檔案已變更，草稿已保留。請重新載入來源檔案後再儲存。',
+  ],
+  'Source unavailable. Reload to try again.': [
+    'Source unavailable. Reload to try again.',
+    '源文件不可用。可重新加载以重试。',
+    '來源檔案無法使用。可重新載入以重試。',
+  ],
+  'The Host returned an invalid global instructions result.': [
+    'The Host returned an invalid global instructions result.',
+    'Host 返回了无效的全局指令结果。',
+    'Host 傳回了無效的全域指令結果。',
   ],
 } as const satisfies Catalog;

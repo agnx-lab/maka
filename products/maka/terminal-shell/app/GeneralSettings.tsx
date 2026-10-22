@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { inputAction, Scroll, Text, View } from 'nsh';
+import { Input, inputAction, Scroll, Text, View } from 'nsh';
 import { tr } from './locale';
 import { Button } from 'nsh/base';
 import {
@@ -32,6 +32,9 @@ import {
   bodyTextStyle,
   captionTextStyle,
   C,
+  compact,
+  inputBorderRadius,
+  inputTextStyle,
   controlStyle,
   controlHoverStyle,
   controlFocusStyle,
@@ -44,12 +47,18 @@ export function GeneralSettings(props: { owner: GeneralSettingsOwner }) {
     <Scroll style={{ flex: 1, minHeight: 0 }}>
       <View style={{ padding: 8, gap: 16 }}>
         <If when={owner.loading()}>
-          <Text style={{ ...bodyTextStyle, color: C.muted }}>{tr('Reading preferences…')}</Text>
+          <Text style={{ ...bodyTextStyle, color: C.muted }}>
+            {owner.editor()?.kind === 'globalInstructions'
+              ? tr('Reading global instructions…')
+              : tr('Reading preferences…')}
+          </Text>
         </If>
         <Each of={[owner.action()]} key={(request) => JSON.stringify(request)}>
           {(action) => {
             const request = action();
             if (request.kind === 'root') return <GeneralRoot owner={owner} request={request} />;
+            if (request.kind === 'globalInstructions')
+              return <GlobalInstructionsEditor owner={owner} request={request} />;
             return <PreferenceEditor owner={owner} request={request} />;
           }}
         </Each>
@@ -169,7 +178,7 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
           <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
             <Text style={{ ...bodyTextStyle, color: C.text }}>{tr('Personalization')}</Text>
             <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
-              {owner.facts()?.displayName || tr('Display name and assistant tone')}
+              {owner.facts()?.displayName || tr('Display name')}
             </Text>
           </View>
           <Icon name="right" color={C.muted} />
@@ -197,6 +206,34 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
           </View>
           <Icon name="right" color={C.muted} />
         </Button>
+      </If>
+      <Button
+        disabled={owner.blocked()}
+        onPress={inputAction(owner.openGlobal, request)}
+        accessibilityLabel={tr('Edit global instructions')}
+        hoverStyle={controlHoverStyle}
+        focusStyle={controlFocusStyle}
+        style={{
+          ...controlStyle,
+          minHeight: 56,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+        }}
+        disabledStyle={controlDisabledStyle}
+      >
+        <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <Text style={{ ...bodyTextStyle, color: C.text }}>{tr('Global instructions')}</Text>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>
+            {tr('Edit the global AGENTS.md used by the assistant.')}
+          </Text>
+        </View>
+        <Icon name="right" color={C.muted} />
+      </Button>
+      <If when={owner.facts()?.workspaceInstructions === false}>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>
+          {tr('Workspace instructions are off, so global instructions are not applied.')}
+        </Text>
       </If>
     </View>
   );
@@ -242,10 +279,6 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
     const editor = owner.editor();
     return editor?.kind === 'personalization' ? editor.displayName : '';
   };
-  const tone = () => {
-    const editor = owner.editor();
-    return editor?.kind === 'personalization' ? editor.assistantTone : '';
-  };
   const prompt = () => {
     const editor = owner.editor();
     return editor?.kind === 'compaction' ? editor.prompt : '';
@@ -259,16 +292,8 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
         <SettingsField
           label={tr('Display name')}
           value={name()}
-          change={(text) => owner.editName(request, 'displayName', text)}
+          change={(text) => owner.editName(request, text)}
           disabled={owner.disabled()}
-        />
-        <SettingsField
-          label={tr('Assistant tone')}
-          value={tone()}
-          change={(text) => owner.editName(request, 'assistantTone', text)}
-          disabled={owner.disabled()}
-          multiline
-          hint={tr('How the assistant should respond.')}
         />
       </If>
       <If when={request.kind === 'compaction'}>
@@ -303,6 +328,102 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
         >
           <Text style={{ ...bodyTextStyle, color: C.background, fontWeight: '500' }}>
             {tr('Save')}
+          </Text>
+        </Button>
+        <Button
+          disabled={owner.busy()}
+          accessibilityLabel={tr('Cancel')}
+          onPress={inputAction(owner.cancel, request)}
+          focusStyle={controlFocusStyle}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          disabledStyle={controlDisabledStyle}
+        >
+          <Text style={{ ...bodyTextStyle, color: C.secondary }}>{tr('Cancel')}</Text>
+        </Button>
+      </View>
+    </View>
+  );
+}
+
+function GlobalInstructionsEditor(props: { owner: GeneralSettingsOwner; request: GeneralAction }) {
+  const owner = props.owner;
+  const request = props.request;
+  const document = owner.globalDocument;
+  return (
+    <View style={{ gap: 16 }}>
+      <If when={document()}>
+        <Text selectable style={{ ...captionTextStyle, color: C.muted }}>
+          {document()?.basis.path}
+        </Text>
+        <If when={document()?.basis.exists === false}>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>
+            {tr('This file does not exist. Saving will create it.')}
+          </Text>
+        </If>
+        <Input
+          accessibilityLabel={tr('Global instructions')}
+          value={document()?.content ?? ''}
+          onChange={(content) => owner.editGlobal(request, content)}
+          multiline
+          submitBehavior="newline"
+          readonly={owner.disabled()}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{
+            ...inputTextStyle,
+            height: compact() ? 200 : 320,
+            borderWidth: 1,
+            borderColor: C.line,
+            borderRadius: inputBorderRadius,
+            backgroundColor: C.background,
+            color: C.text,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+          }}
+          focusStyle={{ borderColor: C.accent }}
+        />
+        <If when={document()?.conflict}>
+          <Text style={{ ...captionTextStyle, color: C.warning }}>
+            {tr('Source changed. Your draft is preserved. Reload the source before saving again.')}
+          </Text>
+        </If>
+      </If>
+      <If when={!document() && !owner.loading()}>
+        <Text style={{ ...bodyTextStyle, color: C.warning }}>
+          {tr('Source unavailable. Reload to try again.')}
+        </Text>
+      </If>
+      <If when={owner.facts()?.workspaceInstructions === false}>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>
+          {tr('Workspace instructions are off, so global instructions are not applied.')}
+        </Text>
+      </If>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <Button
+          disabled={owner.saveDisabled()}
+          accessibilityLabel={tr('Save global instructions')}
+          onPress={inputAction(owner.save, request)}
+          focusStyle={{ backgroundColor: C.accentHover }}
+          style={{ ...controlStyle, backgroundColor: C.accent }}
+          hoverStyle={{ backgroundColor: C.accentHover }}
+          disabledStyle={controlDisabledStyle}
+        >
+          <Text style={{ ...bodyTextStyle, color: C.background, fontWeight: '500' }}>
+            {tr('Save global instructions')}
+          </Text>
+        </Button>
+        <Button
+          disabled={owner.blocked()}
+          accessibilityLabel={tr('Reload (discard edits)')}
+          onPress={inputAction(owner.reloadGlobal, request)}
+          focusStyle={controlFocusStyle}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          disabledStyle={controlDisabledStyle}
+        >
+          <Text style={{ ...bodyTextStyle, color: C.secondary }}>
+            {tr('Reload (discard edits)')}
           </Text>
         </Button>
         <Button
