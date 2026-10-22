@@ -115,7 +115,7 @@ function StyledRuns(props: {
             backgroundColor: run().code ? C.surface : undefined,
           }}
         >
-          <If when={run().image} else={run().text}>
+          <If when={run().image} else={<>{run().text}</>}>
             <MarkdownImageView
               image={() => run().image!}
               sessionId={props.sessionId}
