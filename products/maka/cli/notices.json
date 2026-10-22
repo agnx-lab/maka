@@ -1,7 +1,7 @@
 {
   "inputs": {
-    "Cargo.lock": "09e8af14866adc3afeb197b4d383fc5a61904d41a410ae412979389177bf1d76",
-    "Cargo.toml": "fa9ecab8bdb91f21aa10e502bcad261d8e86431d9b9e91386486841db17a54b7",
+    "Cargo.lock": "63f79ebca2bda37899abcf6883c9643f99a774dde6ea46c834174b48ad202755",
+    "Cargo.toml": "614fa6e94d12780525ce72b8604c49f253c75bf500b5e4a140197c3eee402457",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "93fcc2c070289ffd4b48dcbaee426d72abff74f95c3166ad73447eec588c011a",
@@ -35,7 +35,6 @@
     "platform/plugin-core/Cargo.toml": "fdf62719358de260a7f2d5c799868d26f0d5118c2542e0d55433d9ecbeb19fda",
     "platform/presentation/Cargo.toml": "e443041376121b1548fcafdfe887679ceaff0dc5af60f833f9caf9e0a34b0a64",
     "platform/process/Cargo.toml": "319f952cac326aa23da6de712d5a7289b6fafcb6578f6a6fa28a6579a0b2d272",
-    "platform/render-terminal/Cargo.toml": "dd9f7148fcdc807476cb977edd237ee993d64a6a489ba341dc42b8feb8a9c8c2",
     "platform/sandbox/Cargo.toml": "9f564d3ab6fa2e98f9cc4052409ab1f49cbe3897069297a0fcb15747e92a155f",
     "platform/transport/Cargo.toml": "bfb11b8885f639bfe9e8dfdd63b334204b35f93a0bb34fea40f215d2dbbf3b4e",
     "platform/ui-js/Cargo.toml": "9e14fefad630e56df7699cab071b0a02b5c5e34ac7bfd55cc2bb0209c9a98780",
@@ -124,7 +123,7 @@
     "plugins/agent/insights/Cargo.toml": "e11b391c1304bb27d552322e9f31b9e1858340f81f49ebbb3d484b02c9238def",
     "plugins/agent/model/Cargo.toml": "0fbd5b92911a7d3af54f10069d16b1b1b4b2d453b79aeb6ea63e66fd78d6ad85",
     "plugins/agent/model/tests/fixtures/provider-errors.mjs": "fd92fde7fb6d524315cf583ed4bcf40c33e70de156a81909c919e430a0ad07ee",
-    "plugins/agent/native/Cargo.toml": "4185e550666c6acf3c5e7f30d660b4955ebebe0ed36a93130a4e55e23b816f69",
+    "plugins/agent/native/Cargo.toml": "1c3d52ed44f77af20aac1a9c0c4a6bf9f5d3fe0b8594d88401f408de66d222b0",
     "plugins/agent/navigation/package.ts": "eac5fb178bf93bc3d40cb1e9e184707cf3095b026da8c28c5682e636d0242bed",
     "plugins/agent/navigation/tui.ts": "fbfefb89c7265f5e0e740ca81d05b300fd3d98eb26474e6ae6114245972ad75d",
     "plugins/agent/permission-approval/index.ts": "25f24c0affb340f1245a3a4ed4eaf2df1dd27de8a05dc16e9564a95eaf44bfd3",
@@ -395,7 +394,7 @@
     "products/maka/bundle/scripts/build.mjs": "db11d8cd6f29ef7ead087261848568da1ad3889a870a89f23fa969449d769d47",
     "products/maka/bundle/src/composition.ts": "5f7e4beff05213e60957ce4039c0f6fd429f0e37cd1f9a56a31c437ab678de6f",
     "products/maka/bundle/src/installation.ts": "f1819851114b4280252afcbd16ef82e08269901faeacc171120c5abff74be72e",
-    "products/maka/cli/Cargo.toml": "4aa6ac5e83f5755afc6eeda506e377aeb955b250d7b4a8b76a865babbe2b9b2c",
+    "products/maka/cli/Cargo.toml": "6a47ccc9e3e7fe9a79e473917c2278db07cbced6d5ece102f3e34bcffcfeab62",
     "products/maka/cli/build.rs": "97c68def305bc101788428268fd99b114e5229fa2400542b0fea2eced6edbecc",
     "products/maka/cli/build/product.rs": "44d6ab9638f91a3db0615bd509e4386d5b3aef008f24e3cb1e4dc5a5247b3102",
     "products/maka/client/Cargo.toml": "33a6ff74d79ce70081336cad1f552f7705d0bf10ad82c341f3c0739332c0503c",
@@ -1393,5 +1392,5 @@
     "third-party/termina/upstream.json": "31ce8c2b8b45305bff1ce8a52db55f06e5887e770346dbc6c3ea3c574b58ebad",
     "tools/schema/Cargo.toml": "d8f47765451f555f872ea034945abd7afd54dc4c188ad5d5553932f8f2bc2462"
   },
-  "sha256": "3e27682d8e98b11ecf6f267b9ca1e48bdc24e6b22ee1e7fafebf825d50c91fb3"
+  "sha256": "50391e1c9e6f2ab26b2fa3d1717687672dddd4c5e3e6de736918c172189985e9"
 }
