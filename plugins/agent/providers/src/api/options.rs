@@ -73,7 +73,7 @@ pub(super) fn resolve(
             ))
         }
         ProviderKind::OpenaiCompatible { name } => {
-            compatible::chat(name, model, thinking_level, parallel)
+            compatible::chat(row.provider, name, model, thinking_level, parallel)
         }
         ProviderKind::OpenResponses(contract) => {
             if parallel == Some(false) {

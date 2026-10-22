@@ -21,14 +21,20 @@ use super::{Error, ThinkingLevel, Value, json};
 use crate::facts::provider_facts;
 
 pub(super) fn chat(
+    provider: &str,
     name: &str,
     model: &str,
     level: Option<ThinkingLevel>,
     parallel: Option<bool>,
 ) -> Result<Value, Error> {
-    let facts = provider_facts("openai").map_err(|_| Error::ProviderFactsUnavailable)?;
-    let level =
-        level.or_else(|| super::default_medium(facts, model).then_some(ThinkingLevel::Medium));
+    let level = if provider == "openrouter" {
+        // Its own catalog controls the default; a similarly named OpenAI model
+        // does not establish the routed model's enabled state or effort.
+        level
+    } else {
+        let facts = provider_facts("openai").map_err(|_| Error::ProviderFactsUnavailable)?;
+        level.or_else(|| super::default_medium(facts, model).then_some(ThinkingLevel::Medium))
+    };
     let mut options = json!({});
     if let Some(level) = level {
         options["reasoningEffort"] = match level {
@@ -69,19 +75,36 @@ mod tests {
     fn compatible_policy_preserves_explicit_effort_and_only_defaults_known_families() {
         for (level, wire) in [(ThinkingLevel::High, "high"), (ThinkingLevel::Max, "max")] {
             assert_eq!(
-                chat("custom-chat_relay", "unknown", Some(level), None).unwrap(),
+                chat(
+                    "openai-compatible",
+                    "custom-chat_relay",
+                    "unknown",
+                    Some(level),
+                    None
+                )
+                .unwrap(),
                 json!({"customChatRelay":{"reasoningEffort":wire}}),
             );
         }
-        assert_eq!(chat("relay", "unknown", None, None).unwrap(), json!({}));
+        assert_eq!(
+            chat("openai-compatible", "relay", "unknown", None, None).unwrap(),
+            json!({})
+        );
         for model in ["gpt-5.2", "relay/gpt-5.2"] {
             assert_eq!(
-                chat("custom-chat", model, None, Some(false)).unwrap(),
+                chat("openai-compatible", "custom-chat", model, None, Some(false)).unwrap(),
                 json!({"customChat":{"reasoningEffort":"medium","parallel_tool_calls":false}}),
             );
         }
         assert_eq!(
-            chat("relay", "gpt-5.2", Some(ThinkingLevel::Off), Some(true)).unwrap(),
+            chat(
+                "openai-compatible",
+                "relay",
+                "gpt-5.2",
+                Some(ThinkingLevel::Off),
+                Some(true)
+            )
+            .unwrap(),
             json!({"relay":{"reasoningEffort":"none","parallel_tool_calls":true}}),
         );
         assert_eq!(camel_case("relay--chat_A-2_b"), "relay-Chat_A-2B");
