@@ -229,15 +229,23 @@ export function ImageViewer(props: { image: ViewerImage; close(): void }) {
                 {
                   kind: 'fit' as const,
                   label: () => tr('Fit image to window'),
-                  caption: () => tr('Fit'),
+                  caption: (): string => tr('Fit'),
                 },
                 {
                   kind: 'actual' as const,
                   label: () => tr('Show image at actual size'),
-                  caption: () => '100%',
+                  caption: (): string => '100%',
                 },
-                { kind: 'out' as const, label: () => tr('Zoom image out'), caption: () => '−' },
-                { kind: 'in' as const, label: () => tr('Zoom image in'), caption: () => '+' },
+                {
+                  kind: 'out' as const,
+                  label: () => tr('Zoom image out'),
+                  caption: (): string => '−',
+                },
+                {
+                  kind: 'in' as const,
+                  label: () => tr('Zoom image in'),
+                  caption: (): string => '+',
+                },
               ]}
               key={(item) => item.kind}
             >
