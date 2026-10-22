@@ -163,7 +163,7 @@ impl Write for FrameWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, atomic::Ordering};
     use std::time::Duration;
 
     fn snapshot() -> InputSnapshot {
