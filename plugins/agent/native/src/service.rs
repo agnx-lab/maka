@@ -312,7 +312,7 @@ impl Handler for Agent {
                 "observe" => {
                     use maka_event_log::turns::InvocationState;
                     let input: SessionRead = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     let observed = owner
                         .store
                         .observe_session::<SessionConfiguration>(&input.session_id)
@@ -408,7 +408,7 @@ impl Handler for Agent {
                     })?;
                     maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_observation_unavailable")?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -418,7 +418,7 @@ impl Handler for Agent {
                     use maka_agent_ports::session::history::Page;
                     use maka_agent_ports::session::history::Read;
                     let input: History = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     let high_water = *owner.store.subscribe_commits().borrow();
                     let through = input.through.unwrap_or(high_water);
                     if through > high_water {
@@ -490,7 +490,7 @@ impl Handler for Agent {
                                 .collect(),
                         }
                     };
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -501,7 +501,7 @@ impl Handler for Agent {
                 }
                 "historyLandmarks" => {
                     let input: HistoryLandmarksRead = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if input.through > *owner.store.subscribe_commits().borrow() {
                         return Err("agent_cursor_invalid".into());
                     }
@@ -522,7 +522,7 @@ impl Handler for Agent {
                             })
                             .collect(),
                     };
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -533,7 +533,7 @@ impl Handler for Agent {
                 }
                 "historyPrompt" => {
                     let input: HistoryPromptRead = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if input.through > *owner.store.subscribe_commits().borrow() {
                         return Err("agent_cursor_invalid".into());
                     }
@@ -542,7 +542,7 @@ impl Handler for Agent {
                         .history_prompt(&input.session_id, input.through, input.position)
                         .await
                         .map_err(|_| "agent_history_unavailable")?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -550,7 +550,7 @@ impl Handler for Agent {
                 }
                 "search" => {
                     let input: HistorySearch = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
 
                     if input.through > *owner.store.subscribe_commits().borrow()
                         || input.after.is_some_and(|after| {
@@ -591,7 +591,7 @@ impl Handler for Agent {
                             next_after: batch.next_after,
                         }
                     };
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -642,7 +642,7 @@ impl Handler for Agent {
                             file_path,
                         }
                     };
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -653,7 +653,7 @@ impl Handler for Agent {
                 }
                 "toolImage" => {
                     let input: ToolImageRead = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if input.through > *owner.store.subscribe_commits().borrow() {
                         return Err("agent_cursor_invalid".into());
                     }
@@ -679,7 +679,7 @@ impl Handler for Agent {
                             data: STANDARD.encode(image.bytes),
                         }
                     };
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -693,7 +693,7 @@ impl Handler for Agent {
                 }
                 "attachmentImage" => {
                     let input: AttachmentImageRead = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     let image = match &input.source {
                         AttachmentImageSource::Uploaded { id } => {
                             owner
@@ -723,7 +723,7 @@ impl Handler for Agent {
                         }
                     }
                     .map_err(|_| "agent_image_unavailable")?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
                         return Err("agent_observation_cancelled".into());
                     }
@@ -821,7 +821,7 @@ impl Handler for Agent {
                 }
                 "watch" => {
                     let input: Watch = decode(input)?;
-                    owner.session(&input.session_id).await?;
+                    owner.require_session(&input.session_id).await?;
                     let mut commits = owner.store.subscribe_commits();
                     let mut after = input.after;
                     let mut queue_revision = None;
@@ -852,7 +852,7 @@ impl Handler for Agent {
                                 .emit(encode(DeliveryPage::Interactions { pending })?)
                                 .await?;
                         }
-                        owner.session(&input.session_id).await?;
+                        owner.require_session(&input.session_id).await?;
                         let through = *commits.borrow();
                         if after > through {
                             return Err("agent_cursor_invalid".into());

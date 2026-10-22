@@ -350,6 +350,19 @@ async fn family_removal_freezes_one_atomic_plan_and_does_not_rearchive_restored_
     else {
         panic!("unchanged revision");
     };
+    for session in &plan.remove {
+        assert!(!log.session_is_available(session).await.unwrap());
+    }
+    for session in &plan.archive {
+        assert!(log.session_is_available(session).await.unwrap());
+        assert_eq!(
+            log.session_retirement(session).await.unwrap(),
+            Some(SessionRetirement::Archiving)
+        );
+    }
+    for session in ["draft", "branch"] {
+        assert!(log.session_is_available(session).await.unwrap());
+    }
     assert_eq!(plan.archived_subtask_count, 3);
     assert!(plan.archive.contains(&"late".into()));
     assert!(log.get_session::<Value>("root").await.unwrap().is_none());
@@ -380,6 +393,12 @@ async fn family_removal_freezes_one_atomic_plan_and_does_not_rearchive_restored_
             log.finish_session_retirement(session).await.unwrap(),
             SessionRetirement::Archived
         );
+    }
+    for session in &plan.remove {
+        assert!(!log.session_is_available(session).await.unwrap());
+    }
+    for session in &plan.archive {
+        assert!(log.session_is_available(session).await.unwrap());
     }
     let receipt = log
         .session_copy_receipt("child-revision")

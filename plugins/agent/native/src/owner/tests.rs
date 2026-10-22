@@ -73,6 +73,9 @@ mod interactions;
 #[path = "tests/catalog.rs"]
 mod catalog;
 
+#[path = "tests/session_availability.rs"]
+mod session_availability;
+
 #[path = "tests/history_search.rs"]
 mod history_search;
 
