@@ -21,6 +21,8 @@ import { cleanup, signal } from 'nsh';
 import { host } from './host';
 import { createText, errorText, message, UiError } from './text';
 import type {
+  AgentGlobalInstructionsUpdate,
+  AgentGlobalInstructionsUpdated,
   ClientOperation,
   CredentialStatus,
   CredentialVersionBasis,
@@ -87,14 +89,25 @@ export function createSettingsOperations() {
       throw reason;
     }
   };
-  const mutate = async (
+  function mutate(
+    endpoint: 'agent',
+    method: 'updateGlobalInstructions',
+    input: AgentGlobalInstructionsUpdate,
+  ): Promise<AgentGlobalInstructionsUpdated>;
+  function mutate(
     endpoint: 'settings' | 'setup' | 'authentication' | 'management',
     method: string,
     input: unknown,
+    secret?: string | null,
+  ): Promise<any>;
+  async function mutate(
+    endpoint: 'settings' | 'setup' | 'authentication' | 'management' | 'agent',
+    method: string,
+    input: unknown,
     secret: string | null = null,
-  ): Promise<any> => {
+  ): Promise<unknown> {
     return settingsValue((await host.settingsMutation(endpoint, method, input, secret)).reply);
-  };
+  }
   const run = async (operation: () => Promise<void>) => {
     if (!alive || busy() || !pendingKnown() || pending().length) return;
     busy.set(true);
@@ -109,7 +122,9 @@ export function createSettingsOperations() {
       if (alive) busy.set(false);
     }
   };
-  const recover = (afterKnown: (original: ClientOperation, value: unknown) => void) => {
+  const recover = (
+    afterKnown: (original: ClientOperation, value: unknown) => void | Promise<void>,
+  ) => {
     if (!alive || busy()) return;
     busy.set(true);
     error.set('');
@@ -119,6 +134,12 @@ export function createSettingsOperations() {
           if (!original.reference) continue;
           const value = settingsValue(await host.recoverSetting(original.id));
           if (!alive) return;
+          if (original.endpoint === 'agent' && original.method === 'updateGlobalInstructions') {
+            // File CAS outcomes belong to the instruction editor, which preserves
+            // an unsaved draft when the original receipt reports a conflict.
+            await afterKnown(original, value);
+            continue;
+          }
           if (original.endpoint === 'management') {
             if (!record(value) || value.status !== 'committed') {
               if (record(value) && value.status === 'conflict')
@@ -133,7 +154,7 @@ export function createSettingsOperations() {
             )
               throw settingsRejection(outcome);
           }
-          afterKnown(original, value);
+          await afterKnown(original, value);
         }
         if (alive) notice.set(message('Original settings action receipts checked.'));
       } catch (reason) {

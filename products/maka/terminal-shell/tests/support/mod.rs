@@ -369,6 +369,12 @@ impl Fixture {
                 "receipts":[{"kind":"instance","path":["receipts"],"export":"Receipts"}]
             }))
         }});
+        if matches!(catalog, InitialCatalog::Empty) {
+            let home = directory.path().join("assistant-home");
+            std::fs::create_dir(&home).unwrap();
+            plan["instances"]["agent"]["configuration"]["values"]["assistant"] =
+                json!({"home":home});
+        }
         if plugins {
             plan["instances"]["management"] = node(&manager, 8, json!({}), json!({}));
             plan["instances"]["gateway"]["bindings"]["management"] =
@@ -474,6 +480,8 @@ impl Fixture {
                             "directories",
                             "create",
                             "selectBackend",
+                            "globalInstructions",
+                            "updateGlobalInstructions",
                             "metadata",
                             "changeSession",
                             "fork",

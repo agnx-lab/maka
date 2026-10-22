@@ -100,9 +100,11 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
   };
   const cancel = (request: BackAction) => () => back(request);
   const recover = () =>
-    operations.recover((original) => {
+    operations.recover(async (original, value) => {
       const method = original.method;
-      if (original.endpoint === 'management') plugins.reset();
+      if (original.endpoint === 'agent' && method === 'updateGlobalInstructions')
+        await general.recovered(value);
+      else if (original.endpoint === 'management') plugins.reset();
       else if (method === 'updateAssistantPreferences') general.reset();
       else if (method === 'updateNetwork') network.reset();
       else {

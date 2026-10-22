@@ -72,6 +72,7 @@ const SETTINGS_METHODS: [&str; 9] = [
 ];
 fn settings_route(endpoint: &str, method: &str) -> bool {
     (endpoint == "settings" && SETTINGS_METHODS.contains(&method))
+        || (endpoint == "agent" && method == "updateGlobalInstructions")
         || (endpoint == "setup" && method == "discoverModels")
         || (endpoint == "management" && matches!(method, "setEnabled" | "configure"))
         || (endpoint == "authentication" && method == "loginCredential")

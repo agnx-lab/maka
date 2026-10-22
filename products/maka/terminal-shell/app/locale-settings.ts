@@ -903,4 +903,16 @@ export const settingsMessages = {
     'Host 返回了无效的全局指令结果。',
     'Host 傳回了無效的全域指令結果。',
   ],
+  'The original action completed, but the source could not be read. Your draft is preserved. Reload before saving again.':
+    [
+      'The original action completed, but the source could not be read. Your draft is preserved. Reload before saving again.',
+      '原操作已完成，但无法读取源文件。草稿已保留，请重新加载后再保存。',
+      '原操作已完成，但無法讀取來源檔案。草稿已保留，請重新載入後再儲存。',
+    ],
+  'The original action completed, but the source could not be read. Your draft is preserved. Reload before saving again. ({reason})':
+    [
+      'The original action completed, but the source could not be read. Your draft is preserved. Reload before saving again. ({reason})',
+      '原操作已完成，但无法读取源文件。草稿已保留，请重新加载后再保存。（{reason}）',
+      '原操作已完成，但無法讀取來源檔案。草稿已保留，請重新載入後再儲存。（{reason}）',
+    ],
 } as const satisfies Catalog;

@@ -20,7 +20,7 @@
 import { batch, cleanup, signal } from 'nsh';
 import { host } from './host';
 import { applyLanguagePreference, tr } from './locale';
-import { message, UiError } from './text';
+import { errorText, message, UiError } from './text';
 import type {
   AgentGlobalInstructionsView,
   LanguagePreference,
@@ -214,13 +214,16 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
       if (owns()) loading.set(false);
     }
   };
-  const settleGlobal = async (value: unknown) => {
+  const settleGlobal = async (value: unknown, submittedId: number | null) => {
     if (!alive) return;
     const kind = value !== null && typeof value === 'object' && 'kind' in value ? value.kind : null;
     const form = editor();
     switch (kind) {
       case 'saved':
-        if (form?.kind === 'globalInstructions') {
+        if (
+          form?.kind === 'globalInstructions' &&
+          (submittedId === null ? form.document === null : form.id === submittedId)
+        ) {
           // The committed draft cannot be submitted again, even if this read fails.
           batch(() => {
             cancelRead();
@@ -246,6 +249,60 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
       default:
         throw new UiError('The Host returned an invalid global instructions result.');
     }
+  };
+  const recovered = async (value: unknown) => {
+    if (!alive) return;
+    const kind = value !== null && typeof value === 'object' && 'kind' in value ? value.kind : null;
+    const form = editor();
+    if (kind !== 'saved' || form?.kind !== 'globalInstructions' || !form.document)
+      return settleGlobal(value, null);
+    // The journal can contain another shell's action. Its saved receipt does
+    // not grant ownership of this editor's unsaved draft.
+    const document = form.document;
+    cancelRead();
+    const generation = ++read;
+    const capturedView = view();
+    const owns = () =>
+      alive &&
+      generation === read &&
+      capturedView === view() &&
+      editor()?.kind === 'globalInstructions' &&
+      editor()?.id === form.id;
+    loading.set(true);
+    let current: AgentGlobalInstructionsView;
+    try {
+      current = await host.query('agent', 'globalInstructions', {});
+    } catch (reason) {
+      if (!owns()) return;
+      editor.set({ ...form, document: { ...document, conflict: true } });
+      throw new UiError(
+        'The original action completed, but the source could not be read. Your draft is preserved. Reload before saving again. ({reason})',
+        { reason: errorText(reason) },
+      );
+    } finally {
+      if (owns()) loading.set(false);
+    }
+    if (!owns()) return;
+    if (
+      current.kind === 'available' &&
+      current.source === document.basis.source &&
+      current.path === document.basis.path &&
+      current.exists &&
+      current.content === document.content
+    ) {
+      editor.set({
+        ...form,
+        document: { basis: current, content: document.content, conflict: false },
+      });
+      operations.notice.set(message('Global instructions saved.'));
+      return;
+    }
+    editor.set({ ...form, document: { ...document, conflict: true } });
+    throw new UiError(
+      current.kind === 'unavailable'
+        ? 'The original action completed, but the source could not be read. Your draft is preserved. Reload before saving again.'
+        : 'Source changed. Your draft is preserved. Reload the source before saving again.',
+    );
   };
   const open = (request: GeneralAction, kind: PreferencesEditor['kind']) => {
     const basis = facts();
@@ -358,7 +415,7 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
         return;
       editor.set({ ...form, document: { ...form.document, content } });
     },
-    recovered: settleGlobal,
+    recovered,
     reload(request: GeneralAction) {
       if (!current(request) || request.kind !== 'root' || operations.busy() || loading()) return;
       operations.error.set('');
@@ -417,7 +474,7 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
             revision: document.basis.revision,
             content: document.content,
           });
-          await settleGlobal(result);
+          await settleGlobal(result, form.id);
         });
       }
       if (form.kind === 'globalInstructions') return;

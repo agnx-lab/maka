@@ -98,6 +98,7 @@ impl Handler for CounterHandler {
                 | "loginCredential"
                 | "saveCredential"
                 | "updateAssistantPreferences"
+                | "updateGlobalInstructions"
                 | "updateNetwork" => {
                     owner.messages.lock().unwrap().push(input.clone());
                     if method == "saveCredential"
@@ -193,6 +194,7 @@ impl Fixture {
                 "loginCredential":{"mode":"mutation","input":{},"output":{},"progress":{},"resources":{}},
                 "saveCredential":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":false}}},
                 "updateAssistantPreferences":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "updateGlobalInstructions":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "updateNetwork":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":true}}},
                 "watch":{"mode":"subscription","input":{},"output":{},"resources":{}}
             }}
@@ -320,6 +322,7 @@ impl Fixture {
                                 "send".into(),
                                 "uploadAttachment".into(),
                                 "selectBackend".into(),
+                                "updateGlobalInstructions".into(),
                                 "stop".into(),
                                 "respond".into(),
                                 "editQueue".into(),

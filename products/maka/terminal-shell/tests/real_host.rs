@@ -415,6 +415,10 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         let mut fixture = Fixture::registered_empty_settings().await;
         #[cfg(not(unix))]
         let mut fixture = Fixture::empty_settings().await;
+        let instruction_path = fixture.directory.path().join("assistant-home/.maka/AGENTS.md");
+        std::fs::create_dir(instruction_path.parent().unwrap()).unwrap();
+        let initial_instructions = "  INITIAL GLOBAL UTF-8 指令\n\nKeep user-owned whitespace.\n";
+        std::fs::write(&instruction_path, initial_instructions).unwrap();
         let client = fixture.client().await;
         let empty = client.query("settings", "connections", json!({"kind":"start"})).await.unwrap();
         assert_eq!(empty["kind"], "ready");
@@ -526,7 +530,6 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         let original_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
         activate(&mut view, "Edit personalization").await;
         fill(&mut view, "Display name", "界面草稿用户").await;
-        fill(&mut view, "Assistant tone", "请简明作答").await;
         activate(&mut view, "Settings section Network").await;
         wait_view(&mut view, |screen| screen.contains("Network settings") && !screen.contains("Loading network settings…")).await;
         let initial_network = client.query("settings", "network", json!({})).await.unwrap();
@@ -558,21 +561,18 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Settings section General").await;
         wait_view(&mut view, |screen| screen.contains("Personalization") && screen.contains("Display name")).await;
         assert_input(&mut view, "Display name", "界面草稿用户").await;
-        assert_input(&mut view, "Assistant tone", "请简明作答").await;
         activate(&mut view, "Save this preference").await;
-        wait_view(&mut view, |screen| screen.contains("Preferences changed elsewhere.") && screen.contains("界面草稿用户") && screen.contains("请简明作答")).await;
+        wait_view(&mut view, |screen| screen.contains("Preferences changed elsewhere.") && screen.contains("界面草稿用户")).await;
         let save = view.accessibility_snapshot().into_iter().find(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Save this preference").expect("the stale preference editor lost its actual Save button");
         assert!(save.state.disabled, "a stale preference draft must require explicit discard before another save");
         let conflicted = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
         assert_eq!(conflicted["revision"], saved_network["revision"]);
         assert_eq!(conflicted["displayName"], original_preferences["displayName"]);
-        assert_eq!(conflicted["assistantTone"], original_preferences["assistantTone"]);
         // Cancel explicitly discards this stale draft and reads the Host's
         // current shared policy before another personalization edit is opened.
         activate(&mut view, "Cancel").await;
         activate(&mut view, "Edit personalization").await;
         fill(&mut view, "Display name", "已保存的中文用户").await;
-        fill(&mut view, "Assistant tone", "请用简洁清楚的方式回答").await;
         activate(&mut view, "Save this preference").await;
         wait_view(&mut view, |screen| screen.contains("General settings") && screen.contains("Preferences saved.")).await;
         let settings_close = support::wait_enabled_button(&mut view, "Close settings").await.id;
@@ -580,7 +580,6 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         wait_view_state(&mut view, |view, screen| screen.contains("常规设置") && screen.contains("偏好已保存。") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "语言：简体中文" && node.state.selected) && view.accessibility_snapshot().iter().any(|node| node.id == settings_close && node.label == "关闭设置")).await;
         let saved_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
         assert_eq!(saved_preferences["displayName"], "已保存的中文用户");
-        assert_eq!(saved_preferences["assistantTone"], "请用简洁清楚的方式回答");
         assert_eq!(saved_preferences["language"], "zh-CN", "the interface and assistant must share the committed Host language");
         activate(&mut view, "语言：繁體中文").await;
         wait_view_state(&mut view, |view, screen| screen.contains("一般設定") && screen.contains("偏好已儲存。") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "語言：繁體中文" && node.state.selected) && view.accessibility_snapshot().iter().any(|node| node.id == settings_close && node.label == "關閉設定")).await;
@@ -588,7 +587,6 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(traditional_preferences["language"], "zh-TW");
         assert!(traditional_preferences["revision"].as_u64().unwrap() > saved_preferences["revision"].as_u64().unwrap());
         assert_eq!(traditional_preferences["displayName"], saved_preferences["displayName"]);
-        assert_eq!(traditional_preferences["assistantTone"], saved_preferences["assistantTone"]);
         activate(&mut view, "語言：English").await;
         wait_view_state(&mut view, |view, screen| screen.contains("General settings") && screen.contains("Preferences saved.") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Language: English" && node.state.selected) && view.accessibility_snapshot().iter().any(|node| node.id == settings_close && node.label == "Close settings")).await;
         let saved_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
@@ -598,6 +596,45 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(final_network["proxy"], saved_network["proxy"]);
         assert_eq!(final_network["credential"], saved_network["credential"]);
         assert!(!final_network.to_string().contains(proxy_secret));
+        // This editor writes the Host-selected global AGENTS.md, independently
+        // of the shared runtime-policy revision and without changing its bytes.
+        let initial_global = client.query("agent", "globalInstructions", json!({})).await.unwrap();
+        assert_eq!(initial_global["kind"], "available");
+        assert_eq!(initial_global["source"], "maka");
+        assert_eq!(initial_global["path"], instruction_path.to_str().unwrap());
+        assert_eq!(initial_global["content"], initial_instructions);
+        activate(&mut view, "Edit global instructions").await;
+        wait_view(&mut view, |screen| screen.contains(instruction_path.to_str().unwrap())).await;
+        assert_input(&mut view, "Global instructions", initial_instructions).await;
+        let instruction_draft = "  GLOBAL_DRAFT_PRESERVED\n未保存的完整草稿。\n\n";
+        fill(&mut view, "Global instructions", instruction_draft).await;
+        let external_instructions = "EXTERNAL GLOBAL UPDATE\n外部编辑不能被覆盖。\n";
+        std::fs::write(&instruction_path, external_instructions).unwrap();
+        activate(&mut view, "Save global instructions").await;
+        wait_view(&mut view, |screen| screen.contains("Source changed. Your draft is preserved.")).await;
+        assert_input(&mut view, "Global instructions", instruction_draft).await;
+        let save = view.accessibility_snapshot().into_iter().find(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Save global instructions").expect("the global instruction draft lost its actual Save button");
+        assert!(save.state.disabled, "a changed file must require explicit reload before another save");
+        assert_eq!(std::fs::read_to_string(&instruction_path).unwrap(), external_instructions);
+        activate(&mut view, "Reload (discard edits)").await;
+        wait_view(&mut view, |screen| screen.contains("EXTERNAL GLOBAL UPDATE") && !screen.contains("Reading global instructions…")).await;
+        assert_input(&mut view, "Global instructions", external_instructions).await;
+        let final_instructions = format!("  GLOBAL_UI_INSTRUCTIONS_UNIQUE\n{}\n\n", "保留完整 UTF-8 指令，遵循实际用户需求。\n".repeat(40));
+        fill(&mut view, "Global instructions", &final_instructions).await;
+        assert_input(&mut view, "Global instructions", &final_instructions).await;
+        activate(&mut view, "Save global instructions").await;
+        wait_view(&mut view, |screen| screen.contains("Global instructions saved.")).await;
+        let saved_global = client.query("agent", "globalInstructions", json!({})).await.unwrap();
+        assert_eq!(saved_global["source"], initial_global["source"]);
+        assert_eq!(saved_global["path"], initial_global["path"]);
+        assert_eq!(saved_global["content"], final_instructions);
+        assert_eq!(saved_global["exists"], true);
+        assert_ne!(saved_global["revision"], initial_global["revision"]);
+        assert_eq!(std::fs::read_to_string(&instruction_path).unwrap(), final_instructions);
+        assert_eq!(client.query("settings", "assistantPreferences", json!({})).await.unwrap(), saved_preferences, "editing AGENTS.md must not mutate display name, language or the policy revision");
+        // Return from the file editor before continuing the original name and
+        // composer identity checks; saving may retain the fresh file editor.
+        activate(&mut view, "Back from general settings").await;
         activate(&mut view, "Edit personalization").await;
         assert_input(&mut view, "Display name", "已保存的中文用户").await;
         support::wait_enabled_button(&mut view, "Back from general settings").await;
@@ -614,6 +651,14 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(request.body["provider"], json!({"only":["openrouter","deepseek"]}));
         assert_eq!(request.body["temperature"], 0.22);
         assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("Use my new connection exactly once")));
+        let system_prompt = request.body["messages"].as_array().unwrap().iter()
+            .filter(|message| message["role"] == "system")
+            .filter_map(|message| message["content"].as_str()).collect::<Vec<_>>().join("\n");
+        assert_eq!(system_prompt.matches("GLOBAL_UI_INSTRUCTIONS_UNIQUE").count(), 1, "admission must capture the saved global file once");
+        assert!(system_prompt.contains(final_instructions.trim()), "the provider did not receive the saved full global instructions");
+        assert!(!system_prompt.contains("INITIAL GLOBAL UTF-8"));
+        assert!(!system_prompt.contains("EXTERNAL GLOBAL UPDATE"));
+
         request.thinking("SETTINGS_CONNECTION_REASONING").await;
         request.delta("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
         request.finish().await;
@@ -645,7 +690,6 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         let startup_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
         assert_eq!(startup_preferences["language"], "zh-CN");
         assert_eq!(startup_preferences["displayName"], saved_preferences["displayName"]);
-        assert_eq!(startup_preferences["assistantTone"], saved_preferences["assistantTone"]);
         drop(view);
         bindings.close().await.unwrap();
         drop(client);
@@ -659,6 +703,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             assert!(!restored.contains(proxy_secret));
             let restarted = fixture.client().await;
             assert_eq!(restarted.query("settings", "assistantPreferences", json!({})).await.unwrap(), startup_preferences);
+            assert_eq!(restarted.query("agent", "globalInstructions", json!({})).await.unwrap(), saved_global, "the selected file and full content must survive terminal restart");
             let persisted_network = restarted.query("settings", "network", json!({})).await.unwrap();
             // Language and network settings share the runtime policy revision.
             // The final UI language change advances that revision while every
