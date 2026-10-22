@@ -337,7 +337,7 @@ fn migration_retires_only_observed_models_and_preserves_typed_connection_and_sec
             rusqlite::params![
                 expected.connection_id,
                 expected.slug,
-                expected.revision,
+                i64::try_from(expected.revision).unwrap(),
                 serde_json::to_string(&expected).unwrap()
             ],
         )
@@ -361,7 +361,7 @@ fn migration_retires_only_observed_models_and_preserves_typed_connection_and_sec
     expected.models.clear();
     expected.model_source = None;
     expected.models_fetched_at = None;
-    let (column_revision, document): (u64, String) = database
+    let (column_revision, document): (i64, String) = database
         .query_row("SELECT revision,document FROM connections", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
@@ -378,7 +378,7 @@ fn migration_retires_only_observed_models_and_preserves_typed_connection_and_sec
             .query_row(
                 "SELECT revision,default_target FROM connection_catalog",
                 [],
-                |row| Ok((row.get::<_, u64>(0)?, row.get::<_, String>(1)?))
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             )
             .unwrap(),
         (12, target)
@@ -390,7 +390,7 @@ fn migration_retires_only_observed_models_and_preserves_typed_connection_and_sec
                 [],
                 |row| Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, u64>(1)?,
+                    row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?
                 ))
@@ -406,7 +406,7 @@ fn migration_retires_only_observed_models_and_preserves_typed_connection_and_sec
     assert_eq!(
         database
             .query_row("SELECT revision FROM credential_vault", [], |row| row
-                .get::<_, u64>(0))
+                .get::<_, i64>(0))
             .unwrap(),
         9
     );
