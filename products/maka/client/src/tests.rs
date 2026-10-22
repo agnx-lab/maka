@@ -90,6 +90,7 @@ impl Handler for CounterHandler {
                 }
                 "send"
                 | "selectBackend"
+                | "editQueue"
                 | "create"
                 | "discoverModels"
                 | "setEnabled"
@@ -181,6 +182,7 @@ impl Fixture {
                 "selectBackend":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "stop":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "respond":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "editQueue":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "metadata":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "changeSession":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "fork":{"mode":"mutation","input":{},"output":{},"resources":{}},
@@ -320,6 +322,7 @@ impl Fixture {
                                 "selectBackend".into(),
                                 "stop".into(),
                                 "respond".into(),
+                                "editQueue".into(),
                                 "watch".into(),
                             ]
                             .into(),
@@ -499,7 +502,7 @@ async fn durable_original_receipt_survives_cancelled_observer_disconnect_and_res
             control.close().await.unwrap();
         }
         let id = Uuid::new_v4();
-        let mutation = client.control(id,"selectBackend",json!({"sessionId":"session-one","text":"private draft text"})).await.unwrap();
+        let mutation = client.control(id,"editQueue",json!({"sessionId":"session-one","expectedRevision":4,"edit":{"kind":"update","messageId":"queued-one","message":"private draft text"}})).await.unwrap();
         assert_eq!(client.pending_controls().await.unwrap().iter().map(|operation| operation.id).collect::<Vec<_>>(),[id]);
         let original = mutation.prepare().await.unwrap();
         assert_eq!(original.session_id.as_deref(),Some("session-one"));

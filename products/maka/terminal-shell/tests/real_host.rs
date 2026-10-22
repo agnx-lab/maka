@@ -33,6 +33,8 @@ mod keyboard;
 mod oauth;
 #[path = "real_host/plugin_settings.rs"]
 mod plugin_settings;
+#[path = "real_host/queue.rs"]
+mod queue;
 #[path = "real_host/session_lifecycle.rs"]
 mod session_lifecycle;
 mod support;
