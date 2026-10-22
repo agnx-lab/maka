@@ -44,9 +44,13 @@ import {
   controlDisabledStyle,
 } from './ui';
 import { Icon } from './Icon';
-import type { Browsing, BrowserScope, BrowserWorkspace, BrowserSession } from './browsing';
+import type { Browsing, BrowserScope, BrowserWorkspace } from './browsing';
 import { SessionActions } from './SessionActions';
-import type { SessionAction } from './sessionLifecycle';
+import {
+  sessionActionTarget,
+  type SessionAction,
+  type SessionActionTarget,
+} from './sessionLifecycle';
 import { sessionStatusCaption } from './sessionStatus';
 
 export type WorkspaceBrowserProps = {
@@ -70,11 +74,13 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
   const browser = props.browsing;
   const choosingWorkspace = signal(false);
   const selectedRow = signal<string | null>(null);
-  const actions = signal<{ session: BrowserSession; origin: string | null } | null>(null);
-  const navigationNotice = signal('');
+  const actions = signal<{ session: SessionActionTarget; origin: string | null } | null>(null);
+  const actionsAnchor = signal<YNode | null>(null);
+  const navigationNotice = signal<{ kind: 'draft' | 'action'; message: string } | null>(null);
   const viewportHeight = signal(160);
   let search: YNode | undefined;
   let list: YNode | undefined;
+  let currentActionTrigger: { id: string; node: YNode } | null = null;
   let removeSearchKeys = () => {};
   let removeEscape = () => {};
   let alive = true;
@@ -132,33 +138,48 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
   const currentRow = () => (index() < 0 ? undefined : selectedRow());
   const select = async ({ id, origin }: { id: string; origin: string | null }) => {
     if (!alive || props.selected() !== origin || props.switching()) return;
-    navigationNotice.set('');
+    navigationNotice.set(null);
     await props.selectSession(id, origin);
     if (alive && id !== origin && props.selected() === origin)
-      navigationNotice.set(
-        'The draft is not ready to save. Return to the conversation to check its status.',
-      );
+      navigationNotice.set({
+        kind: 'draft',
+        message: 'The draft is not ready to save. Return to the conversation to check its status.',
+      });
   };
-  const openActions = (target: { session: BrowserSession; origin: string | null }) => {
+  const openActions = (
+    target: { session: SessionActionTarget; origin: string | null },
+    anchor: YNode,
+  ) => {
     if (
       alive &&
       !props.switching() &&
       props.selected() === target.origin &&
       sessionsById().get(target.session.id)?.revision === target.session.revision
-    )
-      actions.set(target);
+    ) {
+      batch(() => {
+        navigationNotice.set(null);
+        actionsAnchor.set(anchor);
+        actions.set(target);
+      });
+    }
   };
   const currentActions = () => {
     const session = sessionsById().get(currentRow() ?? '');
-    if (session && !choosingWorkspace()) openActions({ session, origin: props.selected() });
+    if (session && !choosingWorkspace() && currentActionTrigger?.id === session.id)
+      openActions(
+        { session: sessionActionTarget(session), origin: props.selected() },
+        currentActionTrigger.node,
+      );
   };
   const closeActions = () => {
-    actions.set(null);
-    search?.focus();
+    batch(() => {
+      actions.set(null);
+      actionsAnchor.set(null);
+    });
   };
   effect(() => {
     const target = actions();
-    if (target && props.selected() !== target.origin) actions.set(null);
+    if (target && props.selected() !== target.origin) closeActions();
   });
   const chooseFilter = (filter: 'all' | 'archived') => {
     batch(() => {
@@ -507,6 +528,25 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                 );
               }
               const session = () => sessionsById().get(key());
+              let actionTrigger: YNode | undefined;
+              const trackActionTrigger = () => {
+                const id = key();
+                if (actionTrigger && currentRow() === id)
+                  currentActionTrigger = { id, node: actionTrigger };
+                else if (currentActionTrigger?.node === actionTrigger) currentActionTrigger = null;
+              };
+              effect(trackActionTrigger);
+              cleanup(() => {
+                if (currentActionTrigger?.node === actionTrigger) currentActionTrigger = null;
+                if (alive && actionsAnchor() === actionTrigger) actionsAnchor.set(null);
+              });
+              const showActions = (target: {
+                session: SessionActionTarget;
+                origin: string | null;
+              }) => {
+                if (actionTrigger && target.session.id === key())
+                  openActions(target, actionTrigger);
+              };
               return (
                 <View
                   style={{
@@ -568,12 +608,16 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                     </Text>
                   </Button>
                   <Button
+                    ref={(node) => {
+                      actionTrigger = node;
+                      untracked(trackActionTrigger);
+                    }}
                     accessibilityLabel={`Actions for ${session()?.title || 'Untitled conversation'}`}
                     disabled={props.switching() || !session()}
                     onPress={
                       session()
-                        ? inputAction(openActions, {
-                            session: session()!,
+                        ? inputAction(showActions, {
+                            session: sessionActionTarget(session()!),
                             origin: props.selected(),
                           })
                         : undefined
@@ -599,15 +643,22 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         <Text style={{ color: C.muted }}>Loading…</Text>
       </If>
       <If when={navigationNotice()}>
-        <Text style={{ color: C.warning }}>{navigationNotice()}</Text>
-        <Button
-          onPress={inputAction(props.close, null)}
-          style={controlStyle}
-          hoverStyle={controlHoverStyle}
-          focusStyle={controlFocusStyle}
+        <Text
+          selectable
+          style={{ color: navigationNotice()?.kind === 'action' ? C.danger : C.warning }}
         >
-          <Text style={{ color: C.accent }}>Return to draft</Text>
-        </Button>
+          {navigationNotice()?.message}
+        </Text>
+        <If when={navigationNotice()?.kind === 'draft'}>
+          <Button
+            onPress={inputAction(props.close, null)}
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+          >
+            <Text style={{ color: C.accent }}>Return to draft</Text>
+          </Button>
+        </If>
       </If>
       <If when={browser.error() || browser.projectError()}>
         <Text selectable style={{ color: C.danger }}>
@@ -681,8 +732,10 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
           return (
             <SessionActions
               session={target.session}
+              anchor={actionsAnchor}
               current={() => alive && actions() === target && props.selected() === target.origin}
               close={closeActions}
+              notice={(message) => navigationNotice.set({ kind: 'action', message })}
               change={(action) => props.changeSession(action, target.origin)}
             />
           );

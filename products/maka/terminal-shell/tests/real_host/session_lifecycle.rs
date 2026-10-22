@@ -67,6 +67,22 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         shortcut(&mut view, 'o');
         wait_focused_input(&mut view, "Search session titles").await;
         wait_enabled_node(&mut view, "Actions for NSH real Agent").await;
+        let original_search = view.surface().input_context().unwrap();
+        for exit in ["Back from conversation actions", "Close conversation actions"] {
+            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)));
+            activate(&mut view, "Rename conversation").await;
+            wait_focused_input(&mut view, "Conversation title").await;
+            support::click_label(&mut view, exit);
+            if exit == "Back from conversation actions" {
+                wait_enabled_node(&mut view, "Fork conversation").await;
+                view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+            }
+            wait_focused_input(&mut view, "Search session titles").await;
+            assert_eq!(view.surface().focused(), Some(original_search.node));
+            let restored = view.surface().input_context().unwrap();
+            assert_eq!(restored.text, original_search.text);
+            assert_eq!(restored.selection, original_search.selection);
+        }
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)));
         activate(&mut view, "Rename conversation").await;
         fill_title(&mut view, "Renamed original").await;
@@ -89,7 +105,7 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
 
         actions(&mut view, "Renamed original").await;
         support::click_label(&mut view, "Archive conversation");
-        wait_view(&mut view, |screen| !screen.contains("Conversation actions")).await;
+        wait_view(&mut view, |screen| !screen.contains("Conversation actions") && !screen.contains("Updating conversation…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("This conversation is archived.")).await;
         assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["session"]["archived"], true);
@@ -101,7 +117,7 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         support::click_label(&mut view, "Actions for Renamed original");
         wait_enabled_node(&mut view, "Restore conversation").await;
         support::click_label(&mut view, "Restore conversation");
-        wait_view(&mut view, |screen| !screen.contains("Conversation actions")).await;
+        wait_view(&mut view, |screen| !screen.contains("Conversation actions") && !screen.contains("Updating conversation…")).await;
         support::click_label(&mut view, "Show active conversations");
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| !screen.contains("This conversation is archived.")).await;

@@ -36,6 +36,9 @@ const glyphs = {
   file: '📄',
   terminal: '⌁',
   copy: '⧉',
+  edit: '✎',
+  archive: '▤',
+  trash: '⌫',
   wrap: '↵',
   nowrap: '→',
   code: '⌘',
@@ -191,6 +194,41 @@ export function Icon(props: { name: keyof typeof glyphs; color: string }) {
             cx.lineTo(4, 11);
             cx.moveTo(9, 11);
             cx.lineTo(12, 11);
+            break;
+          case 'edit':
+            cx.moveTo(3, 10);
+            cx.lineTo(11, 2);
+            cx.lineTo(14, 5);
+            cx.lineTo(6, 13);
+            cx.lineTo(2, 14);
+            cx.closePath();
+            cx.moveTo(9, 4);
+            cx.lineTo(12, 7);
+            break;
+          case 'archive':
+            cx.rect(1.5, 2, 13, 3);
+            cx.moveTo(3, 5);
+            cx.lineTo(3, 14);
+            cx.lineTo(13, 14);
+            cx.lineTo(13, 5);
+            cx.moveTo(6, 8);
+            cx.lineTo(10, 8);
+            break;
+          case 'trash':
+            cx.moveTo(2, 4);
+            cx.lineTo(14, 4);
+            cx.moveTo(5, 4);
+            cx.lineTo(5, 2);
+            cx.lineTo(11, 2);
+            cx.lineTo(11, 4);
+            cx.moveTo(3.5, 4);
+            cx.lineTo(4.5, 14);
+            cx.lineTo(11.5, 14);
+            cx.lineTo(12.5, 4);
+            cx.moveTo(6, 7);
+            cx.lineTo(6.5, 11.5);
+            cx.moveTo(10, 7);
+            cx.lineTo(9.5, 11.5);
             break;
           case 'copy':
             cx.roundRect(2, 1.5, 9, 10, 1.5);

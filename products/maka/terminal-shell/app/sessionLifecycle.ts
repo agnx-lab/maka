@@ -20,10 +20,28 @@
 import type { AgentSession } from '../../../../packages/plugin-sdk/src/index.js';
 import type { Control } from './Conversation';
 
+export type SessionActionTarget = Pick<
+  AgentSession,
+  'id' | 'revision' | 'title' | 'labels' | 'archived'
+> & {
+  workspace: Pick<AgentSession['workspace'], 'path'>;
+};
+// Catalog activity is presentation data; it must not rebind a metadata action.
+export function sessionActionTarget(session: AgentSession): SessionActionTarget {
+  return {
+    id: session.id,
+    revision: session.revision,
+    title: session.title,
+    labels: [...session.labels],
+    archived: session.archived,
+    workspace: { path: session.workspace.path },
+  };
+}
+
 export type SessionAction =
-  | { kind: 'rename'; session: AgentSession; title: string }
-  | { kind: 'fork'; session: AgentSession; title: string; turnId: string | null }
-  | { kind: 'archive' | 'restore' | 'remove'; session: AgentSession };
+  | { kind: 'rename'; session: SessionActionTarget; title: string }
+  | { kind: 'fork'; session: SessionActionTarget; title: string; turnId: string | null }
+  | { kind: 'archive' | 'restore' | 'remove'; session: SessionActionTarget };
 export type SessionActionResult =
   | { kind: 'updated' | 'forked'; session: AgentSession }
   | { kind: 'removed'; sessionId: string };
