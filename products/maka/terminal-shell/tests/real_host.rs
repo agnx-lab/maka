@@ -1883,11 +1883,17 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let wheel = wait_view_state(&mut cancelled, |view, screen| !view.surface().animating() && screen.contains(&wheel_marker)).await;
         let wheel_row = wheel.lines().position(|line| line.contains(&wheel_marker)).unwrap();
         assert!(!cancelled.accessibility_snapshot().iter().any(|node| node.label.contains(&added_marker)));
+        evidence("history-home-wheel-before-final-page", &wheel);
+        evidence("history-home-wheel-before-final-page-ax", &format!("{:#?}", cancelled.accessibility_snapshot()));
+        support::evidence_cells("history-home-wheel-before-final-page", &cancelled);
         gate.release();
         // AX includes mounted overscan. This newly prepended paragraph proves
         // the final reply and all its promise continuations reached a real
         // native commit; a wire write alone would not provide that barrier.
         let retained = wait_view_state(&mut cancelled, |view, _| view.accessibility_snapshot().iter().any(|node| node.label.contains(&added_marker))).await;
+        evidence("history-home-wheel-final-page-published", &retained);
+        evidence("history-home-wheel-final-page-published-ax", &format!("{:#?}", cancelled.accessibility_snapshot()));
+        support::evidence_cells("history-home-wheel-final-page-published", &cancelled);
         assert_eq!(retained.lines().position(|line| line.contains(&wheel_marker)), Some(wheel_row), "a completed, cancelled Home moved the user's wheel anchor:\n{retained}");
         assert!(!retained.contains("History question 00"), "the cancelled Home snapped to canonical start:\n{retained}");
         support::wait_draft(&cancel_client, &fixture.session, HOME_DRAFT).await;
