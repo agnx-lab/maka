@@ -398,10 +398,16 @@ async fn header(
         return Ok(row);
     }
     let row = sqlx::query(
-        "SELECT source.message_id, source.turn_id, source.timestamp, source.role, length(cached.body),
+        "SELECT source.message_id, source.turn_id, source.timestamp, source.role,
+            CASE WHEN source.role = 'turn_state' AND source.state_status IS NOT 'failed' AND ?4 = 'body'
+                THEN 0 ELSE length(cached.body) END,
             CASE WHEN source.role = 'user' THEN source.user_origin END
-            FROM transcript_directory source JOIN transcript_cache.text cached USING(session_id, source_sequence, item_index)
-            WHERE source.session_id = ?1 AND source.source_sequence = ?2 AND item_index = ?3 AND cached.field = ?4"
+            FROM transcript_directory source LEFT JOIN transcript_cache.text cached
+                ON cached.session_id = source.session_id AND cached.source_sequence = source.source_sequence
+                AND cached.item_index = source.item_index AND cached.field = ?4
+            WHERE source.session_id = ?1 AND source.source_sequence = ?2 AND source.item_index = ?3
+                AND (cached.field IS NOT NULL OR
+                    (source.role = 'turn_state' AND source.state_status IS NOT 'failed' AND ?4 = 'body'))"
     ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(field_name(field)).fetch_one(&mut *tx).await?;
     let mut header = Header {
         origin: row
@@ -552,6 +558,22 @@ async fn materialize(
             .await?
             .is_some()
     {
+        return Ok(0);
+    }
+    // Non-failed turn states have no text under BODY. Their immutable directory
+    // identity is sufficient for cursor progress; replaying their producer only
+    // to cache an empty body repeats the completed invocation's evidence.
+    let empty_state: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM transcript_directory
+            WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
+                AND role = 'turn_state' AND state_status IS NOT 'failed')",
+    )
+    .bind(session)
+    .bind(sql_position(locator)?.0)
+    .bind(sql_position(locator)?.1)
+    .fetch_one(&mut *tx)
+    .await?;
+    if empty_state {
         return Ok(0);
     }
     super::bodycache::ensure(tx, session, locator).await?;

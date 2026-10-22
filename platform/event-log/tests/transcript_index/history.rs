@@ -623,6 +623,12 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
     }
     let original_events =
         serde_json::to_vec(&log.prefix(1000, 1024 * 1024).await.unwrap()).unwrap();
+    // This comparison covers all original row bytes across reopen. History
+    // need not populate bodies for directory-only, empty state boundaries.
+    let cache_fence = *log.subscribe_commits().borrow();
+    crate::transcript_cache::materialize_all_rows(&log, "numeric", cache_fence)
+        .await
+        .unwrap();
     let db = Connection::open(&path).unwrap();
     let canonical = crate::test_store::inspect(&log, |db| rows(db, "numeric")).await;
     crate::test_store::inspect(&log, move |db| {
