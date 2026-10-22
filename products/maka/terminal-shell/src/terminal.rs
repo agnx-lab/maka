@@ -22,12 +22,10 @@
 //! event dispatch or the input owner’s independent cancellation path.
 
 mod adapter;
-#[cfg(target_os = "linux")]
 mod frame_trace;
 mod graphics;
 mod input;
 mod output;
-#[cfg(target_os = "linux")]
 mod pixels;
 mod ui;
 
@@ -107,7 +105,6 @@ pub(crate) fn run(
         ..Default::default()
     };
     let setup = [SETUP, graphics::QUERY].concat();
-    #[cfg(target_os = "linux")]
     let setup = {
         let mut setup = setup;
         let mut state = presentation.state.lock().unwrap();
@@ -130,7 +127,6 @@ pub(crate) fn run(
     let mut input = None;
     let result = (|| {
         input = Some(start_reader(presentation.clone(), reader)?);
-        #[cfg(target_os = "linux")]
         {
             let capabilities = pixels::select(&mut output, &presentation, size)?;
             if presentation.stop.load(Ordering::Acquire) || presentation.state.lock().unwrap().quit
@@ -157,7 +153,6 @@ pub(crate) fn run(
     // or code pages while it can still decode input races shutdown on Windows.
     drop(input);
     let mut cleanup = Vec::new();
-    #[cfg(target_os = "linux")]
     cleanup.extend(pixels::cleanup(&presentation, result.is_err()));
     cleanup.extend_from_slice(CLEANUP);
     let cleanup = output.close(cleanup).and_then(|receipt| {
@@ -177,7 +172,6 @@ pub(crate) fn run(
         (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}")),
     };
     drop(terminal);
-    #[cfg(target_os = "linux")]
     {
         let trace = presentation.state.lock().unwrap().trace.take();
         if let Some(trace) = trace {
@@ -304,7 +298,6 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                         };
                         presentation.wake_driver();
                         inbox.graphics.observe(&event);
-                        #[cfg(target_os = "linux")]
                         {
                             let graphics_response =
                                 inbox.pixel_probe.check_graphics_response(&event);

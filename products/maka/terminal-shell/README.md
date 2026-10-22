@@ -34,7 +34,7 @@ The shell discovers and verifies the selected Root's live Host. If none is runni
 
 Installed users can run `maka` or `maka terminal-shell` from the same Maka executable. Use `--root`, `--session` or `--help` to select a Root, open an existing conversation or inspect the options. Relative Root paths use the caller's working directory.
 
-At startup, the shell negotiates image transport and display geometry. On Linux, including WSL, the required capabilities enable the entire interface to use GPU-rendered pixel frames through Kitty, Sixel or iTerm2. Otherwise, the same application uses Unicode rendering. Both presentations support mouse and keyboard interaction.
+At startup, the shell negotiates image transport and display geometry. On Linux (including WSL), macOS and Windows, the required capabilities enable the entire interface to use GPU-rendered pixel frames through Kitty, Sixel or iTerm2. Otherwise, the same application uses Unicode rendering. Both presentations support mouse and keyboard interaction.
 
 Kitty pixel frames use one complete upload-and-retirement write with error-only replies. The original writer's flush receipt permits native input publication without waiting for a success reply on every frame; a flush does not prove that the terminal has parsed or displayed the image. Any negative reply for either session-owned image slot ends the graphics session. Resize immediately revokes old pointer geometry while any started write finishes intact.
 

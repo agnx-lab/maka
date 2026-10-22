@@ -25,7 +25,8 @@ use super::{
     mapping::Mapping,
 };
 use gpui::{
-    AppContext, Application, Bounds, PlatformInput, WindowBounds, WindowOptions, point, px, size,
+    AppContext, Application, Bounds, Focusable, PlatformInput, WindowBounds, WindowOptions, point,
+    px, size,
 };
 use nsh_engine::EngineConfig;
 use nsh_gpui_terminal::{FrameToken, TerminalPlatform};
@@ -218,6 +219,7 @@ fn run(
                 let view = AppView::new(
                     AppOptions {
                         title: "Maka".into(),
+                        terminal_keyboard: true,
                         app_id: "org.apache.maka.terminal".into(),
                         ..Default::default()
                     },
@@ -232,6 +234,9 @@ fn run(
                 if !cancelled {
                     view.load_with_config(config);
                 }
+                // This surface owns the terminal keyboard from its first frame.
+                // A regular embedded AppView waits for the host to focus it.
+                window.focus(&view.focus_handle(cx), cx);
                 view
             })
         }) {

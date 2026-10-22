@@ -18,7 +18,8 @@
  */
 
 use gpui::{
-    AppContext, Application, Bounds, PlatformInput, WindowBounds, WindowOptions, point, px, size,
+    AppContext, Application, Bounds, Focusable, PlatformInput, WindowBounds, WindowOptions, point,
+    px, size,
 };
 use nsh_engine::{App, Bundle, EngineConfig};
 use nsh_gpui_terminal::{SubmittedFrame, TerminalPlatform};
@@ -34,8 +35,10 @@ use std::{
 fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     const APP: &str = r#"
         import { mount, signal } from 'nsh';
+        import { keymap } from 'nsh/keymap';
         import { element, prop, bindProp, append } from 'nsh:rt';
         const value = signal('');
+        keymap.bind('mod+k', () => value.set(keymap.label('mod+k')), { when: 'always' });
         mount(() => {
             const root = element('view');
             prop(root, 'style', {flex: 1, padding: 16, backgroundColor: '#111111'});
@@ -81,7 +84,14 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
                 },
                 move |window, cx| {
                     cx.new(|cx| {
-                        let view = AppView::new(AppOptions::default(), window, cx);
+                        let view = AppView::new(
+                            AppOptions {
+                                terminal_keyboard: true,
+                                ..Default::default()
+                            },
+                            window,
+                            cx,
+                        );
                         view.on_error(move |message| {
                             *failed.borrow_mut() = Some(message.to_owned())
                         });
@@ -89,6 +99,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
                             ui_sets: vec![nsh_base::registry()],
                             ..EngineConfig::new(App::Js(Bundle::source(APP.into())))
                         });
+                        window.focus(&view.focus_handle(cx), cx);
                         view
                     })
                 },
@@ -155,11 +166,16 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
             .dispatch_input(PlatformInput::KeyUp(gpui::KeyUpEvent { keystroke }))
             .unwrap();
     };
+    let copy_stage = Cell::new(0);
     let copied = || {
-        stroke("a", None, true);
-        stroke("c", None, true);
+        let stage = copy_stage.get() + 1;
+        copy_stage.set(stage);
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
+            // Engine callbacks can commit a new value between native events.
+            // Retry the observable copy while keeping drawing deferred.
+            stroke("a", None, true);
+            stroke("c", None, true);
             platform.pump_with_draw(false);
             assert_eq!(
                 count.get(),
@@ -174,9 +190,27 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
                 "native input error: {:?}",
                 errors.borrow()
             );
-            assert!(Instant::now() < deadline, "native copy did not complete");
+            assert!(
+                Instant::now() < deadline,
+                "native copy did not complete at stage {stage}"
+            );
         }
     };
+    // The terminal owns the GPUI keyboard before any pointer click. A global
+    // Control-based command must already reach the app through that focus.
+    stroke("k", None, true);
+    click(32.0);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if copied() == "Ctrl+K" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "initial terminal shortcut lost its focus"
+        );
+    }
+    stroke("backspace", None, false);
     // Initial paint had no focused editor. Registration must already exist so
     // the physical click can focus it and accept text before another paint.
     click(32.0);
@@ -201,6 +235,35 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     assert_eq!(copied(), "a你好😀");
     platform.paste("恢复 active").unwrap();
     assert_eq!(copied(), "恢复 active");
+    // Terminal editing remains Control-based on macOS as well as Linux:
+    // Home/End are line edges; Control+arrows advance by words.
+    platform.paste("one two three").unwrap();
+    stroke("home", None, false);
+    stroke("right", None, true);
+    platform.paste("|").unwrap();
+    assert_eq!(copied(), "one |two three");
+    platform.paste("one two three").unwrap();
+    stroke("end", None, false);
+    stroke("left", None, true);
+    platform.paste("|").unwrap();
+    assert_eq!(copied(), "one two |three");
+    platform.paste("one two").unwrap();
+    stroke("home", None, true);
+    platform.paste("<").unwrap();
+    stroke("end", None, true);
+    platform.paste(">").unwrap();
+    assert_eq!(copied(), "<one two>");
+    stroke("k", None, true);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if copied() == "Ctrl+K" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Control-based mod binding did not reach the engine"
+        );
+    }
     assert_eq!(count.get(), initial_count);
     application.update(|cx| {
         window
