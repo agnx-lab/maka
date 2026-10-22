@@ -40,6 +40,14 @@ pub(super) struct Inbox {
 }
 
 impl Inbox {
+    pub fn push_terminal(&mut self, event: termina::Event) {
+        if matches!(event, termina::Event::MouseLeave) {
+            self.lose_pointer();
+        } else if let Some(event) = super::adapter::event(event) {
+            self.push(event);
+        }
+    }
+
     pub fn push(&mut self, event: Event) {
         if let Event::Key(key) = event
             && key.kind != KeyEventKind::Release
@@ -52,16 +60,19 @@ impl Inbox {
         if let Event::Resize(columns, rows) = event {
             self.graphics.resize();
             self.resize = Some((columns, rows));
-            self.cancel_pointer = true;
-            // Coordinates read before the resize no longer describe the
-            // pending viewport. Keys and paste keep their physical order.
-            self.events
-                .retain(|event| !matches!(event, Event::Mouse(_)));
+            // Coordinates read before resize no longer describe the viewport.
+            self.lose_pointer();
             return;
         }
         if self.error.is_none() {
             self.events.push_back(event);
         }
+    }
+
+    fn lose_pointer(&mut self) {
+        self.cancel_pointer = true;
+        self.events
+            .retain(|event| !matches!(event, Event::Mouse(_)));
     }
 
     pub fn pop_batch(&mut self) -> Vec<Event> {
@@ -133,6 +144,22 @@ mod tests {
             inbox.push(event);
         }
         assert_eq!(inbox.pop_batch(), expected);
+    }
+
+    #[test]
+    fn physical_leave_retires_old_mouse_events_without_losing_keyboard_or_paste() {
+        let mut inbox = Inbox::default();
+        inbox.push(key('a'));
+        inbox.push(mouse(MouseEventKind::Down(MouseButton::Left)));
+        inbox.push(Event::Paste("你好 draft".into()));
+        inbox.push(mouse(MouseEventKind::Up(MouseButton::Left)));
+        inbox.push_terminal(termina::Event::MouseLeave);
+        assert!(inbox.cancel_pointer);
+        assert_eq!(inbox.resize, None, "leave does not resize or change focus");
+        assert_eq!(
+            inbox.pop_batch(),
+            vec![key('a'), Event::Paste("你好 draft".into())]
+        );
     }
 
     #[test]

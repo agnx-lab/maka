@@ -1304,10 +1304,12 @@ mod tests {
             0,
         );
         session.advance(command([down])).unwrap();
-        let mut cancel = command([]);
-        cancel.cancel_pointer = true;
+        let mut inbox = crate::terminal::input::Inbox::default();
+        inbox.push_terminal(termina::Event::MouseLeave);
+        inbox.push(up);
+        let mut cancel = command(inbox.pop_batch());
+        cancel.cancel_pointer = inbox.cancel_pointer;
         session.advance(cancel).unwrap();
-        session.advance(command([up])).unwrap();
         assert!(session.surface.snapshot().contains("selected:none"));
         let events = click(&session.surface, "row:A");
         session.advance(command(events)).unwrap();

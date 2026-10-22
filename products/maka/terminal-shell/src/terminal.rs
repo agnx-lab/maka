@@ -328,10 +328,7 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                                 continue;
                             }
                         }
-                        let Some(event) = adapter::event(event) else {
-                            continue;
-                        };
-                        inbox.push(event);
+                        inbox.push_terminal(event);
                         if inbox.quit || inbox.error.is_some() || stop.load(Ordering::Acquire) {
                             break;
                         }
