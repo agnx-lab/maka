@@ -860,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn a_flushed_close_survives_background_work_but_not_an_earlier_action() {
+    fn a_flushed_close_survives_background_work_and_an_earlier_action() {
         let mut session = Session::new(config(
             r#"
             import { inputAction, mount, signal } from "nsh";
@@ -924,7 +924,7 @@ mod tests {
             .unwrap()
             .pop_batch(session.epoch);
         assert_eq!(inputs.len(), 2);
-        let acted = session
+        session
             .advance(Advance {
                 image_protocol: None,
                 inputs,
@@ -933,15 +933,26 @@ mod tests {
             })
             .unwrap();
         assert!(session.surface.snapshot().contains("after closed:1"));
-        {
+        let inputs = {
             let mut inbox = session.presentation.state.lock().unwrap();
-            assert!(
-                inbox.pop_batch(session.epoch).is_empty(),
-                "the earlier callback revokes every old lease"
+            let inputs = inbox.pop_batch(session.epoch);
+            assert_eq!(
+                inputs.len(),
+                2,
+                "the same displayed owner and binding retain the second independent click"
             );
-            assert!(inbox.cancel_pointer);
-            inbox.cancel_pointer = false;
-        }
+            assert!(!inbox.cancel_pointer);
+            inputs
+        };
+        let acted = session
+            .advance(Advance {
+                image_protocol: None,
+                inputs,
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap();
+        assert!(session.surface.snapshot().contains("after closed:2"));
         publish(&mut output, &presentation, acted);
         {
             let mut inbox = session.presentation.state.lock().unwrap();
@@ -964,7 +975,7 @@ mod tests {
             })
             .unwrap();
         assert!(
-            session.surface.snapshot().contains("after closed:2"),
+            session.surface.snapshot().contains("after closed:3"),
             "a freshly displayed Close remains usable"
         );
         publish(&mut output, &presentation, fresh);
@@ -995,7 +1006,7 @@ mod tests {
             })
             .unwrap();
         assert!(
-            session.surface.snapshot().contains("after closed:2"),
+            session.surface.snapshot().contains("after closed:3"),
             "a cancelled sealed gesture cannot release through the opaque path"
         );
         // A later opaque release must not complete a capture recreated by the
@@ -1011,7 +1022,7 @@ mod tests {
                 cancel_pointer: false,
             })
             .unwrap();
-        assert!(session.surface.snapshot().contains("after closed:2"));
+        assert!(session.surface.snapshot().contains("after closed:3"));
         let inputs = click(&session.surface, "Close")
             .into_iter()
             .map(|event| Input {
@@ -1028,7 +1039,7 @@ mod tests {
             })
             .unwrap();
         assert!(
-            session.surface.snapshot().contains("after closed:3"),
+            session.surface.snapshot().contains("after closed:4"),
             "the next native click remains usable after cancellation"
         );
     }
