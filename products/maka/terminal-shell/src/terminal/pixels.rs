@@ -234,7 +234,9 @@ pub(super) fn run(
                                     }
                                 }
                                 if let Some(size) = resize {
-                                    state.push(crossterm::event::Event::Resize(size.cols, size.rows));
+                                    state.push(crossterm::event::Event::Resize(
+                                        size.cols, size.rows,
+                                    ));
                                 }
                             }
                         }
