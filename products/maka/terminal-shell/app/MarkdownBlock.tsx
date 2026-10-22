@@ -38,6 +38,7 @@ export function MarkdownBlockView(props: {
   block: () => MarkdownBlock;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+  userScroll(): void;
 }) {
   const block = props.block;
   const container = () =>
@@ -48,7 +49,12 @@ export function MarkdownBlockView(props: {
     <If
       when={container()}
       else={
-        <MarkdownBlockContent block={block} compact={props.compact} openLink={props.openLink} />
+        <MarkdownBlockContent
+          block={block}
+          compact={props.compact}
+          openLink={props.openLink}
+          userScroll={props.userScroll}
+        />
       }
     >
       <View
@@ -68,7 +74,12 @@ export function MarkdownBlockView(props: {
           </Text>
         </If>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <MarkdownBlockContent block={block} compact={props.compact} openLink={props.openLink} />
+          <MarkdownBlockContent
+            block={block}
+            compact={props.compact}
+            openLink={props.openLink}
+            userScroll={props.userScroll}
+          />
         </View>
       </View>
     </If>
@@ -166,6 +177,7 @@ function MarkdownBlockContent(props: {
   block: () => MarkdownBlock;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+  userScroll(): void;
 }) {
   const block = props.block;
   return (
@@ -225,11 +237,16 @@ function MarkdownBlockContent(props: {
             </If>
           }
         >
-          <CodeBlock block={block} compact={props.compact} />
+          <CodeBlock block={block} compact={props.compact} userScroll={props.userScroll} />
         </If>
       }
     >
-      <TableBlock table={() => block().table!} compact={props.compact} openLink={props.openLink} />
+      <TableBlock
+        table={() => block().table!}
+        compact={props.compact}
+        openLink={props.openLink}
+        userScroll={props.userScroll}
+      />
     </If>
   );
 }
@@ -238,6 +255,7 @@ function TableBlock(props: {
   table(): MarkdownTable;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+  userScroll(): void;
 }) {
   const cells = computed(() => {
     const table = props.table();
@@ -252,7 +270,12 @@ function TableBlock(props: {
     );
   });
   return (
-    <Scroll horizontal accessibilityLabel={tr('Markdown table')} style={{ flexGrow: 0 }}>
+    <Scroll
+      horizontal
+      onScrollIntent={props.userScroll}
+      accessibilityLabel={tr('Markdown table')}
+      style={{ flexGrow: 0 }}
+    >
       <View
         style={{
           display: 'grid',
@@ -307,7 +330,7 @@ type CopyState =
   | { kind: 'copying' | 'copied'; text: string }
   | { kind: 'failed'; text: string; message: string };
 
-function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
+function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean; userScroll(): void }) {
   const block = props.block;
   const key = computed(() => block().key);
   const text = computed(() => block().text);
@@ -391,7 +414,7 @@ function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
           <Icon name={copied() ? 'check' : 'copy'} color={C.secondary} />
         </Button>
       </View>
-      <Scroll horizontal={!wrapped()} scrollable={!wrapped()}>
+      <Scroll horizontal={!wrapped()} scrollable={!wrapped()} onScrollIntent={props.userScroll}>
         <Text
           selectable
           style={{

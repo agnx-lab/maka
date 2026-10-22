@@ -121,7 +121,7 @@ export function MessageRow({
                               </Text>
                             }
                           >
-                            <MarkdownBody row={row} openLink={openLink} />
+                            <MarkdownBody row={row} openLink={openLink} userScroll={userScroll} />
                           </If>
                         }
                       >
@@ -264,7 +264,14 @@ export function MessageRow({
                           >
                             <If
                               when={sourceMode()}
-                              else={<MarkdownBody row={row} openLink={openLink} compact />}
+                              else={
+                                <MarkdownBody
+                                  row={row}
+                                  openLink={openLink}
+                                  userScroll={userScroll}
+                                  compact
+                                />
+                              }
                             >
                               <Text selectable style={{ ...secondaryTextStyle, color: C.muted }}>
                                 {text()}
@@ -310,6 +317,7 @@ export function MessageRow({
                 </Text>
                 <If when={(row().attachments?.length ?? 0) > 0}>
                   <HistoryAttachments
+                    userScroll={userScroll}
                     sessionId={sessionId}
                     through={row().metadataThrough ?? through()}
                     position={row().position}

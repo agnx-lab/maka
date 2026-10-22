@@ -267,9 +267,15 @@ export function HistoryAttachments(props: {
   position?: Position;
   attachments: AgentHistoryAttachment[];
   preview(image: ImagePreview): void;
+  userScroll(): void;
 }) {
   return (
-    <Scroll horizontal accessibilityLabel={tr('Message attachments')} style={{ flexShrink: 0 }}>
+    <Scroll
+      horizontal
+      onScrollIntent={props.userScroll}
+      accessibilityLabel={tr('Message attachments')}
+      style={{ flexShrink: 0 }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
         <Each
           of={props.attachments.map((attachment, index) => ({ ...attachment, index }))}

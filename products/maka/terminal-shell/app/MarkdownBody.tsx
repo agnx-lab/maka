@@ -40,6 +40,7 @@ export function MarkdownBody(props: {
   row: () => Row;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+  userScroll(): void;
 }) {
   const projection = signal<Projection | null>(null);
   const failure = signal<{ input: Input; message: UiText } | null>(null);
@@ -132,7 +133,12 @@ export function MarkdownBody(props: {
       <View style={{ gap: props.compact ? 6 : 16 }}>
         <Each of={blocks() ?? []} key={(block: MarkdownBlock) => block.key}>
           {(block) => (
-            <MarkdownBlockView block={block} compact={props.compact} openLink={props.openLink} />
+            <MarkdownBlockView
+              block={block}
+              compact={props.compact}
+              openLink={props.openLink}
+              userScroll={props.userScroll}
+            />
           )}
         </Each>
       </View>
