@@ -158,7 +158,7 @@ pub(crate) fn run(
     drop(input);
     let mut cleanup = Vec::new();
     #[cfg(target_os = "linux")]
-    cleanup.extend(pixels::cleanup(&presentation));
+    cleanup.extend(pixels::cleanup(&presentation, result.is_err()));
     cleanup.extend_from_slice(CLEANUP);
     let cleanup = output.close(cleanup).and_then(|receipt| {
         match receipt.recv_timeout(Duration::from_millis(100)) {
@@ -310,12 +310,30 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                                 inbox.pixel_probe.check_graphics_response(&event);
                             inbox.pixel_probe.observe(&event, Instant::now());
                             let sixel_geometry = inbox.pixel_probe.sixel_geometry;
+                            let tracing = inbox.trace.is_some();
                             if let Some(pixels) = &mut inbox.pixels {
+                                let geometry = pixels.geometry;
+                                let resizing = matches!(&event, termina::Event::WindowResized(_))
+                                    || pixels.capabilities.sixel_geometry != sixel_geometry;
+                                let completed = (tracing
+                                    && resizing
+                                    && pixels.capabilities.protocol
+                                        == Some(pixels::Protocol::Sixel))
+                                .then(|| pixels.completed_frames().collect::<Vec<_>>());
                                 let result = graphics_response
                                     .and_then(|()| pixels.set_sixel_geometry(sixel_geometry))
                                     .and_then(|()| pixels.push(event));
                                 if let Some(wake) = &pixels.wake {
                                     wake.unpark();
+                                }
+                                let resized = pixels.geometry != geometry;
+                                if resized
+                                    && let (Some(completed), Some(trace)) =
+                                        (completed, &mut inbox.trace)
+                                {
+                                    for offer in completed {
+                                        trace.discard(&offer.token, offer.geometry, "resize");
+                                    }
                                 }
                                 match result {
                                     Ok(true) => inbox.quit = true,

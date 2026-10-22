@@ -275,23 +275,27 @@ fn run(
             if let Some(offer) = ready {
                 // Resize invalidates the receipt immediately, even while GPU
                 // readback or an old output transaction is still finishing.
-                if resize.is_none() && offer.geometry == generation {
+                let current = resize.is_none() && offer.geometry == generation;
+                if current {
                     platform
                         .mark_presented(offer.token.clone())
                         .map_err(|error| error.to_string())?;
-                    let mut state = presentation.state.lock().unwrap();
-                    let inbox = state.pixels.as_mut().unwrap();
-                    if inbox.resize.is_none() && inbox.geometry == offer.geometry {
-                        inbox.published = Some(offer.token.clone());
-                        if let Some(trace) = &mut state.trace {
-                            let at = Instant::now();
-                            trace.record(&offer.token, offer.geometry, "published", at, at);
-                        }
-                    }
                 }
                 let mut state = presentation.state.lock().unwrap();
                 let inbox = state.pixels.as_mut().unwrap();
+                let current = current && inbox.resize.is_none() && inbox.geometry == offer.geometry;
+                if current {
+                    inbox.published = Some(offer.token.clone());
+                }
                 inbox.presented(&offer.token);
+                if let Some(trace) = &mut state.trace {
+                    if current {
+                        let at = Instant::now();
+                        trace.record(&offer.token, offer.geometry, "published", at, at);
+                    } else if caps.protocol == Some(super::probe::Protocol::Sixel) {
+                        trace.discard(&offer.token, offer.geometry, "resize");
+                    }
+                }
                 drop(state);
                 presentation.wake_driver();
             }
@@ -525,7 +529,7 @@ fn run(
 }
 
 /// Start an already reserved readback-and-encoding job on the existing executor.
-/// Its Inbox slot spans executor wait, readback, codec and completed FIFO wait.
+/// Its Inbox slot spans executor wait, readback, codec and completed snapshot wait.
 /// Native input keeps pumping; jobs and executor shutdown cannot hold cleanup.
 fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExecutor) -> bool {
     if presentation.stop.load(Ordering::Acquire) {
@@ -583,6 +587,7 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
                 .frame
                 .complete()
                 .map_err(|error| error.to_string());
+            let readback_failed = frame.is_err();
             let readback_ended = readback_started.map(|_| Instant::now());
             let current = {
                 let mut state = presentation.state.lock().unwrap();
@@ -661,22 +666,36 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
             } else {
                 None
             };
-            let failed = result.as_ref().is_some_and(Result::is_err);
+            let failed = readback_failed || result.as_ref().is_some_and(Result::is_err);
             let mut state = presentation.state.lock().unwrap();
             let cancelled =
                 state.quit || state.error.is_some() || presentation.stop.load(Ordering::Acquire);
             let inbox = state.pixels.as_mut().unwrap();
             let discarded = !current || cancelled || inbox.geometry != geometry;
-            let encoded = match result.filter(|_| !discarded) {
-                Some(Ok(encoded)) => Some(encoded),
-                Some(Err(error)) => {
+            let encoded = match result {
+                Some(Ok(encoded)) if !discarded => Some(encoded),
+                Some(Err(error))
+                    if !discarded
+                        || (caps.protocol == Some(Protocol::Sixel)
+                            && !state.quit
+                            && !presentation.stop.load(Ordering::Acquire)) =>
+                {
                     state.error.get_or_insert(error);
                     None
                 }
-                None => None,
+                _ => None,
+            };
+            let disposition = if failed || state.error.is_some() {
+                Some("error")
+            } else if cancelled {
+                Some("cancel")
+            } else if discarded {
+                Some("resize")
+            } else {
+                None
             };
             let inbox = state.pixels.as_mut().unwrap();
-            inbox.finished(&token, encoded);
+            let superseded = inbox.finished(&token, encoded);
             let wake = inbox.wake.clone();
             if let (Some(start), Some(end), Some(trace)) = (started, ended, &mut state.trace) {
                 let sample = trace.record(&token, geometry, "codec", start, end);
@@ -689,6 +708,23 @@ fn encode_pending(presentation: &Presentation, background: &gpui::BackgroundExec
                 } else {
                     "ok"
                 };
+            }
+            if let Some(trace) = &mut state.trace {
+                if let super::input::Completion::Superseded {
+                    token: retired,
+                    replacement,
+                } = superseded
+                {
+                    let at = Instant::now();
+                    let sample = trace.record(&retired, geometry, "superseded", at, at);
+                    sample.outcome = "superseded";
+                    sample.pending_frame = Some(replacement.sequence());
+                }
+                if let Some(outcome) = disposition
+                    && caps.protocol == Some(Protocol::Sixel)
+                {
+                    trace.discard(&token, geometry, outcome);
+                }
             }
             drop(state);
             if let Some(wake) = wake {

@@ -48,6 +48,7 @@ pub(super) struct Sample {
     pub outcome: &'static str,
     /// Candidate present at the sink before admitting this frame. The outcome
     /// distinguishes a discarded new frame from replacing that old candidate.
+    /// For stage `superseded`, the newer same-geometry replacement sequence.
     pub pending_frame: Option<u64>,
 }
 
@@ -124,6 +125,22 @@ impl Trace {
         let index = self.inputs.len();
         self.inputs.push(sample);
         index
+    }
+
+    /// A real owner revoked further presentation, not the worker's execution.
+    /// Shutdown can race a late completion; retain one explicit terminal reason
+    /// in the existing trace rather than inventing another lifecycle ledger.
+    pub fn discard(&mut self, token: &FrameToken, geometry: u64, outcome: &'static str) {
+        if self.samples.iter().rev().any(|sample| {
+            sample.frame == token.sequence()
+                && sample.viewport_generation == token.viewport_generation()
+                && sample.geometry == geometry
+                && matches!(sample.stage, "published" | "superseded" | "discarded")
+        }) {
+            return;
+        }
+        let at = Instant::now();
+        self.record(token, geometry, "discarded", at, at).outcome = outcome;
     }
 
     pub fn finish_input(&mut self, index: usize, end: Instant, outcome: &'static str) {

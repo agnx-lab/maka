@@ -29,7 +29,7 @@ use super::{Presentation, output::Output};
 pub(super) use input::Inbox;
 use nsh_engine::EngineConfig;
 pub(super) use probe::Probe;
-pub(super) use probe::{Capabilities, MouseCoordinates};
+pub(super) use probe::{Capabilities, MouseCoordinates, Protocol};
 use std::{sync::atomic::Ordering, thread, time::Instant};
 
 /// Uses the single input reader during negotiation. No engine has started, so
@@ -208,7 +208,7 @@ pub(super) fn run(
                     Ok(Err(config)) => {
                         // No app was started. Return the exact original Host
                         // configuration to the character renderer.
-                        let mut restore = cleanup(presentation);
+                        let mut restore = cleanup(presentation, false);
                         // Kitty keeps one active mouse tracking/encoding
                         // value: resetting pixel modes also clears the
                         // original character modes. Re-enable those after
@@ -339,10 +339,35 @@ pub(super) fn run(
     }
 }
 
-pub(super) fn cleanup(presentation: &Presentation) -> Vec<u8> {
-    let state = presentation.state.lock().unwrap();
+pub(super) fn cleanup(presentation: &Presentation, failed: bool) -> Vec<u8> {
+    let mut state = presentation.state.lock().unwrap();
     if state.pixels.is_none() {
         return Vec::new();
+    }
+    if state.trace.is_some()
+        && state.pixels.as_ref().unwrap().capabilities.protocol == Some(probe::Protocol::Sixel)
+    {
+        let inbox = state.pixels.as_ref().unwrap();
+        let geometry = inbox.geometry;
+        let pending: Vec<_> = inbox.pending_frames().collect();
+        let failed = failed || state.error.is_some();
+        if let Some(trace) = &mut state.trace {
+            for offer in pending {
+                // This ends eligibility for display, not execution. Running
+                // readback/codecs keep their original slots until they return.
+                trace.discard(
+                    &offer.token,
+                    offer.geometry,
+                    if failed {
+                        "error"
+                    } else if offer.geometry != geometry {
+                        "resize"
+                    } else {
+                        "cancel"
+                    },
+                );
+            }
+        }
     }
     let inbox = state.pixels.as_ref().unwrap();
     let mut bytes = b"\x1b[?1016l\x1b[?1004l\x1b[?1003l".to_vec();

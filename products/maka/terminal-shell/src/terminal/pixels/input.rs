@@ -63,8 +63,16 @@ pub(super) struct Encoded {
     pub geometry: u64,
 }
 
-/// One admitted draw keeps its capacity through readback, codec and FIFO wait.
-/// Resize can discard completed work, but cannot cancel a running codec.
+pub(super) enum Completion {
+    Finished,
+    Superseded {
+        token: FrameToken,
+        replacement: FrameToken,
+    },
+}
+
+/// Running readback and codec work retain their original capacity until return.
+/// Only complete Sixel snapshots can supersede another completed snapshot.
 struct FrameJob {
     geometry: u64,
     work: FrameWork,
@@ -93,7 +101,7 @@ pub(crate) struct Inbox {
     pub capabilities: Capabilities,
     events: VecDeque<Input>,
     tracing: bool,
-    /// Last current-viewport writer receipt, used only by output diagnostics.
+    /// Last current-viewport writer receipt; also rejects late older Sixel work.
     pub published: Option<FrameToken>,
     frames: VecDeque<FrameJob>,
     frame_capacity: usize,
@@ -102,7 +110,7 @@ pub(crate) struct Inbox {
     /// The terminal geometry of the last whole image transaction's flush.
     pub last_fully_written_geometry: Option<u64>,
     /// Sole writer transaction, retained until the native owner consumes its receipt.
-    pub in_flight: Option<FrameToken>,
+    pub in_flight: Option<Offer>,
     pub(super) ready: Option<Offer>,
     pub geometry: u64,
     pub resize: Option<WindowSize>,
@@ -214,43 +222,123 @@ impl Inbox {
 
     /// A worker can only finish its own immutable token. Stale and cancelled
     /// jobs release capacity here, after their readback/codec actually returned.
-    pub(super) fn finished(&mut self, token: &FrameToken, encoded: Option<Encoded>) {
+    pub(super) fn finished(&mut self, token: &FrameToken, encoded: Option<Encoded>) -> Completion {
         let Some(index) = self
             .frames
             .iter()
             .position(|job| matches!(&job.work, FrameWork::Encoding(active) if active == token))
         else {
-            return;
+            return Completion::Finished;
         };
-        if let Some(encoded) = encoded.filter(|encoded| encoded.geometry == self.geometry) {
-            self.frames[index].work = FrameWork::Ready(encoded);
-        } else {
+        let Some(encoded) = encoded.filter(|encoded| encoded.geometry == self.geometry) else {
             self.frames.remove(index);
+            return Completion::Finished;
+        };
+        if self.capabilities.protocol == Some(Protocol::Sixel) {
+            let replacement = self
+                .frames
+                .iter()
+                .filter_map(|job| match &job.work {
+                    FrameWork::Ready(ready) if job.geometry == self.geometry => {
+                        Some(ready.frame.token())
+                    }
+                    _ => None,
+                })
+                .chain(
+                    self.in_flight
+                        .iter()
+                        .filter(|offer| offer.geometry == self.geometry)
+                        .map(|offer| offer.token.clone()),
+                )
+                .chain(self.published.iter().cloned())
+                .filter(|ready| ready.sequence() > token.sequence())
+                .max_by_key(FrameToken::sequence);
+            if let Some(replacement) = replacement {
+                self.frames.remove(index);
+                return Completion::Superseded {
+                    token: token.clone(),
+                    replacement,
+                };
+            }
+            // At most one complete snapshot waits for the sole writer. Active
+            // workers remain in their own slots even when a newer draw is ready.
+            let previous = self
+                .frames
+                .iter()
+                .position(|job| matches!(job.work, FrameWork::Ready(_)));
+            self.frames[index].work = FrameWork::Ready(encoded);
+            if let Some(previous) = previous {
+                let retired = self.frames.remove(previous).unwrap();
+                return Completion::Superseded {
+                    token: retired.work.token().unwrap(),
+                    replacement: token.clone(),
+                };
+            }
+        } else {
+            self.frames[index].work = FrameWork::Ready(encoded);
         }
+        Completion::Finished
     }
 
-    /// Completion order cannot reorder terminal transactions. The native owner
-    /// must consume the previous writer receipt before another handoff.
+    /// Sixel is a complete visual snapshot: an idle writer takes the latest
+    /// ready scene without waiting for older codecs. Stateful protocols retain
+    /// their serial order and every handoff waits for the native writer receipt.
     pub(super) fn take_encoded(&mut self) -> Option<Encoded> {
-        if self.in_flight.is_some()
-            || !self
-                .frames
-                .front()
-                .is_some_and(|job| matches!(job.work, FrameWork::Ready(_)))
-        {
+        if self.in_flight.is_some() {
             return None;
         }
-        let FrameWork::Ready(encoded) = self.frames.pop_front()?.work else {
+        let index = if self.capabilities.protocol == Some(Protocol::Sixel) {
+            self.frames
+                .iter()
+                .position(|job| matches!(job.work, FrameWork::Ready(_)))?
+        } else {
+            self.frames
+                .front()
+                .filter(|job| matches!(job.work, FrameWork::Ready(_)))?;
+            0
+        };
+        let FrameWork::Ready(encoded) = self.frames.remove(index)?.work else {
             unreachable!()
         };
-        self.in_flight = Some(encoded.frame.token());
+        self.in_flight = Some(Offer {
+            token: encoded.frame.token(),
+            geometry: encoded.geometry,
+        });
         Some(encoded)
     }
 
     pub(super) fn presented(&mut self, token: &FrameToken) {
-        if self.in_flight.as_ref() == Some(token) {
+        if self
+            .in_flight
+            .as_ref()
+            .is_some_and(|offer| &offer.token == token)
+        {
             self.in_flight = None;
         }
+    }
+
+    /// Actual unfinished presentation work, sampled only by the existing trace.
+    /// Inspecting it neither cancels a worker nor releases its capacity.
+    pub(super) fn pending_frames(&self) -> impl Iterator<Item = Offer> + '_ {
+        self.frames
+            .iter()
+            .filter_map(|job| {
+                job.work.token().map(|token| Offer {
+                    token,
+                    geometry: job.geometry,
+                })
+            })
+            .chain(self.in_flight.iter().cloned())
+    }
+
+    pub(super) fn completed_frames(&self) -> impl Iterator<Item = Offer> + '_ {
+        self.frames.iter().filter_map(|job| match &job.work {
+            FrameWork::Ready(encoded) => Some(Offer {
+                token: encoded.frame.token(),
+                geometry: encoded.geometry,
+            }),
+            _ => None,
+        })
     }
 
     pub fn push(&mut self, event: Event) -> Result<bool, String> {
@@ -916,7 +1004,10 @@ mod tests {
             assert!(!inbox.can_submit());
             inbox.release_reservation();
             let token = FrameToken::default();
-            inbox.in_flight = Some(token.clone());
+            inbox.in_flight = Some(Offer {
+                token: token.clone(),
+                geometry: 1,
+            });
             inbox.written(Offer { token, geometry: 1 }, Some(41));
             assert!(
                 !inbox.can_submit(),
@@ -1092,7 +1183,10 @@ mod tests {
     #[test]
     fn pointer_fifo_does_not_wait_for_output_and_resize_keeps_new_coordinates() {
         let mut inbox = Inbox::new(capabilities(), false);
-        inbox.in_flight = Some(FrameToken::default());
+        inbox.in_flight = Some(Offer {
+            token: FrameToken::default(),
+            geometry: 1,
+        });
         let pointer = |kind, x, y| {
             Event::SgrMouse(termina::event::SgrMouseEvent {
                 kind,
