@@ -189,6 +189,17 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     platform.paste("must not enter the old editor").unwrap();
     click(32.0);
     assert_eq!(copied(), "a你好😀");
+
+    // Losing terminal activation must also revoke text acceptance immediately;
+    // native field focus can remain ready to resume when activation returns.
+    platform.set_active(false).unwrap();
+    platform.pump_with_draw(false);
+    platform.paste("must not enter an inactive editor").unwrap();
+    platform.set_active(true).unwrap();
+    platform.pump_with_draw(false);
+    assert_eq!(copied(), "a你好😀");
+    platform.paste("恢复 active").unwrap();
+    assert_eq!(copied(), "恢复 active");
     assert_eq!(count.get(), initial_count);
     application.update(|cx| {
         window
