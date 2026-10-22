@@ -212,5 +212,11 @@
   "string_wizard@1.2.13": [
     "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/LICENSE",
     "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/THIRD-PARTY-LICENSE"
+  ],
+  "dwrote@0.11.5": [
+    {
+      "file": "scripts/rust/licenses/declared-mpl-2.0.txt",
+      "source": "https://github.com/servo/dwrote-rs/blob/5bbe910f7156213cdbaca4e1addfe85ea8b421ef/Cargo.toml ; https://www.mozilla.org/media/MPL/2.0/index.txt"
+    }
   ]
 }

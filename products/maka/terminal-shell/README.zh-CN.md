@@ -34,7 +34,7 @@ cargo run -p maka-cli
 
 安装后直接运行 `maka` 或 `maka terminal-shell`，终端界面与 CLI 使用同一个可执行文件。`--root` 指定 Root，`--session` 打开已有会话，`--help` 查看参数；相对 Root 路径按调用时的工作目录解析。
 
-启动时会协商图片协议和显示尺寸。在 Linux（含 WSL）上，终端提供所需能力时，整个界面通过 Kitty、Sixel 或 iTerm2 显示 GPU 渲染的像素帧；否则，同一个应用自动使用 Unicode 呈现。两种呈现方式都支持鼠标和键盘操作。
+启动时会协商图片协议和显示尺寸。在 Linux（含 WSL）、macOS 和 Windows 上，终端提供所需能力时，整个界面通过 Kitty、Sixel 或 iTerm2 显示 GPU 渲染的像素帧；否则，同一个应用自动使用 Unicode 呈现。两种呈现方式都支持鼠标和键盘操作。
 
 省略 `--session` 时，居中的输入区域会显示 **Choose workspace**，选择工作区后即可开始对话。添加 `--session SESSION_ID` 可直接打开已有会话。Host 必须提供 `agent`、`settings` 和 `receipts`。退出终端只关闭自己的连接，Host 按既有生命周期和空闲策略退出。
 
