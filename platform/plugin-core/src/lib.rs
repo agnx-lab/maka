@@ -85,8 +85,7 @@ pub fn validator(
     // JSON Schema is built without external file/network resolution features.
     #[derive(Default)]
     struct Checked {
-        schemas:
-            std::collections::HashMap<serde_json::Value, std::sync::Arc<jsonschema::Validator>>,
+        schemas: std::collections::HashMap<Schema, std::sync::Arc<jsonschema::Validator>>,
         bytes: usize,
     }
     static CHECKED: std::sync::OnceLock<std::sync::Mutex<Checked>> = std::sync::OnceLock::new();
@@ -101,16 +100,13 @@ pub fn validator(
     let size = serde_json::to_vec(value).expect("JSON schema value").len();
     const MAX_BYTES: usize = 4 * 1024 * 1024;
     if size <= MAX_BYTES {
+        let key = Schema::from(value.clone());
         let mut checked = checked.lock().expect("schema cache");
         if checked.bytes + size > MAX_BYTES || checked.schemas.len() >= 1024 {
             checked.schemas.clear();
             checked.bytes = 0;
         }
-        if checked
-            .schemas
-            .insert(value.clone(), validator.clone())
-            .is_none()
-        {
+        if checked.schemas.insert(key, validator.clone()).is_none() {
             checked.bytes += size;
         }
     }

@@ -118,6 +118,11 @@ impl AsRef<Value> for Schema {
         &self.0
     }
 }
+impl std::borrow::Borrow<Value> for Schema {
+    fn borrow(&self) -> &Value {
+        self.as_ref()
+    }
+}
 impl std::ops::Deref for Schema {
     type Target = Value;
     fn deref(&self) -> &Value {
