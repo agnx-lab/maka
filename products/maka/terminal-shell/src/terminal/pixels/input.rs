@@ -465,41 +465,310 @@ mod tests {
     }
 
     #[test]
-    fn completed_tail_waits_for_its_predecessor_and_the_native_writer_receipt() {
-        let mut inbox = Inbox::new(capabilities(), false);
-        let token = FrameToken::default();
-        inbox.frames.push_back(FrameJob {
-            geometry: 1,
-            work: FrameWork::Encoding(token.clone()),
+    fn serial_protocols_wait_for_the_predecessor_and_native_writer_receipt() {
+        for protocol in [Protocol::Kitty, Protocol::Iterm2] {
+            let mut caps = capabilities();
+            caps.protocol = Some(protocol);
+            let mut inbox = Inbox::new(caps, false);
+            let token = FrameToken::default();
+            inbox.frames.push_back(FrameJob {
+                geometry: 1,
+                work: FrameWork::Encoding(token.clone()),
+            });
+            inbox.frames.push_back(FrameJob {
+                geometry: 1,
+                work: FrameWork::Ready(encoded(1)),
+            });
+            assert!(
+                inbox.take_encoded().is_none(),
+                "the completed tail cannot pass the head"
+            );
+            assert_eq!(inbox.frames.len(), 2);
+            inbox.finished(&token, Some(encoded(1)));
+            let first = inbox.take_encoded().unwrap();
+            assert_eq!(inbox.frames.len(), 1);
+            assert!(inbox.take_encoded().is_none());
+            inbox.written(
+                Offer {
+                    token: first.frame.token(),
+                    geometry: 1,
+                },
+                None,
+            );
+            assert!(
+                inbox.take_encoded().is_none(),
+                "a flush cannot overwrite an unconsumed receipt"
+            );
+            let receipt = inbox.ready.take().unwrap();
+            inbox.presented(&receipt.token);
+            assert!(inbox.take_encoded().is_some());
+            assert!(inbox.frames.is_empty());
+        }
+    }
+
+    // Use authentic, ordered native tokens without widening FrameToken's API.
+    // Only completion order is controlled below; no scheduler API is replaced.
+    fn native_frames(count: usize) -> Vec<nsh_gpui_terminal::CandidateFrame> {
+        use gpui::{
+            AppContext, Application, Bounds, Context, IntoElement, Render, Styled, Window,
+            WindowBounds, WindowOptions, div, point, px, rgb, size,
+        };
+        use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+        struct Solid;
+        impl Render for Solid {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().bg(rgb(0xff0000))
+            }
+        }
+        let frames = Rc::new(RefCell::new(Vec::new()));
+        let received = frames.clone();
+        let platform = nsh_gpui_terminal::TerminalPlatform::new(
+            Box::new(gpui_wgpu::WgpuHeadlessRenderer::new().unwrap()),
+            Box::new(move |frame| received.borrow_mut().push(frame)),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let window = Rc::new(RefCell::new(None));
+        let created = window.clone();
+        let application = Application::with_platform(platform.clone()).run_embedded(move |cx| {
+            *created.borrow_mut() = Some(
+                cx.open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                            point(px(0.0), px(0.0)),
+                            size(px(32.0), px(12.0)),
+                        ))),
+                        inactive_frame_interval: None,
+                        ..Default::default()
+                    },
+                    |_, cx| cx.new(|_| Solid),
+                )
+                .unwrap(),
+            );
         });
-        inbox.frames.push_back(FrameJob {
-            geometry: 1,
-            work: FrameWork::Ready(encoded(1)),
-        });
+        let mut completed = Vec::new();
+        for _ in 0..count {
+            application.update(|cx| {
+                window
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .update(cx, |_, window, _| window.refresh())
+                    .unwrap();
+            });
+            assert!(platform.pump());
+            let frame = frames.borrow_mut().remove(0).complete().unwrap();
+            assert_eq!(&frame.pixels()[..4], &[255, 0, 0, 255]);
+            assert!(frames.borrow().is_empty());
+            completed.push(frame);
+        }
         assert!(
-            inbox.take_encoded().is_none(),
-            "the completed tail cannot pass the head"
+            completed
+                .windows(2)
+                .all(|pair| pair[0].token().sequence() < pair[1].token().sequence())
         );
-        assert_eq!(inbox.frames.len(), 2);
-        inbox.finished(&token, Some(encoded(1)));
-        let first = inbox.take_encoded().unwrap();
-        assert_eq!(inbox.frames.len(), 1);
-        assert!(inbox.take_encoded().is_none());
+        drop(application);
+        platform.shutdown();
+        completed
+    }
+
+    fn native_encoded(frame: &nsh_gpui_terminal::CandidateFrame, geometry: u64) -> Encoded {
+        use nsh_gpui_terminal::inline::{InlineFrame, InlineProtocol};
+        Encoded {
+            frame: WireFrame::Inline(
+                InlineFrame::encode(frame, InlineProtocol::Sixel, 4, 2, false, true).unwrap(),
+            ),
+            geometry,
+        }
+    }
+
+    fn encoding(inbox: &mut Inbox, frame: &nsh_gpui_terminal::CandidateFrame) {
+        assert!(inbox.reserve_frame());
+        inbox.frames.back_mut().unwrap().work = FrameWork::Encoding(frame.token());
+    }
+
+    fn consume_flush(inbox: &mut Inbox, encoded: &Encoded) {
+        let token = encoded.frame.token();
         inbox.written(
             Offer {
-                token: first.frame.token(),
-                geometry: 1,
+                token: token.clone(),
+                geometry: encoded.geometry,
             },
             None,
         );
         assert!(
             inbox.take_encoded().is_none(),
-            "a flush cannot overwrite an unconsumed receipt"
+            "native consumption owns the writer receipt"
         );
         let receipt = inbox.ready.take().unwrap();
+        assert_eq!(receipt.token, token);
+        inbox.published = Some(token);
         inbox.presented(&receipt.token);
-        assert!(inbox.take_encoded().is_some());
+    }
+
+    #[test]
+    fn sixel_latest_ready_bypasses_slow_work_and_never_publishes_an_unwritten_frame() {
+        let frames = native_frames(3);
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.frame_capacity = 5;
+        inbox.last_fully_written_geometry = Some(1);
+        for frame in &frames {
+            encoding(&mut inbox, frame);
+        }
+        inbox.finished(&frames[1].token(), Some(native_encoded(&frames[1], 1)));
+        let current = inbox
+            .take_encoded()
+            .expect("a complete scene must pass an older active codec");
+        assert_eq!(current.frame.token(), frames[1].token());
+        assert!(inbox.published.is_none());
+        assert_eq!(
+            inbox.frames.len(),
+            2,
+            "active workers keep their original capacity"
+        );
+
+        inbox.finished(&frames[0].token(), Some(native_encoded(&frames[0], 1)));
+        assert_eq!(
+            inbox.frames.len(),
+            1,
+            "late older completion cannot become another transaction"
+        );
+        assert!(inbox.take_encoded().is_none());
+        consume_flush(&mut inbox, &current);
+        assert_eq!(inbox.published, Some(frames[1].token()));
+
+        inbox.finished(&frames[2].token(), Some(native_encoded(&frames[2], 1)));
+        let final_scene = inbox
+            .take_encoded()
+            .expect("a final quiet scene must remain visible");
+        assert_eq!(final_scene.frame.token(), frames[2].token());
+        consume_flush(&mut inbox, &final_scene);
+        assert_eq!(inbox.published, Some(frames[2].token()));
         assert!(inbox.frames.is_empty());
+        assert!(inbox.in_flight.is_none());
+    }
+
+    #[test]
+    fn sixel_latest_ready_coalesces_behind_a_blocked_writer_without_starving_updates() {
+        let frames = native_frames(5);
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.frame_capacity = 5;
+        inbox.last_fully_written_geometry = Some(1);
+        for frame in &frames {
+            encoding(&mut inbox, frame);
+        }
+        inbox.finished(&frames[0].token(), Some(native_encoded(&frames[0], 1)));
+        let writing = inbox.take_encoded().unwrap();
+        for frame in &frames[1..] {
+            inbox.finished(&frame.token(), Some(native_encoded(frame, 1)));
+            assert!(
+                inbox.take_encoded().is_none(),
+                "a writing transaction is indivisible"
+            );
+            assert_eq!(
+                inbox
+                    .frames
+                    .iter()
+                    .filter(|job| matches!(job.work, FrameWork::Ready(_)))
+                    .count(),
+                1,
+                "only the newest completed scene waits behind the writer"
+            );
+        }
+        assert_eq!(inbox.frames.len(), 1);
+        assert!(inbox.published.is_none());
+        consume_flush(&mut inbox, &writing);
+        let latest = inbox.take_encoded().unwrap();
+        assert_eq!(latest.frame.token(), frames[4].token());
+        consume_flush(&mut inbox, &latest);
+
+        // An idle writer must start each ready scene even if a still newer
+        // codec has not finished. New arrivals cannot postpone that handoff.
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.frame_capacity = 5;
+        inbox.last_fully_written_geometry = Some(1);
+        for frame in &frames {
+            encoding(&mut inbox, frame);
+        }
+        for frame in &frames {
+            inbox.finished(&frame.token(), Some(native_encoded(frame, 1)));
+            let next = inbox
+                .take_encoded()
+                .expect("continuous updates cannot starve a ready scene");
+            assert_eq!(next.frame.token(), frame.token());
+            consume_flush(&mut inbox, &next);
+        }
+        assert_eq!(inbox.published, Some(frames[4].token()));
+        assert!(inbox.frames.is_empty());
+    }
+
+    #[test]
+    fn sixel_latest_ready_rejects_late_work_after_publication_and_resize() {
+        let frames = native_frames(3);
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.frame_capacity = 5;
+        inbox.last_fully_written_geometry = Some(1);
+        encoding(&mut inbox, &frames[0]);
+        encoding(&mut inbox, &frames[1]);
+        inbox.finished(&frames[1].token(), Some(native_encoded(&frames[1], 1)));
+        let current = inbox.take_encoded().unwrap();
+        consume_flush(&mut inbox, &current);
+        inbox.finished(&frames[0].token(), Some(native_encoded(&frames[0], 1)));
+        assert!(
+            inbox.frames.is_empty(),
+            "late work cannot roll back an already visible scene"
+        );
+        assert!(inbox.take_encoded().is_none());
+        assert_eq!(inbox.published, Some(frames[1].token()));
+
+        encoding(&mut inbox, &frames[2]);
+        inbox
+            .push(Event::WindowResized(capabilities().size))
+            .unwrap();
+        inbox.resize.take();
+        assert_eq!(
+            inbox.frames.len(),
+            1,
+            "the unfinished old task retains its original slot"
+        );
+        assert!(
+            inbox.can_submit(),
+            "spare capacity can admit the new geometry's first frame"
+        );
+        inbox.finished(&frames[2].token(), Some(native_encoded(&frames[2], 1)));
+        assert!(inbox.frames.is_empty());
+        assert!(inbox.published.is_none());
+        assert!(inbox.can_submit());
+        assert!(inbox.reserve_frame());
+        assert!(
+            !inbox.can_submit(),
+            "new geometry must first complete a clean whole flush"
+        );
+        inbox.release_reservation();
+        assert!(inbox.frames.is_empty());
+        assert!(inbox.ready.is_none());
+
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.frame_capacity = 5;
+        inbox.last_fully_written_geometry = Some(1);
+        encoding(&mut inbox, &frames[0]);
+        encoding(&mut inbox, &frames[2]);
+        inbox.finished(&frames[2].token(), Some(native_encoded(&frames[2], 1)));
+        inbox.finished(&frames[0].token(), None);
+        assert_eq!(
+            inbox.frames.len(),
+            1,
+            "failure/cancel releases only the finished worker's slot"
+        );
+        assert!(
+            inbox.ready.is_none(),
+            "a failed worker cannot manufacture a flush receipt"
+        );
+        let surviving = inbox.take_encoded().unwrap();
+        assert_eq!(surviving.frame.token(), frames[2].token());
+        consume_flush(&mut inbox, &surviving);
+        assert_eq!(inbox.published, Some(frames[2].token()));
     }
 
     #[test]
