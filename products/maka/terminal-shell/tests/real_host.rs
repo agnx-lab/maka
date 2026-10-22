@@ -628,7 +628,9 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(initial_global["path"], instruction_path.to_str().unwrap());
         assert_eq!(initial_global["content"], initial_instructions);
         activate(&mut view, "Edit global instructions").await;
-        wait_view(&mut view, |screen| screen.contains(instruction_path.to_str().unwrap())).await;
+        // The complete native text remains one label even when a long Host
+        // path wraps across multiple terminal rows.
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.label == instruction_path.to_str().unwrap())).await;
         assert_input(&mut view, "Global instructions", initial_instructions).await;
         editable(&mut view, "Global instructions").await;
         let global_editor = view.surface().focused().unwrap();
