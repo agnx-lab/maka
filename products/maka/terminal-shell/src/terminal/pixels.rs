@@ -73,11 +73,11 @@ pub(super) fn select(
                 let (events, resize) = pixels.into_startup();
                 for event in events {
                     if let Some(event) = super::adapter::event(event) {
-                        state.push(event, 0);
+                        state.push(event);
                     }
                 }
                 if let Some(size) = resize {
-                    state.push(crossterm::event::Event::Resize(size.cols, size.rows), 0);
+                    state.push(crossterm::event::Event::Resize(size.cols, size.rows));
                 }
             }
             return Ok(decision);
@@ -230,14 +230,11 @@ pub(super) fn run(
                                 let (events, resize) = pixels.into_startup();
                                 for event in events {
                                     if let Some(event) = super::adapter::event(event) {
-                                        state.push(event, 0);
+                                        state.push(event);
                                     }
                                 }
                                 if let Some(size) = resize {
-                                    state.push(
-                                        crossterm::event::Event::Resize(size.cols, size.rows),
-                                        0,
-                                    );
+                                    state.push(crossterm::event::Event::Resize(size.cols, size.rows));
                                 }
                             }
                         }
