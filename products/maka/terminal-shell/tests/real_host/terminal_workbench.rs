@@ -156,7 +156,7 @@ async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening
 
         support::click_button(&mut view, "Browse workspace files").await;
         support::click_button(&mut view, "Show conversation terminals").await;
-        support::click_button(&mut view, &format!("Open terminal: {command}")).await;
+        support::click_button(&mut view, &format!("Open terminal {command}")).await;
         wait_view(&mut view, |screen| screen.contains("中文终端")).await;
         assert_colored_output(&view);
         let reopened = client

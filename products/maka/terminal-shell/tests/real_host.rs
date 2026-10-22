@@ -2368,7 +2368,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let composer = view.surface().focused().unwrap();
         support::click_label(&mut view, "Browse workspace files");
         wait_view(&mut view, |screen| screen.contains("000-preview.txt") && screen.contains("001-scene.data") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
-        support::click_label(&mut view, "file: 000-preview.txt");
+        support::click_label(&mut view, "File: 000-preview.txt");
         let first = wait_view_state(&mut view, |view, screen| screen.contains("AFTER_CURRENT_EDIT") && screen.contains("Captured version") && !screen.contains("Reading current file…") && view.accessibility_snapshot().iter().any(|node| node.label == long_line && node.frame.size.height.0 > 16.0)).await;
         assert!(!first.contains("BEFORE_CURRENT_EDIT"));
         // One original line stays one native Text, including a combining
@@ -2484,7 +2484,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
         support::click_label(&mut view, "Browse workspace files");
         wait_view(&mut view, |screen| screen.contains("001-scene.data") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
-        support::click_label(&mut view, "file: 001-scene.data");
+        support::click_label(&mut view, "File: 001-scene.data");
         let image = wait_view(&mut view, |screen| screen.contains("64 × 48 · Captured image") && screen.contains('▀')).await;
         evidence("workspace-current-image-dialog", &image);
         support::evidence_cells("workspace-current-image-dialog", &view);
@@ -2533,10 +2533,10 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.expect("native file scrolling did not load the second Host page");
-        let tail_y = view.accessibility_snapshot().into_iter().find(|node| node.label == "file: page-139.txt").unwrap().frame.origin.y.0;
+        let tail_y = view.accessibility_snapshot().into_iter().find(|node| node.label == "File: page-139.txt").unwrap().frame.origin.y.0;
         std::fs::rename(workspace.join("page-139.txt"), workspace.join("page-139v2.txt")).unwrap();
         wait_view(&mut view, |screen| screen.contains("page-139v2.txt")).await;
-        let refreshed_y = view.accessibility_snapshot().into_iter().find(|node| node.label == "file: page-139v2.txt").unwrap().frame.origin.y.0;
+        let refreshed_y = view.accessibility_snapshot().into_iter().find(|node| node.label == "File: page-139v2.txt").unwrap().frame.origin.y.0;
         assert_eq!(tail_y, refreshed_y, "a watch refresh discarded the already requested prefix");
         support::evidence_cells("workspace-files-automatic-pagination-and-watch", &view);
         support::click_button(&mut view, "Close workspace preview").await;
