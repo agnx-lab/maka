@@ -21,7 +21,6 @@ use std::collections::HashSet;
 use maka_agent_facts::configuration::ConnectionEffectFailureClass;
 use maka_agent_facts::configuration::ModelCapabilities;
 use maka_agent_facts::configuration::ModelInfo;
-use maka_agent_facts::execution::ThinkingLevel;
 use serde_json::Value;
 
 type Failure = ConnectionEffectFailureClass;
@@ -87,6 +86,11 @@ fn model_info(provider: &str, row: &Value) -> Result<Option<ModelInfo>, Failure>
     else {
         return Ok(None);
     };
+    if provider == "openrouter" {
+        return crate::catalog::openrouter::model(row)
+            .map(Some)
+            .map_err(|_| Failure::InvalidResponse);
+    }
     let input = optional_array(row.get("input_modalities"))?;
     let output = optional_array(row.get("output_modalities"))?;
     let tags = optional_array(row.get("tags"))?;
@@ -145,88 +149,7 @@ fn model_info(provider: &str, row: &Value) -> Result<Option<ModelInfo>, Failure>
     if capabilities != ModelCapabilities::default() {
         model.capabilities = Some(capabilities);
     }
-    if provider == "openrouter" {
-        openrouter_reasoning(row, &mut model)?;
-    }
     Ok(Some(model))
-}
-
-fn openrouter_reasoning(row: &Value, model: &mut ModelInfo) -> Result<(), Failure> {
-    // ModelReasoning is absent for non-reasoners and dynamic routers. Parameter
-    // support can establish reasoning support, but never an effort allowlist.
-    let reasoning = match row.get("reasoning") {
-        None | Some(Value::Null) => None,
-        Some(Value::Object(reasoning)) => Some(reasoning),
-        _ => return Err(Failure::InvalidResponse),
-    };
-    if reasoning.is_some() {
-        model.capabilities.get_or_insert_default().reasoning = Some(true);
-    } else if let Some(parameters) = row.get("supported_parameters") {
-        let parameters = optional_array(Some(parameters))?;
-        model.capabilities.get_or_insert_default().reasoning =
-            Some(contains(parameters, "reasoning") || contains(parameters, "reasoning_effort"));
-    }
-    // An omitted control is not permission to resurrect bundled effort guesses.
-    let mut levels = vec![];
-    if let Some(reasoning) = reasoning {
-        let mandatory = reasoning.get("mandatory").and_then(Value::as_bool) == Some(true);
-        match reasoning.get("supported_efforts") {
-            None => {}
-            // The official null allowlist accepts every gateway effort value.
-            Some(Value::Null) => levels.extend([
-                ThinkingLevel::Max,
-                ThinkingLevel::Xhigh,
-                ThinkingLevel::High,
-                ThinkingLevel::Medium,
-                ThinkingLevel::Low,
-                ThinkingLevel::Minimal,
-                ThinkingLevel::Off,
-            ]),
-            Some(Value::Array(efforts)) => {
-                for effort in efforts {
-                    if let Some(level) = effort.as_str().and_then(openrouter_effort)
-                        && !levels.contains(&level)
-                    {
-                        levels.push(level);
-                    }
-                }
-            }
-            _ => return Err(Failure::InvalidResponse),
-        }
-        if mandatory {
-            levels.retain(|level| *level != ThinkingLevel::Off);
-        }
-        let enabled = reasoning.get("default_enabled").and_then(Value::as_bool);
-        model.default_thinking_level = if enabled == Some(false) && !mandatory {
-            Some(ThinkingLevel::Off)
-        } else if enabled == Some(true) || mandatory {
-            // default_effort describes the effort *when enabled*. Without an
-            // enabled-state fact it cannot establish the model's initial effort.
-            reasoning
-                .get("default_effort")
-                .and_then(Value::as_str)
-                .and_then(openrouter_effort)
-                .filter(|level| *level != ThinkingLevel::Off)
-        } else {
-            None
-        }
-        .filter(|level| levels.contains(level));
-    }
-    model.thinking_levels = Some(levels);
-    Ok(())
-}
-
-fn openrouter_effort(effort: &str) -> Option<ThinkingLevel> {
-    Some(match effort {
-        "none" => ThinkingLevel::Off,
-        "minimal" => ThinkingLevel::Minimal,
-        "low" => ThinkingLevel::Low,
-        "medium" => ThinkingLevel::Medium,
-        "high" => ThinkingLevel::High,
-        "xhigh" => ThinkingLevel::Xhigh,
-        "max" => ThinkingLevel::Max,
-        _ => return None,
-    })
 }
 
 fn token_limit(value: &Value) -> Option<u64> {

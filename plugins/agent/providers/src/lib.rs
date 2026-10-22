@@ -19,6 +19,7 @@
 
 //! Compiled model providers with explicit definitions for native service owners.
 pub mod api;
+pub mod catalog;
 pub mod codex;
 mod facts;
 
