@@ -42,6 +42,12 @@ node scripts/rust/notices.mjs check
 
 Review the generated inventory and license texts. [notices-sources.json](notices-sources.json) records reviewed upstream exceptions. Release assembly also includes notices from the actual V8 build and Rust standard library. The TSV inventory does not replace full license texts.
 
+For offline comparisons of the production Rust and TypeScript Hosts on Linux,
+use [host-comparison](host-comparison/README.md). It drives real public clients
+against a loopback SSE fixture, verifies canonical output, and retains per-process
+and system telemetry. Background-agent capacity probes distinguish requested
+sessions, actual active executions, confirmed completions and unknown outcomes.
+
 To compare direct TUI startup on macOS/Linux, build and retain each executable,
 then run:
 
