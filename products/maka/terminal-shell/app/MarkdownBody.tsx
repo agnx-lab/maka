@@ -36,7 +36,11 @@ const sameInput = (left: Input | null, right: Input | null) =>
     left.field === right.field &&
     left.source === right.source);
 
-export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
+export function MarkdownBody(props: {
+  row: () => Row;
+  compact?: boolean;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+}) {
   const projection = signal<Projection | null>(null);
   const failure = signal<{ input: Input; message: UiText } | null>(null);
   let wanted: Input | null = null;
@@ -127,7 +131,9 @@ export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
     >
       <View style={{ gap: props.compact ? 6 : 16 }}>
         <Each of={blocks() ?? []} key={(block: MarkdownBlock) => block.key}>
-          {(block) => <MarkdownBlockView block={block} compact={props.compact} />}
+          {(block) => (
+            <MarkdownBlockView block={block} compact={props.compact} openLink={props.openLink} />
+          )}
         </Each>
       </View>
     </If>

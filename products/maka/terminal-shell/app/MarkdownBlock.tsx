@@ -19,6 +19,7 @@
 
 import { tr } from './locale';
 import { cleanup, computed, inputAction, Scroll, signal, Text, View } from 'nsh';
+import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
 import { platform, windowSize } from 'nsh/device';
@@ -33,14 +34,23 @@ import {
 } from './ui';
 import { Icon } from './Icon';
 
-export function MarkdownBlockView(props: { block: () => MarkdownBlock; compact?: boolean }) {
+export function MarkdownBlockView(props: {
+  block: () => MarkdownBlock;
+  compact?: boolean;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+}) {
   const block = props.block;
   const container = () =>
     block().kind === 'code' || block().marker !== '' || block().quote > 0 || block().indent > 0;
   const inset = () =>
     Math.min((block().indent + Math.max(0, block().quote - 1)) * 16, windowSize().width / 4);
   return (
-    <If when={container()} else={<MarkdownBlockContent block={block} compact={props.compact} />}>
+    <If
+      when={container()}
+      else={
+        <MarkdownBlockContent block={block} compact={props.compact} openLink={props.openLink} />
+      }
+    >
       <View
         style={{
           flexDirection: 'row',
@@ -58,14 +68,14 @@ export function MarkdownBlockView(props: { block: () => MarkdownBlock; compact?:
           </Text>
         </If>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <MarkdownBlockContent block={block} compact={props.compact} />
+          <MarkdownBlockContent block={block} compact={props.compact} openLink={props.openLink} />
         </View>
       </View>
     </If>
   );
 }
 
-function InlineRuns(props: { runs(): MarkdownRun[]; compact?: boolean }) {
+function StyledRuns(props: { runs(): MarkdownRun[]; compact?: boolean }) {
   return (
     <Each of={props.runs()} key={(run) => run.key}>
       {(run) => (
@@ -86,7 +96,77 @@ function InlineRuns(props: { runs(): MarkdownRun[]; compact?: boolean }) {
   );
 }
 
-function MarkdownBlockContent(props: { block: () => MarkdownBlock; compact?: boolean }) {
+function InlineRuns(props: {
+  runs(): MarkdownRun[];
+  compact?: boolean;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+}) {
+  const groups = computed(() => {
+    const result: { key: string; link: MarkdownRun['link']; runs: MarkdownRun[] }[] = [];
+    for (const run of props.runs()) {
+      const previous = result[result.length - 1];
+      if (previous && previous.link?.key === run.link?.key) previous.runs.push(run);
+      else result.push({ key: run.key, link: run.link, runs: [run] });
+    }
+    return result;
+  });
+  let alive = true;
+  cleanup(() => {
+    alive = false;
+  });
+  return (
+    <Each of={groups()} key={(group) => group.key}>
+      {(group) => {
+        let node: YNode | undefined;
+        let mounted = true;
+        cleanup(() => {
+          mounted = false;
+        });
+        const activate = async (request: { key: string; target: string }) => {
+          const owns = () =>
+            alive &&
+            mounted &&
+            groups().some(
+              (current) => current.key === request.key && current.link?.target === request.target,
+            );
+          if (owns())
+            await props.openLink(request.target, () => {
+              if (!owns() || !node) return false;
+              node.focus();
+              return true;
+            });
+        };
+        return (
+          <If
+            when={group().link}
+            else={<StyledRuns runs={() => group().runs} compact={props.compact} />}
+          >
+            <Text
+              ref={(value) => {
+                node = value;
+              }}
+              accessibilityRole="link"
+              accessibilityLabel={group()
+                .runs.map((run) => run.text)
+                .join('')}
+              focusable
+              onPress={inputAction(activate, { key: group().key, target: group().link!.target })}
+              style={{ color: C.accentHover, textDecorationLine: 'underline' }}
+            >
+              <StyledRuns runs={() => group().runs} compact={props.compact} />
+            </Text>
+          </If>
+        );
+      }}
+    </Each>
+  );
+}
+
+function MarkdownBlockContent(props: {
+  block: () => MarkdownBlock;
+  compact?: boolean;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+}) {
   const block = props.block;
   return (
     <If
@@ -136,7 +216,11 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock; compact?: boo
                   fontWeight: block().kind === 'heading' ? (props.compact ? '600' : '700') : '400',
                 }}
               >
-                <InlineRuns runs={() => block().runs} compact={props.compact} />
+                <InlineRuns
+                  runs={() => block().runs}
+                  compact={props.compact}
+                  openLink={props.openLink}
+                />
               </Text>
             </If>
           }
@@ -145,12 +229,16 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock; compact?: boo
         </If>
       }
     >
-      <TableBlock table={() => block().table!} compact={props.compact} />
+      <TableBlock table={() => block().table!} compact={props.compact} openLink={props.openLink} />
     </If>
   );
 }
 
-function TableBlock(props: { table(): MarkdownTable; compact?: boolean }) {
+function TableBlock(props: {
+  table(): MarkdownTable;
+  compact?: boolean;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
+}) {
   const cells = computed(() => {
     const table = props.table();
     return table.rows.flatMap((row, rowIndex) =>
@@ -200,7 +288,11 @@ function TableBlock(props: { table(): MarkdownTable; compact?: boolean }) {
                   textAlign: cell().align,
                 }}
               >
-                <InlineRuns runs={() => cell().runs} compact={props.compact} />
+                <InlineRuns
+                  runs={() => cell().runs}
+                  compact={props.compact}
+                  openLink={props.openLink}
+                />
               </Text>
             </View>
           )}

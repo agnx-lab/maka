@@ -47,6 +47,7 @@ export function MessageRow({
   through,
   viewState,
   previewImage,
+  openLink,
   onExpand,
   ownerKey,
   toolMaxHeight,
@@ -58,6 +59,7 @@ export function MessageRow({
   through: () => number;
   viewState?: MessageViewState;
   previewImage(image: ImagePreview): void;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   onExpand?(key: string): void;
   ownerKey?: () => string;
   toolMaxHeight: () => number;
@@ -117,7 +119,7 @@ export function MessageRow({
                               </Text>
                             }
                           >
-                            <MarkdownBody row={row} />
+                            <MarkdownBody row={row} openLink={openLink} />
                           </If>
                         }
                       >
@@ -258,7 +260,10 @@ export function MessageRow({
                               paddingVertical: 4,
                             }}
                           >
-                            <If when={sourceMode()} else={<MarkdownBody row={row} compact />}>
+                            <If
+                              when={sourceMode()}
+                              else={<MarkdownBody row={row} openLink={openLink} compact />}
+                            >
                               <Text selectable style={{ ...secondaryTextStyle, color: C.muted }}>
                                 {text()}
                               </Text>

@@ -354,6 +354,18 @@ function App() {
     if (closeCommand(context) && context.sessionId)
       resources.openFiles({ sessionId: context.sessionId });
   };
+  const openLink = async (sessionId: string, target: string, restoreFocus: () => boolean) => {
+    if (!alive || selected() !== sessionId || overlay()) return;
+    try {
+      const link = await host.openLink(target);
+      if (link && alive && selected() === sessionId && !overlay()) {
+        resources.openFile({ sessionId, ...link, title: host.pathLabel(link.path) }, restoreFocus);
+      }
+    } catch (reason) {
+      if (alive && selected() === sessionId)
+        report(new UiError('Could not open link: {reason}', { reason: errorText(reason) }));
+    }
+  };
   const commandLatest = (context: CommandContext & { turnId: string | null }) => {
     if (closeCommand(context)) handle()?.jumpLatest(context.turnId);
   };
@@ -627,6 +639,7 @@ function App() {
               files={inputAction(resources.openFiles, { sessionId: id() })}
               filesOpener={(node) => resources.attachOpener(id(), node)}
               previewImage={previewImage}
+              openLink={(target, restoreFocus) => openLink(id(), target, restoreFocus)}
               focusComposer={focusComposer}
               stopAction={stopAction}
               attach={(next) => {

@@ -21,6 +21,7 @@
 
 use ::markdown::{ParseOptions, mdast::AlignKind, mdast::Node};
 use nsh_core::ui::prelude::*;
+use std::collections::BTreeMap;
 
 /// Inline content; unsupported constructs retain their complete source spelling.
 #[derive(Clone, Debug, PartialEq, JsObject)]
@@ -31,6 +32,14 @@ pub struct MarkdownRun {
     pub emphasis: bool,
     pub strike: bool,
     pub code: bool,
+    pub link: Option<MarkdownLink>,
+}
+
+/// One logical link, including all of its separately styled inline runs.
+#[derive(Clone, Debug, PartialEq, JsObject)]
+pub struct MarkdownLink {
+    pub key: String,
+    pub target: String,
 }
 
 /// Rendering supported by the terminal application's rich text primitives.
@@ -113,7 +122,9 @@ fn parse_source(source: &str) -> Result<Vec<MarkdownBlock>, String> {
     let mut output = Presentation {
         source,
         blocks: Vec::new(),
+        references: BTreeMap::new(),
     };
+    output.collect_references(&root);
     output.visit(&root, Context::default());
     Ok(output.blocks)
 }
@@ -135,9 +146,23 @@ struct Marks {
 struct Presentation<'a> {
     source: &'a str,
     blocks: Vec<MarkdownBlock>,
+    references: BTreeMap<String, String>,
 }
 
 impl Presentation<'_> {
+    fn collect_references(&mut self, node: &Node) {
+        if let Node::Definition(definition) = node {
+            self.references
+                .entry(definition.identifier.clone())
+                .or_insert_with(|| definition.url.clone());
+        }
+        if let Some(children) = node.children() {
+            for child in children {
+                self.collect_references(child);
+            }
+        }
+    }
+
     fn visit(&mut self, node: &Node, context: Context) {
         match node {
             Node::Root(root) => {
@@ -242,7 +267,14 @@ impl Presentation<'_> {
                         };
                         let mut runs = Vec::new();
                         for child in &cell.children {
-                            inline(self.source, child, Marks::default(), &mut runs);
+                            inline(
+                                self.source,
+                                &self.references,
+                                child,
+                                Marks::default(),
+                                None,
+                                &mut runs,
+                            );
                         }
                         cells.push(MarkdownTableCell {
                             key: format!("table-cell:{}", start(cell_node)),
@@ -269,8 +301,9 @@ impl Presentation<'_> {
                 block.text = raw(self.source, node).into();
                 self.blocks.push(block);
             }
-            // HTML, images, links, footnotes and definitions have no
-            // terminal activation or lossy "text content" representation.
+            // Link definitions are metadata, not rendered document content.
+            Node::Definition(_) => {}
+            // HTML, images and footnotes keep their complete source spelling.
             _ => {
                 let mut block = self.block(node, MarkdownBlockKind::Literal, context);
                 block.text = raw(self.source, node).into();
@@ -304,7 +337,14 @@ impl Presentation<'_> {
     ) {
         let mut block = self.block(node, kind, context);
         for child in children {
-            inline(self.source, child, Marks::default(), &mut block.runs);
+            inline(
+                self.source,
+                &self.references,
+                child,
+                Marks::default(),
+                None,
+                &mut block.runs,
+            );
         }
         block.level = level;
         self.blocks.push(block);
@@ -319,7 +359,31 @@ fn begins_with_list(node: Option<&Node>) -> bool {
     }
 }
 
-fn inline(source: &str, node: &Node, marks: Marks, runs: &mut Vec<MarkdownRun>) {
+fn inline(
+    source: &str,
+    references: &BTreeMap<String, String>,
+    node: &Node,
+    marks: Marks,
+    link: Option<&MarkdownLink>,
+    runs: &mut Vec<MarkdownRun>,
+) {
+    let linked = match node {
+        Node::Link(value) => Some((&value.children, &value.url)),
+        Node::LinkReference(value) => references
+            .get(&value.identifier)
+            .map(|target| (&value.children, target)),
+        _ => None,
+    };
+    if let Some((children, target)) = linked {
+        let target = MarkdownLink {
+            key: format!("link:{}", start(node)),
+            target: target.clone(),
+        };
+        for child in children {
+            inline(source, references, child, marks, Some(&target), runs);
+        }
+        return;
+    }
     let children = match node {
         Node::Strong(strong) => Some((
             &strong.children,
@@ -346,7 +410,7 @@ fn inline(source: &str, node: &Node, marks: Marks, runs: &mut Vec<MarkdownRun>) 
     };
     if let Some((children, marks)) = children {
         for child in children {
-            inline(source, child, marks, runs);
+            inline(source, references, child, marks, link, runs);
         }
         return;
     }
@@ -370,6 +434,7 @@ fn inline(source: &str, node: &Node, marks: Marks, runs: &mut Vec<MarkdownRun>) 
         && previous.emphasis == marks.emphasis
         && previous.strike == marks.strike
         && previous.code == marks.code
+        && previous.link.as_ref() == link
     {
         previous.text.push_str(text);
         return;
@@ -381,6 +446,7 @@ fn inline(source: &str, node: &Node, marks: Marks, runs: &mut Vec<MarkdownRun>) 
         emphasis: marks.emphasis,
         strike: marks.strike,
         code: marks.code,
+        link: link.cloned(),
     });
 }
 
@@ -566,16 +632,60 @@ mod tests {
     }
 
     #[test]
+    fn links_keep_their_own_identity_targets_and_nested_styles() {
+        let source = "[plain **粗体** *斜体*](https://example.test/a)[next](https://example.test/a) [文档][Docs]\n\n[docs]: ./报告%20原文.txt\n";
+        let blocks = parse_source(source).unwrap();
+        assert_eq!(
+            blocks.len(),
+            1,
+            "reference definitions are not visible prose"
+        );
+        let runs = &blocks[0].runs;
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "plain 粗体 斜体next 文档"
+        );
+        let first = runs[0].link.as_ref().unwrap();
+        assert_eq!(first.target, "https://example.test/a");
+        assert!(
+            runs.iter()
+                .any(|run| run.strong && run.text == "粗体" && run.link.as_ref() == Some(first))
+        );
+        assert!(
+            runs.iter()
+                .any(|run| run.emphasis && run.text == "斜体" && run.link.as_ref() == Some(first))
+        );
+        let next = runs
+            .iter()
+            .find(|run| run.text == "next")
+            .unwrap()
+            .link
+            .as_ref()
+            .unwrap();
+        assert_eq!(next.target, first.target);
+        assert_ne!(
+            next.key, first.key,
+            "adjacent links to one URL remain distinct keyboard targets"
+        );
+        assert_eq!(
+            runs.last().unwrap().link.as_ref().unwrap().target,
+            "./报告%20原文.txt"
+        );
+    }
+
+    #[test]
     fn unsupported_constructs_keep_complete_source_without_activation() {
         let source = "[label](https://example.test/target) ![alt](image.png) [^note]\n\n| left | right |\n| --- | --- |\n| 一 | 二 |\n\n<div>HTML</div>\n\n[id]: https://example.test/definition\n\n[^note]: footnote\n\n$E = mc^2$ \\(x\\) \\[y\\]";
         let blocks = parse_source(source).unwrap();
+        assert_eq!(blocks[0].runs[0].text, "label");
+        assert_eq!(blocks[0].runs[1].text, " ![alt](image.png) [^note]");
         assert_eq!(
-            blocks[0].runs[0].text,
-            "[label](https://example.test/target) ![alt](image.png) [^note]"
+            blocks[0].runs[0].link.as_ref().unwrap().target,
+            "https://example.test/target"
         );
+        assert!(blocks[0].runs[1].link.is_none());
         for original in [
             "<div>HTML</div>",
-            "[id]: https://example.test/definition",
             // The footnote container includes its final line ending.
             "[^note]: footnote\n",
         ] {

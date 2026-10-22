@@ -115,7 +115,8 @@ export function createResources(options: { selected(): string | null; blocked():
     reveal();
     focusRequest.set(true);
   };
-  const openFile = (target: WorkspaceFileTarget) =>
+  const openFile = (target: WorkspaceFileTarget, restoreFocus?: () => boolean) => {
+    if (!admits(target.sessionId)) return;
     open(target.sessionId, `file:${target.path.bytesBase64}`, (instance) => ({
       kind: 'file',
       instance,
@@ -124,6 +125,11 @@ export function createResources(options: { selected(): string | null; blocked():
       title: target.title,
       model: createCurrentFile(target),
     }));
+    if (restoreFocus) {
+      const fallback = headerOpener(target.sessionId);
+      opener = () => restoreFocus() || fallback();
+    }
+  };
   const openDiff = (target: CurrentDiffTarget) =>
     open(target.sessionId, `diff:${target.area}:${target.path.bytesBase64}`, (instance) => ({
       kind: 'diff',
@@ -275,6 +281,7 @@ export function createResources(options: { selected(): string | null; blocked():
     terminals,
     inventory,
     openFiles,
+    openFile,
     openImage,
     openImageViewer,
     imageViewer,

@@ -21,6 +21,7 @@
 
 mod assets;
 mod files;
+mod links;
 mod mutation;
 mod settings;
 mod terminal;
@@ -195,6 +196,18 @@ fn require_contract(endpoint: &str, method: &str, actual: &Contract) -> Result<(
 
 #[class]
 impl ApplicationHost {
+    /// Hand an HTTP(S) link to this client's system browser, or return an exact
+    /// workspace-relative path and parent for the original session's reader.
+    /// This does not read files or execute anything on the connected Host.
+    pub async fn open_link(
+        this: Instance<Self>,
+        target: String,
+    ) -> Result<Option<links::WorkspaceLink>, String> {
+        let owner = this.owner.clone();
+        drop(this);
+        links::open(owner, target).await
+    }
+
     /// Display only. Keep the original opaque WorkspacePath for every Host call.
     pub fn path_label(&self, path: JsonValue) -> Result<String, String> {
         let path: maka_agent_api::contract::WorkspacePath =

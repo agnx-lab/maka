@@ -175,6 +175,7 @@ function ActivityLog(props: {
   through: () => number;
   viewport: () => { width: number; height: number };
   previewImage(image: ImagePreview): void;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   reading(away: boolean): void;
   reveal(): void;
 }) {
@@ -350,6 +351,7 @@ function ActivityLog(props: {
                       sessionId={props.sessionId}
                       through={props.through}
                       previewImage={props.previewImage}
+                      openLink={props.openLink}
                       onExpand={(key) => {
                         if (!alive || !ownList) return;
                         state.following.set(false);
@@ -391,6 +393,7 @@ export function TurnPanel(props: {
   activity: () => LiveActivity;
   reveal(): void;
   previewImage(image: ImagePreview): void;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   reading(away: boolean): void;
 }) {
   const active = () =>

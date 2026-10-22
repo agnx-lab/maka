@@ -168,6 +168,15 @@ async function subscribe(
 // Local journal methods serialize these actual Rust DTOs. Their receipt business
 // values remain unknown and continue through the application's existing guards.
 export const host = {
+  async openLink(target: string) {
+    const link = await nativeHost.openLink(target);
+    return link === null
+      ? null
+      : {
+          path: { bytesBase64: link.path },
+          parent: link.parent === null ? null : { bytesBase64: link.parent },
+        };
+  },
   query,
   subscribe,
   get initialSession() {

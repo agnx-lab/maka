@@ -29,6 +29,8 @@ mod final_actions;
 mod interactions;
 #[path = "real_host/keyboard.rs"]
 mod keyboard;
+#[path = "real_host/markdown_links.rs"]
+mod markdown_links;
 #[path = "real_host/oauth.rs"]
 mod oauth;
 #[path = "real_host/plugin_settings.rs"]

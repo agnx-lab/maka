@@ -78,6 +78,11 @@ export const conversationMessages = {
     '已允許存取 · {scope}',
   ],
   'Access denied': msg_permissionDenied,
+  'Could not open link: {reason}': [
+    'Could not open link: {reason}',
+    '无法打开链接：{reason}',
+    '無法開啟連結：{reason}',
+  ],
   'Action feedback': ['Action feedback', '操作反馈', '操作回饋'],
   Activity: ['Activity', '活动', '活動'],
   'Add connections, API keys and models': [

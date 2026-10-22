@@ -102,6 +102,7 @@ type ConversationProps = {
   files(): void;
   filesOpener(node: YNode): void;
   previewImage(image: ImagePreview): void;
+  openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   attach(handle: ConversationHandle): void;
   detach(handle: ConversationHandle): void;
   focusComposer(): void;
@@ -1808,6 +1809,7 @@ export function Conversation(props: ConversationProps) {
                         sessionId={sessionId}
                         through={() => latestKnown}
                         previewImage={props.previewImage}
+                        openLink={props.openLink}
                         reveal={reveal}
                         activity={activity}
                         viewport={readingSize}
@@ -1840,6 +1842,7 @@ export function Conversation(props: ConversationProps) {
                         sessionId={sessionId}
                         through={() => latestKnown}
                         previewImage={props.previewImage}
+                        openLink={props.openLink}
                         onExpand={reveal}
                         onToolReading={(key) => {
                           if (
