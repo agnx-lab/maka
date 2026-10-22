@@ -46,36 +46,36 @@ impl Owner {
                 session: Box::new(crate::service::summary(self, session)),
             });
         }
-        let public_guard = self.catalog.snapshot.read().await;
-        let snapshot = public_guard
-            .as_ref()
-            .map_err(|_| "agent_configuration_unavailable")?
-            .clone();
         let available = match &input.backend {
             BackendPreference::Model {
                 connection_id,
                 model_id,
                 ..
-            } => self
-                .configuration
-                .catalog()
-                .await
-                .map_err(|_| "agent_configuration_unavailable")?
-                .connections
-                .iter()
-                .any(|row| {
-                    row.connection_id == *connection_id
-                        && row.enabled
-                        && row.enabled_model_ids.contains(model_id)
-                        && maka_providers::definition(&row.provider, snapshot.clone()).is_ok()
-                }),
+            } => {
+                let public_guard = self.catalog.snapshot.read().await;
+                let snapshot = public_guard
+                    .as_ref()
+                    .map_err(|_| "agent_configuration_unavailable")?
+                    .clone();
+                self.configuration
+                    .catalog()
+                    .await
+                    .map_err(|_| "agent_configuration_unavailable")?
+                    .connections
+                    .iter()
+                    .any(|row| {
+                        row.connection_id == *connection_id
+                            && row.enabled
+                            && row.enabled_model_ids.contains(model_id)
+                            && maka_providers::definition(&row.provider, snapshot.clone()).is_ok()
+                    })
+            }
             BackendPreference::Executor { selection } => self
                 .settings
                 .executors
                 .iter()
                 .any(|entry| entry.name == selection.executor),
         };
-        drop(public_guard);
         if !available {
             return Ok(MetadataResult::Rejected {
                 reason: Rejection::ToolsUnavailable,
