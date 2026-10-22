@@ -23,6 +23,9 @@
     "useIgnoreFile": true
   },
   "files": {
+    // The generated service contracts are 1.8 MB; accept the same 4 MiB
+    // output supported by the SDK generator instead of silently skipping them.
+    "maxSize": 4194304,
     // Broad include; VCS integration (useIgnoreFile) already skips anything
     // in .gitignore (node_modules, dist, etc). The excludes below cover
     // tracked files that still shouldn't be touched by Biome.
