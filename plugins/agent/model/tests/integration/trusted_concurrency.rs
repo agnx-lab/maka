@@ -138,6 +138,173 @@ async fn assert_http_closed(socket: &mut TcpStream) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sdk_input_budget_wait_is_not_provider_silence_and_remains_cancellable() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let runtime = TrustedRuntime::default();
+        let large_models = ModelExecutor::with_runtime(runtime.clone(), Duration::from_secs(30)).unwrap();
+        let queued_models = ModelExecutor::with_runtime(runtime, Duration::from_millis(250)).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (received, ready) = oneshot::channel();
+        let http = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            assert!(read_request(&mut first).await.len() > 32 * 1024 * 1024);
+            received.send(()).unwrap();
+            // The complete large request owns the input window until its
+            // physical transport has closed. Neither queued request may pass it.
+            tokio::select! {
+                _ = assert_http_closed(&mut first) => {},
+                unexpected = listener.accept() => panic!("input reservation released before cleanup: {unexpected:?}"),
+            }
+            let (mut second, _) = listener.accept().await.unwrap();
+            let wire = read_request(&mut second).await;
+            assert!(wire.contains("queued survivor"));
+            assert!(!wire.contains("cancelled before transport"));
+            let part = json!({"id":"queued","object":"chat.completion.chunk","created":1,"model":"test-model",
+                "choices":[{"index":0,"delta":{"content":"after capacity"},"finish_reason":"stop"}],
+                "usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}});
+            let body = format!("data: {part}\n\ndata: [DONE]\n\n");
+            second.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let mut large = request(ProviderKind::OpenaiChat, base.clone());
+        large.prompt = vec![maka_model::prompt::Message::user("x".repeat(33 * 1024 * 1024))];
+        let held = large_models.stream(large, CancellationToken::new()).await.unwrap();
+        ready.await.unwrap();
+        let mut survivor = request(ProviderKind::OpenaiChat, base.clone());
+        survivor.prompt = vec![maka_model::prompt::Message::user("queued survivor")];
+        let mut waiting = queued_models.stream(survivor, CancellationToken::new()).await.unwrap();
+        let mut cancelled = request(ProviderKind::OpenaiChat, base);
+        cancelled.prompt = vec![maka_model::prompt::Message::user("cancelled before transport")];
+        queued_models.stream(cancelled, CancellationToken::new()).await.unwrap()
+            .cancel_and_wait().await.expect("queued cancellation settles without transport");
+        assert!(tokio::time::timeout(Duration::from_millis(750), waiting.next()).await.is_err(),
+            "waiting for local capacity must outlive the provider idle budget without failing");
+        held.cancel_and_wait().await.expect("original HTTP custody closes before input capacity returns");
+        let mut text = String::new();
+        let mut step = StepBuilder::default();
+        while let Some(event) = waiting.next().await {
+            let event = event.unwrap().event;
+            if let ModelEvent::PartDelta { text: delta, .. } = &event { text.push_str(delta); }
+            step.push(event).unwrap();
+        }
+        assert_eq!(text, "after capacity");
+        step.finish().unwrap();
+        waiting.cancel_and_wait().await.expect("surviving stream cleanup");
+        http.await.unwrap();
+    }).await.expect("local input backpressure and cancellation settle");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sdk_waiting_for_response_headers_times_out_and_closes_each_protocol() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let models = ModelExecutor::new(Duration::from_millis(400)).unwrap();
+        for kind in [
+            ProviderKind::OpenaiChat,
+            ProviderKind::OpenaiCompatible {
+                name: "fixture".into(),
+            },
+            ProviderKind::Anthropic,
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let http = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_request(&mut socket).await;
+                assert_http_closed(&mut socket).await;
+            });
+            let mut stream = models
+                .stream(request(kind, base), CancellationToken::new())
+                .await
+                .unwrap();
+            let error = loop {
+                match stream.next().await {
+                    Some(Ok(_)) => {}
+                    Some(Err(error)) => break error,
+                    None => panic!("silent HTTP headers must report the actual timeout"),
+                }
+            };
+            assert!(
+                matches!(error, maka_model::ModelError::TimedOut),
+                "{error:?}"
+            );
+            stream
+                .cancel_and_wait()
+                .await
+                .expect("timed-out HTTP cleanup");
+            http.await.unwrap();
+        }
+    })
+    .await
+    .expect("all SDK protocols bound network silence");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sdk_output_backpressure_outlives_idle_timeout_without_losing_text() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        for silent_after_resume in [false, true] {
+            let models = ModelExecutor::new(Duration::from_millis(400)).unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let unit = "retained 字🙂 ";
+            let (resume, resumed) = oneshot::channel();
+            let http = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_request(&mut socket).await;
+                let part = json!({"id":"backpressure","object":"chat.completion.chunk","created":1,"model":"test-model",
+                    "choices":[{"index":0,"delta":{"content":unit},"finish_reason":null}]});
+                let body = format!("data: {part}\n\n").repeat(128);
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
+                socket.write_all(format!("{:x}\r\n{body}\r\n",body.len()).as_bytes()).await.unwrap();
+                // No further wire bytes arrive while the caller deliberately stops
+                // draining the bounded event queue beyond its idle interval.
+                resumed.await.unwrap();
+                if silent_after_resume {
+                    assert_http_closed(&mut socket).await;
+                    return;
+                }
+                let last = json!({"id":"backpressure","object":"chat.completion.chunk","created":1,"model":"test-model",
+                    "choices":[{"index":0,"delta":{},"finish_reason":"stop"}],
+                    "usage":{"prompt_tokens":1,"completion_tokens":128,"total_tokens":129}});
+                let body = format!("data: {last}\n\ndata: [DONE]\n\n");
+                socket.write_all(format!("{:x}\r\n{body}\r\n0\r\n\r\n",body.len()).as_bytes()).await.unwrap();
+            });
+            let mut stream = models.stream(request(ProviderKind::OpenaiChat, base), CancellationToken::new()).await.unwrap();
+            let mut step = StepBuilder::default();
+            let mut text = String::new();
+            let mut paused = false;
+            let mut resume = Some(resume);
+            let mut failure = None;
+            while let Some(event) = stream.next().await {
+                let event = match event {
+                    Ok(event) => event.event,
+                    Err(error) => { failure = Some(error); break; },
+                };
+                if let ModelEvent::PartDelta { text: delta, .. } = &event {
+                    text.push_str(delta);
+                    if !paused {
+                        paused = true;
+                        tokio::time::sleep(Duration::from_millis(1200)).await;
+                        resume.take().unwrap().send(()).unwrap();
+                    }
+                }
+                step.push(event).unwrap();
+            }
+            assert!(paused);
+            assert_eq!(text, unit.repeat(128));
+            if silent_after_resume {
+                assert!(matches!(failure, Some(maka_model::ModelError::TimedOut)), "{failure:?}");
+                assert!(step.finish().is_err());
+            } else {
+                assert!(failure.is_none(), "{failure:?}");
+                step.finish().unwrap();
+            }
+            stream.cancel_and_wait().await.expect("backpressured output cleanup");
+            http.await.unwrap();
+        }
+    }).await.expect("local output backpressure preserves the complete stream");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shared_sdk_admits_more_than_128_independent_models_and_cleans_them_up() {
     tokio::time::timeout(Duration::from_secs(30), async {
         const CALLS: usize = 256;

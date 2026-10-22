@@ -93,6 +93,7 @@ pub(super) enum Command {
         sender: mpsc::Sender<Result<ProviderEvent>>,
         cancellation: CancellationToken,
         network: Arc<dyn maka_agent_ports::model::Transport>,
+        idle_timeout: Duration,
         input: OwnedSemaphorePermit,
         reply: Reply,
     },
@@ -156,6 +157,7 @@ impl TrustedRuntime {
         sender: mpsc::Sender<Result<ProviderEvent>>,
         cancellation: CancellationToken,
         network: Arc<dyn maka_agent_ports::model::Transport>,
+        idle_timeout: Duration,
     ) -> Result<()> {
         let bytes =
             maka_agent_facts::model::budget::reservation(&request, INPUT_WINDOW).map_err(failed)?;
@@ -179,6 +181,7 @@ impl TrustedRuntime {
                 sender,
                 cancellation: cancellation.clone(),
                 network,
+                idle_timeout,
                 input,
                 reply,
             })

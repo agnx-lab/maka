@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { isTransportFailure } from './network-fetch.js';
+import { isIdleTimeout, isTransportFailure } from './network-fetch.js';
 
 const codes = new Set([
   'context_length_exceeded',
@@ -114,9 +114,15 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
       return;
     }
     let transport = false;
+    let idleTimeout = false;
     for (let cause = error, depth = 0; record(cause) && depth < 8; depth++, cause = cause.cause) {
       if (cause.name === 'AbortError' || cause.name === 'ProviderResponseLimitError') throw error;
       transport ||= isTransportFailure(cause);
+      idleTimeout ||= isIdleTimeout(cause);
+    }
+    if (idleTimeout) {
+      await emit({ type: 'error', error: { kind: 'timed_out' } });
+      return;
     }
     const failure = transientFailure(error, transport);
     if (failure) {

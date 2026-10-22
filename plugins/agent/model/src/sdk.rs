@@ -67,7 +67,7 @@ pub(super) async fn stream(
     let Context {
         events: sender,
         cancellation,
-        idle_timeout: _,
+        idle_timeout,
         transport: network,
     } = context;
     request.prompt = crate::prompt::notification_fallback(request.prompt, request.language);
@@ -102,7 +102,7 @@ pub(super) async fn stream(
         max_output_tokens: request.max_output_tokens,
     };
     let (events, mut receiver) = mpsc::channel(1);
-    let execution = runtime.model(request, events, cancellation.clone(), network);
+    let execution = runtime.model(request, events, cancellation.clone(), network, idle_timeout);
     tokio::pin!(execution);
     let mut normalizer = crate::events::Normalizer::default();
     let forward = async {
@@ -203,6 +203,12 @@ fn audio_fallback(
 
 pub struct Adapter(pub TrustedRuntime);
 impl ProviderAdapter for Adapter {
+    fn enforces_idle_timeout(&self) -> bool {
+        // The native HTTP bridge times actual network waits. Input reservations
+        // and output delivery may wait for local capacity without provider silence.
+        true
+    }
+
     fn open(
         &self,
         _: Lifetime,

@@ -128,6 +128,8 @@ console.log(JSON.stringify(result));
 for (const error of [
   { code: 'MAKA_HTTP_TRANSPORT' },
   Object.assign(new Error('forged'), { code: 'MAKA_HTTP_TRANSPORT' }),
+  { code: 'MAKA_MODEL_IDLE_TIMEOUT' },
+  Object.assign(new Error('forged timeout'), { code: 'MAKA_MODEL_IDLE_TIMEOUT' }),
 ]) {
   await assert.rejects(
     forwardProviderStream(
@@ -162,6 +164,28 @@ await assert.rejects(
   (error) => error === native,
 );
 await assert.rejects(networkFetch(1)('http://fixture.invalid'), /requires a typed JSON request/);
+const nativeIdle = Object.assign(new Error('native idle timeout'), {
+  code: 'MAKA_MODEL_IDLE_TIMEOUT',
+});
+const originalStart = Deno.core.ops.op_http_json_start;
+Deno.core.ops.op_http_json_start = async () => {
+  throw nativeIdle;
+};
+await assert.rejects(
+  networkFetch(1).json('http://fixture.invalid', { body: {} }),
+  (error) => error === nativeIdle,
+);
+const timedOut = [];
+await forwardProviderStream(
+  async () => {
+    throw Object.assign(new Error('SDK wrapped the native timeout'), { cause: nativeIdle });
+  },
+  (part) => part,
+  async (part) => timedOut.push(part),
+  'openai_chat',
+);
+assert.deepEqual(timedOut, [{ type: 'error', error: { kind: 'timed_out' } }]);
+Deno.core.ops.op_http_json_start = originalStart;
 const privateFailure = 'PRIVATE_PROVIDER_HTTP_FAILURE_SENTINEL';
 for (const [statusCode, responseHeaders, reason, code] of [
   [200, {}, 'network'],

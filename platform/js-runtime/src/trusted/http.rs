@@ -27,11 +27,16 @@ use serde_json::{Value, json, ser::Formatter};
 use std::{
     cell::RefCell,
     collections::BTreeMap,
+    future::Future,
     io::{self, Write},
     rc::Rc,
     sync::{Arc, Mutex},
+    time::Duration,
 };
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::{
+    sync::{Mutex as AsyncMutex, watch},
+    time::Instant,
+};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Exchange {
@@ -39,14 +44,71 @@ pub(super) struct Exchange {
     response: AsyncMutex<Option<http::Response>>,
     cancellation: CancellationToken,
     current: Mutex<CancellationToken>,
+    idle_timeout: Duration,
+    output: watch::Sender<OutputState>,
 }
+
+#[derive(Clone, Copy)]
+struct OutputState {
+    waiting: usize,
+    resumed: Instant,
+}
+
+pub(super) struct OutputWait(watch::Sender<OutputState>);
+
+impl Drop for OutputWait {
+    fn drop(&mut self) {
+        self.0.send_modify(|state| {
+            state.waiting -= 1;
+            if state.waiting == 0 {
+                state.resumed = Instant::now();
+            }
+        });
+    }
+}
+
 impl Exchange {
-    pub fn new(network: Arc<dyn Transport>, cancellation: CancellationToken) -> Self {
+    pub fn new(
+        network: Arc<dyn Transport>,
+        cancellation: CancellationToken,
+        idle_timeout: Duration,
+    ) -> Self {
         Self {
             network,
             response: AsyncMutex::new(None),
             current: Mutex::new(cancellation.child_token()),
             cancellation,
+            idle_timeout,
+            output: watch::channel(OutputState {
+                waiting: 0,
+                resumed: Instant::now(),
+            })
+            .0,
+        }
+    }
+
+    pub fn wait_for_output(&self) -> OutputWait {
+        self.output.send_modify(|state| state.waiting += 1);
+        OutputWait(self.output.clone())
+    }
+
+    async fn wait<T>(&self, operation: impl Future<Output = T>) -> Result<T, JsErrorBox> {
+        let started = Instant::now();
+        let mut output = self.output.subscribe();
+        tokio::pin!(operation);
+        loop {
+            let state = *output.borrow_and_update();
+            // SDK streams may prefetch while the consumer's bounded queue is
+            // full. Resume a fresh network idle interval only when local output
+            // capacity returns; cancellation remains independently observable.
+            let deadline = started.max(state.resumed) + self.idle_timeout;
+            tokio::select! {
+                biased;
+                result = &mut operation => return Ok(result),
+                _ = output.changed() => {},
+                _ = tokio::time::sleep_until(deadline), if state.waiting == 0 =>
+                    return Err(JsErrorBox::from_err(IdleTimeout)),
+            }
         }
     }
     async fn start(
@@ -66,8 +128,10 @@ impl Exchange {
         let response = tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err(failed("HTTP request cancelled")),
-            response = self.network.request(http::Request { method, url, headers: headers.into_iter().collect(), body }) =>
-                response.map_err(|error| match error {
+            response = self.wait(self.network.request(
+                http::Request { method, url, headers: headers.into_iter().collect(), body }
+            )) => response?
+                .map_err(|error| match error {
                     maka_agent_ports::model::Error::Provider(_) => JsErrorBox::from_err(TransportFailure),
                     other => JsErrorBox::generic(other.to_string()),
                 })?,
@@ -98,13 +162,16 @@ impl Exchange {
         let result = tokio::select! {
             biased;
             _ = cancellation.cancelled() => Err(failed("HTTP request cancelled")),
-            result = response.body.next() => result.map_err(|error| match error {
+            result = self.wait(response.body.next()) =>
+                result.and_then(|result| result.map_err(|error| match error {
                 http::Error::Failed(_) => JsErrorBox::from_err(TransportFailure),
                 other => JsErrorBox::generic(other.to_string()),
-            }),
+            })),
         };
-        if !matches!(result, Ok(Some(_))) {
-            slot.take();
+        if !matches!(result, Ok(Some(_)))
+            && let Some(response) = slot.take()
+        {
+            let _ = response.body.close().await;
         }
         result
     }
@@ -131,6 +198,12 @@ fn failed(message: &'static str) -> JsErrorBox {
 #[property("code" = "MAKA_HTTP_TRANSPORT")]
 #[error("model HTTP transport interrupted")]
 struct TransportFailure;
+
+#[derive(Debug, thiserror::Error, deno_error::JsError)]
+#[class(generic)]
+#[property("code" = "MAKA_MODEL_IDLE_TIMEOUT")]
+#[error("model stream idle timeout exceeded")]
+struct IdleTimeout;
 
 #[op2]
 #[serde]
