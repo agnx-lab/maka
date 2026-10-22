@@ -68,6 +68,8 @@ pub mod workspace;
 use std::path::Path;
 use std::sync::Arc;
 
+mod writeback;
+
 use connection::{ConnectionAuthority, OwnedConnection};
 use sqlx::sqlite::SqliteConnectOptions;
 

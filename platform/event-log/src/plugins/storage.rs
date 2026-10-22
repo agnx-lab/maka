@@ -17,6 +17,9 @@
  * under the License.
  */
 
+#[cfg(test)]
+mod tests;
+
 use super::invalid;
 use crate::{EventLog, StoreError};
 use maka_capabilities::storage::Data;
@@ -39,7 +42,7 @@ impl EventLog {
             .validate()
             .map_err(|error| invalid(&error.to_string()))?;
         let namespace = namespace.clone();
-        self.connection.run(move |connection| Box::pin(async move {
+        self.connection.read(move |connection| Box::pin(async move {
             // Select key/size first: the page budget must bound decoding and
             // allocation as well as the serialized reply. Keep one overflow key.
             let rows: Vec<(String, i64, Option<String>, bool)> = sqlx::query_as(
@@ -83,7 +86,7 @@ impl EventLog {
         let namespace = namespace.clone();
         let key = key.to_owned();
         self.connection
-            .run(move |connection| {
+            .read(move |connection| {
                 Box::pin(async move { read(connection, &namespace, &key).await })
             })
             .await

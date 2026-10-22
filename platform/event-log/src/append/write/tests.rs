@@ -18,11 +18,14 @@
  */
 
 use super::*;
+use maka_agent_facts::event::CommitError;
 use maka_agent_facts::{
     event::{Fact, Invocation, InvocationInput, LogScope, RuntimeEvent},
     model::{ModelEvent, TextKind},
 };
+use std::sync::{Arc, atomic::Ordering};
 use std::{sync::atomic::AtomicUsize, time::Duration};
+use tokio::sync::oneshot;
 
 fn event(id: &str, fact: Fact) -> EventWrite {
     let mut event = RuntimeEvent::new(

@@ -33,7 +33,7 @@ use maka_plugin_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{Connection, Row, SqliteConnection};
+use sqlx::{Row, SqliteConnection};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -343,43 +343,17 @@ impl EventLog {
         self.operation_domain(&reference)?;
         let owner = self.root_owner.as_ref().expect("owned Root").clone();
         let request_json = serde_json::to_string(&request)?;
-        let commits = self.commits.clone();
         self.connection
-            .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-                    if let Some(record) = read(&mut tx, &reference).await? {
-                        // The original origin remains historical observation. New request
-                        // authorization must be checked again by the trusted embedding.
-                        if record.request.consumer != request.consumer
-                            || record.request.input != request.input
-                        {
-                            return Err(StoreError::EventConflict);
-                        }
-                        tx.commit().await.map_err(StoreError::CommitUnknown)?;
-                        return Ok(Dispatch::Existing(record.observation));
-                    }
-                    sqlx::query("INSERT INTO application_operation_contracts (digest, contract_json) VALUES (?, ?) ON CONFLICT(digest) DO NOTHING")
-                        .bind(&reference.contract.digest)
-                        .bind(contract_json.as_ref())
-                        .execute(&mut *tx)
-                        .await?;
-                    sqlx::query("INSERT INTO application_operations (deployment, namespace, operation, source_revision, request_json, outcome_json, cleanup_json, contract_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-                        .bind(reference.source.deployment.to_string())
-                        .bind(serde_json::to_string(&reference.namespace)?)
-                        .bind(reference.operation.to_string())
-                        .bind(reference.source.revision as i64)
-                        .bind(request_json)
-                        .bind(serde_json::to_string(&OperationOutcome::Unresolved)?)
-                        .bind(serde_json::to_string(&OperationCleanup::Unconfirmed)?)
-                        .bind(&reference.contract.digest)
-                        .execute(&mut *tx)
-                        .await?;
-                    tx.commit().await.map_err(StoreError::CommitUnknown)?;
-                    commits.send_modify(|_| {});
-                    Ok(Dispatch::New(DispatchClaim { reference, owner }))
-                })
-            })
+            .write(
+                WriteDispatch {
+                    request,
+                    reference,
+                    contract_json,
+                    request_json,
+                    owner,
+                },
+                self.commits.clone(),
+            )
             .await
     }
 
@@ -397,23 +371,16 @@ impl EventLog {
         }
         validate_settlement(&outcome, &cleanup)?;
         let reference = claim.reference.clone();
-        let commits = self.commits.clone();
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-            let old = read(&mut tx, &reference).await?.ok_or_else(|| invalid("original dispatch missing"))?.observation;
-            let observation = OperationObservation { reference: reference.clone(), outcome, cleanup };
-            if !matches!(old.outcome, OperationOutcome::Unresolved) {
-                if old != observation { return Err(StoreError::EventConflict); }
-            } else {
-                sqlx::query("UPDATE application_operations SET outcome_json=?, cleanup_json=? WHERE deployment=? AND namespace=? AND operation=?")
-                    .bind(serde_json::to_string(&observation.outcome)?).bind(serde_json::to_string(&observation.cleanup)?)
-                    .bind(reference.source.deployment.to_string()).bind(serde_json::to_string(&reference.namespace)?)
-                    .bind(reference.operation.to_string()).execute(&mut *tx).await?;
-            }
-            tx.commit().await.map_err(StoreError::CommitUnknown)?;
-            commits.send_modify(|_| {});
-            Ok(observation)
-        })).await
+        self.connection
+            .write(
+                WriteSettlement {
+                    reference,
+                    outcome,
+                    cleanup,
+                },
+                self.commits.clone(),
+            )
+            .await
     }
 
     /// Reads one fixed original namespace. This lookup performs no effect and
@@ -451,3 +418,146 @@ pub(crate) async fn require_pending(
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) struct WriteDispatch {
+    request: OperationRequest<RecoveryContract>,
+    reference: RecoveryRef,
+    contract_json: Arc<str>,
+    request_json: String,
+    owner: Arc<RootOwner>,
+}
+pub(crate) struct DispatchValue(PreparedDispatch);
+enum PreparedDispatch {
+    New {
+        reference: RecoveryRef,
+        owner: Arc<RootOwner>,
+    },
+    Existing(OperationObservation),
+}
+impl crate::writeback::Statement for WriteDispatch {
+    type Value = DispatchValue;
+    type Output = Dispatch;
+    fn execute(
+        self,
+        connection: &mut SqliteConnection,
+    ) -> crate::connection::BoxFuture<'_, Result<crate::writeback::Prepared<Self::Value>, StoreError>>
+    {
+        Box::pin(async move {
+            let Self {
+                request,
+                reference,
+                contract_json,
+                request_json,
+                owner,
+            } = self;
+            if let Some(record) = read(connection, &reference).await? {
+                // The original origin remains historical observation. New request
+                // authorization must be checked again by the trusted embedding.
+                if record.request.consumer != request.consumer
+                    || record.request.input != request.input
+                {
+                    return Err(StoreError::EventConflict);
+                }
+                return Ok(crate::writeback::Prepared {
+                    value: DispatchValue(PreparedDispatch::Existing(record.observation)),
+                    changed: false,
+                    notification: crate::writeback::Notification::None,
+                });
+            }
+            sqlx::query("INSERT INTO application_operation_contracts (digest, contract_json) VALUES (?, ?) ON CONFLICT(digest) DO NOTHING")
+                        .bind(&reference.contract.digest)
+                        .bind(contract_json.as_ref())
+                        .execute(&mut *connection)
+                        .await?;
+            sqlx::query("INSERT INTO application_operations (deployment, namespace, operation, source_revision, request_json, outcome_json, cleanup_json, contract_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                        .bind(reference.source.deployment.to_string())
+                        .bind(serde_json::to_string(&reference.namespace)?)
+                        .bind(reference.operation.to_string())
+                        .bind(reference.source.revision as i64)
+                        .bind(request_json)
+                        .bind(serde_json::to_string(&OperationOutcome::Unresolved)?)
+                        .bind(serde_json::to_string(&OperationCleanup::Unconfirmed)?)
+                        .bind(&reference.contract.digest)
+                        .execute(&mut *connection)
+                        .await?;
+
+            Ok(crate::writeback::Prepared {
+                value: DispatchValue(PreparedDispatch::New { reference, owner }),
+                changed: true,
+                notification: crate::writeback::Notification::Metadata,
+            })
+        })
+    }
+    fn committed(value: Self::Value) -> Self::Output {
+        match value.0 {
+            PreparedDispatch::New { reference, owner } => {
+                Dispatch::New(DispatchClaim { reference, owner })
+            }
+            PreparedDispatch::Existing(observation) => Dispatch::Existing(observation),
+        }
+    }
+    fn isolated_rejection(error: &StoreError) -> bool {
+        matches!(
+            error,
+            StoreError::EventConflict | StoreError::InvalidTransition(_)
+        )
+    }
+}
+
+pub(crate) struct WriteSettlement {
+    reference: RecoveryRef,
+    outcome: OperationOutcome,
+    cleanup: OperationCleanup,
+}
+impl crate::writeback::Statement for WriteSettlement {
+    type Value = OperationObservation;
+    type Output = OperationObservation;
+    fn execute(
+        self,
+        connection: &mut SqliteConnection,
+    ) -> crate::connection::BoxFuture<'_, Result<crate::writeback::Prepared<Self::Value>, StoreError>>
+    {
+        Box::pin(async move {
+            let Self {
+                reference,
+                outcome,
+                cleanup,
+            } = self;
+            let old = read(connection, &reference)
+                .await?
+                .ok_or_else(|| invalid("original dispatch missing"))?
+                .observation;
+            let observation = OperationObservation {
+                reference: reference.clone(),
+                outcome,
+                cleanup,
+            };
+            let changed = matches!(old.outcome, OperationOutcome::Unresolved);
+            if !changed {
+                if old != observation {
+                    return Err(StoreError::EventConflict);
+                }
+            } else {
+                sqlx::query("UPDATE application_operations SET outcome_json=?, cleanup_json=? WHERE deployment=? AND namespace=? AND operation=?")
+                    .bind(serde_json::to_string(&observation.outcome)?).bind(serde_json::to_string(&observation.cleanup)?)
+                    .bind(reference.source.deployment.to_string()).bind(serde_json::to_string(&reference.namespace)?)
+                    .bind(reference.operation.to_string()).execute(&mut *connection).await?;
+            }
+
+            Ok(crate::writeback::Prepared {
+                value: observation,
+                changed,
+                notification: crate::writeback::Notification::Metadata,
+            })
+        })
+    }
+    fn committed(value: Self::Value) -> Self::Output {
+        value
+    }
+    fn isolated_rejection(error: &StoreError) -> bool {
+        matches!(
+            error,
+            StoreError::EventConflict | StoreError::InvalidTransition(_)
+        )
+    }
+}
