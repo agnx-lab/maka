@@ -57,14 +57,17 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         support::click_button(&mut view, "Toggle tool WorkspaceDocument").await;
         let readable = wait_view(&mut view, |screen| screen.contains("Read lines") && screen.contains("起点_原始")).await;
+        // The native accessibility bridge filters CR controls, retaining LF
+        // and tabs. Byte-exact source preservation is checked by Copy below.
+        let accessible_original = original.replace('\r', "");
         let text = view.accessibility_snapshot().into_iter()
-            .find(|node| node.label == original)
+            .find(|node| node.label == accessible_original)
             .expect("the readable native Text must include both ends of the original paged result");
         assert!(!text.label.contains("CHANGED_CURRENT_WORKSPACE"));
         view.drain_service_output().for_each(drop);
         let copy = support::wait_enabled_button(&mut view, "Copy read contents").await.id;
         support::click_button(&mut view, "Copy read contents").await;
-        wait_view_state(&mut view, |view, screen| screen.contains("Copied") && screen.contains("起点_原始") && view.accessibility_snapshot().iter().any(|node| node.id == copy && node.focused && !node.state.disabled)).await;
+        let copied_screen = wait_view_state(&mut view, |view, screen| screen.contains("Copied") && screen.contains("起点_原始") && view.accessibility_snapshot().iter().any(|node| node.id == copy && node.focused && !node.state.disabled)).await;
         let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
         assert_eq!(clipboard.len(), 1, "one read copy must emit one native clipboard effect");
         let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
@@ -93,7 +96,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
 
         // Large originals scroll inside the card while its disclosure and
         // original-details action remain visible in the turn's own viewport.
-        support::scroll_snapshot_text(&mut view, &readable, "起点_原始", MouseEventKind::ScrollDown);
+        support::scroll_snapshot_text(&mut view, &copied_screen, "起点_原始", MouseEventKind::ScrollDown);
         wait_view_state(&mut view, |view, screen| screen.contains("Read file") && original_visible(view) && !screen.contains("起点_原始")).await;
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         tab_to_label(&mut view, "Tool details").await;
@@ -233,6 +236,10 @@ async fn tool_cards_show_recorded_search_changes_and_business_failures_without_i
             if matches!(method, "write" | "edit") {
                 // Recorded results open first. Reach the original request
                 // through the same local reader a user scrolls with End.
+                // End uses the current range, so first let the separately
+                // loaded original arguments finish rendering their full Text.
+                let requested = if method == "write" { "新文件_记录\n" } else { "替换_记录" };
+                wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.label == requested)).await;
                 tab_to_label(&mut view, "Tool details").await;
                 view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
                 let arguments = wait_view(&mut view, |screen| {
