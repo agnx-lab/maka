@@ -221,6 +221,29 @@ impl EventLog {
             .await
     }
 
+    /// Whether ordinary reads may see this Session. Archiving preserves visibility;
+    /// removing hides it before physical cleanup. This is not caller authorization
+    /// or admission for new work, and does not decode the Session's metadata.
+    pub async fn session_is_available(&self, id: &str) -> Result<bool, StoreError> {
+        self.validate_root()?;
+        validate_id(id)?;
+        let id = id.to_owned();
+        self.connection
+            .read(move |connection| {
+                Box::pin(async move {
+                    Ok(sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?1)
+                         AND NOT EXISTS(SELECT 1 FROM session_retirements
+                                        WHERE session_id = ?1 AND remove_session != 0)",
+                    )
+                    .bind(id)
+                    .fetch_one(connection)
+                    .await?)
+                })
+            })
+            .await
+    }
+
     pub async fn get_session<T: DeserializeOwned + Send + 'static>(
         &self,
         id: &str,

@@ -628,3 +628,104 @@ async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
     );
     reopened.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn availability_tracks_visibility_without_admitting_work_or_decoding_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("events.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    assert!(!log.session_is_available("missing").await.unwrap());
+    for invalid in ["", "a/b", "a.b", "a b"] {
+        assert!(matches!(
+            log.session_is_available(invalid).await,
+            Err(StoreError::InvalidTransition(_))
+        ));
+    }
+    let session = log
+        .create_session("visible", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    assert!(log.session_is_available("visible").await.unwrap());
+    let archived = log
+        .set_session_archived::<Value>("visible", true, 2)
+        .await
+        .unwrap();
+    assert!(archived.archived);
+    assert!(log.session_is_available("visible").await.unwrap());
+    assert!(log.get_session::<Value>("visible").await.unwrap().is_some());
+    let active = log
+        .set_session_archived::<Value>("visible", false, 3)
+        .await
+        .unwrap();
+    assert!(active.revision > session.revision);
+    // Visibility is independent of unrelated metadata decoding. Full readers
+    // must still reject malformed configuration instead of manufacturing a record.
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults
+        .execute(
+            "UPDATE session_control SET configuration='invalid json' WHERE id='visible'",
+            [],
+        )
+        .unwrap();
+    assert!(log.session_is_available("visible").await.unwrap());
+    assert!(matches!(
+        log.get_session::<Value>("visible").await,
+        Err(StoreError::Json(_))
+    ));
+    faults
+        .execute(
+            "UPDATE session_control SET configuration='{}' WHERE id='visible'",
+            [],
+        )
+        .unwrap();
+    drop(faults);
+    assert_eq!(
+        log.begin_session_removal("visible", active.revision)
+            .await
+            .unwrap(),
+        maka_event_log::sessions::SessionRemovalResult::Accepted(
+            maka_event_log::sessions::SessionRetirement::Removing
+        )
+    );
+    assert!(!log.session_is_available("visible").await.unwrap());
+    assert!(log.get_session::<Value>("visible").await.unwrap().is_none());
+    assert!(
+        log.retiring_session::<Value>("visible")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        log.finish_session_retirement("visible").await.unwrap(),
+        maka_event_log::sessions::SessionRetirement::Removed
+    );
+    assert!(!log.session_is_available("visible").await.unwrap());
+    log.close().await.unwrap();
+    let reopened = EventLog::open(&path).await.unwrap();
+    assert!(!reopened.session_is_available("visible").await.unwrap());
+    reopened.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn availability_rejects_a_root_that_lost_its_authority() {
+    use maka_event_log::root::{RootNamespaces, RootOwner};
+    let directory = tempfile::tempdir().unwrap();
+    let namespaces = RootNamespaces {
+        ownership: directory.path().join("owners"),
+        control: directory.path().join("control"),
+    };
+    let root = directory.path().join("root");
+    let owner = std::sync::Arc::new(RootOwner::create(&root, &namespaces).unwrap());
+    let log = EventLog::for_root(owner).await.unwrap();
+    log.create_session("visible", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    assert!(log.session_is_available("visible").await.unwrap());
+    std::fs::remove_dir_all(&namespaces.control).unwrap();
+    assert!(matches!(
+        log.session_is_available("visible").await,
+        Err(StoreError::Io(_))
+    ));
+    assert!(log.get_session::<Value>("visible").await.is_err());
+    log.close().await.unwrap();
+}

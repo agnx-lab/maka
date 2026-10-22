@@ -494,6 +494,21 @@ impl Owner {
     pub fn owns(&self, id: &str) -> bool {
         owns_session(&self.prefix, id)
     }
+    pub async fn require_session(&self, id: &str) -> Result<(), String> {
+        if !self.owns(id) {
+            return Err("agent_session_unavailable".into());
+        }
+        if self
+            .store
+            .session_is_available(id)
+            .await
+            .map_err(|_| "agent_store_unavailable".to_owned())?
+        {
+            Ok(())
+        } else {
+            Err("agent_session_unavailable".into())
+        }
+    }
     pub async fn session(&self, id: &str) -> Result<SessionRecord<SessionConfiguration>, String> {
         if !self.owns(id) {
             return Err("agent_session_unavailable".into());
