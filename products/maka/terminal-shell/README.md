@@ -36,6 +36,8 @@ Installed users can run `maka terminal-shell` from the same Maka executable. Use
 
 At startup, the shell negotiates image transport and display geometry. On Linux, including WSL, the required capabilities enable the entire interface to use GPU-rendered pixel frames through Kitty, Sixel or iTerm2. Otherwise, the same application uses Unicode rendering. Both presentations support mouse and keyboard interaction.
 
+Kitty pixel frames use one complete upload-and-retirement write with error-only replies. The original writer's flush receipt permits native input publication without waiting for a success reply on every frame; a flush does not prove that the terminal has parsed or displayed the image. Any negative reply for either session-owned image slot ends the graphics session. Resize immediately revokes old pointer geometry while any started write finishes intact.
+
 Without `--session`, the centered composer offers **Choose workspace** before editing. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`. Exiting closes only the shell's own connection; the Host follows its existing lifecycle and idle policy.
 
 Use **Connections & models** on Home or **Settings** in the sidebar to add a connection and API key, fetch its model catalog or add a model ID manually, and configure supported reasoning efforts and the connection default. These settings can be configured here even with a fresh Host. Choose **Choose workspace** or press Ctrl+N, then choose a directory published by the Host. Within a conversation, a new conversation reuses its authorized workspace. Creation opens **Models** to select the connection, model and effort before sending.

@@ -28,11 +28,7 @@ pub(super) use input::Inbox;
 use nsh_engine::EngineConfig;
 pub(super) use probe::Probe;
 pub(super) use probe::{Capabilities, MouseCoordinates};
-use std::{
-    sync::atomic::Ordering,
-    thread,
-    time::{Duration, Instant},
-};
+use std::{sync::atomic::Ordering, thread, time::Instant};
 
 /// Uses the single input reader during negotiation. No engine has started, so
 /// automatic selection cannot create competing applications or Host clients.
@@ -100,20 +96,12 @@ pub(super) fn select(
 enum Phase {
     Setup,
     Idle,
-    Upload(PixelUpload),
-    Ack {
-        upload: PixelUpload,
-        deadline: Instant,
+    Publish {
+        offer: input::Offer,
+        image: Option<u32>,
     },
-    Publish(input::Offer),
     Effect,
     Measure,
-}
-
-struct PixelUpload {
-    offer: input::Offer,
-    image: u32,
-    retire: Vec<u8>,
 }
 
 /// Drives only terminal transport. GPU work runs on its native UI thread, so
@@ -175,43 +163,18 @@ pub(super) fn run(
                         .flushed(at);
                     Phase::Idle
                 }
-                Phase::Upload(upload) => {
-                    if tracing {
-                        let mut state = presentation.state.lock().unwrap();
-                        if let Some(trace) = &mut state.trace {
-                            let sample = trace.record(
-                                &upload.offer.token,
-                                upload.offer.geometry,
-                                "upload_flushed",
-                                at,
-                                at,
-                            );
-                            sample.image = Some(upload.image);
-                        }
-                    }
-                    Phase::Ack {
-                        upload,
-                        deadline: at + Duration::from_secs(5),
-                    }
-                }
-                Phase::Publish(offer) => {
+                Phase::Publish { offer, image } => {
                     let mut state = presentation.state.lock().unwrap();
                     if let Some(trace) = &mut state.trace {
-                        let stage = if caps.protocol == Some(probe::Protocol::Kitty) {
-                            "retire_flushed"
-                        } else {
-                            "upload_flushed"
-                        };
-                        trace.record(&offer.token, offer.geometry, stage, at, at);
+                        let sample =
+                            trace.record(&offer.token, offer.geometry, "upload_flushed", at, at);
+                        sample.image = image;
                     }
                     let inbox = state.pixels.as_mut().unwrap();
-                    inbox.ready = Some(offer);
-                    if let Some(wake) = &inbox.wake {
-                        wake.unpark();
-                    }
+                    inbox.written(offer, image);
                     Phase::Idle
                 }
-                Phase::Idle | Phase::Ack { .. } => {
+                Phase::Idle => {
                     return Err("unexpected terminal output receipt".into());
                 }
             };
@@ -234,54 +197,6 @@ pub(super) fn run(
                 }
                 Err(error) if needs_pixels => return Err(error),
                 _ => {}
-            }
-        }
-        if let Phase::Ack { upload, deadline } = &phase {
-            let ack = {
-                let mut state = presentation.state.lock().unwrap();
-                let ack = state.pixels.as_mut().unwrap().ack.take();
-                if let Some((at, result)) = &ack
-                    && let Some(trace) = &mut state.trace
-                {
-                    let sample = trace.record(
-                        &upload.offer.token,
-                        upload.offer.geometry,
-                        "matching_ack",
-                        *at,
-                        *at,
-                    );
-                    sample.image = Some(upload.image);
-                    sample.outcome = if result.is_ok() { "ok" } else { "error" };
-                }
-                ack
-            };
-            if let Some((at, result)) = ack {
-                if at > *deadline {
-                    return Err(
-                        "terminal did not acknowledge the pixel frame before its deadline".into(),
-                    );
-                }
-                result.map_err(|error| format!("terminal rejected the pixel frame: {error}"))?;
-                let mut state = presentation.state.lock().unwrap();
-                state.pixels.as_mut().unwrap().displayed_image = Some(upload.image);
-                if let Some(trace) = &mut state.trace {
-                    let at = Instant::now();
-                    let sample = trace.record(
-                        &upload.offer.token,
-                        upload.offer.geometry,
-                        "retire_submit_begin",
-                        at,
-                        at,
-                    );
-                    sample.bytes = Some(upload.retire.len());
-                    sample.image = Some(upload.image);
-                }
-                drop(state);
-                let offer = upload.offer.clone();
-                output.submit(upload.retire.clone(), None)?;
-                phase = Phase::Publish(offer);
-            } else if Instant::now() >= *deadline {
-                return Err("terminal pixel-frame acknowledgement timed out".into());
             }
         }
         if matches!(phase, Phase::Idle) {
@@ -377,7 +292,7 @@ pub(super) fn run(
                     let at = Instant::now();
                     let (bytes, image) = match &encoded.frame {
                         input::WireFrame::Kitty(frame) => {
-                            (frame.upload().len(), Some(frame.image_id()))
+                            (frame.wire().len(), Some(frame.image_id()))
                         }
                         input::WireFrame::Inline(frame) => (frame.bytes().len(), None),
                     };
@@ -386,23 +301,20 @@ pub(super) fn run(
                 match encoded.frame {
                     input::WireFrame::Kitty(frame) => {
                         let image = frame.image_id();
-                        // Arm before the first byte; ACK may precede the
-                        // driver's observation of the writer flush receipt.
-                        inbox.expected_ack = Some(image);
-                        inbox.ack = None;
-                        let upload = PixelUpload {
+                        // Upload and retirement share one indivisible writer
+                        // transaction. q=1 preserves errors without a success
+                        // reply round trip on the frame publication path.
+                        output.submit(frame.wire().to_vec(), None)?;
+                        phase = Phase::Publish {
                             offer,
-                            image,
-                            retire: frame.retire_previous().to_vec(),
+                            image: Some(image),
                         };
-                        output.submit(frame.upload().to_vec(), None)?;
-                        phase = Phase::Upload(upload);
                     }
                     input::WireFrame::Inline(frame) => {
                         // Sixel and OSC File have no per-image ACK. Only the
                         // original writer's full flush publishes this draw.
                         output.submit(frame.bytes().to_vec(), None)?;
-                        phase = Phase::Publish(offer);
+                        phase = Phase::Publish { offer, image: None };
                     }
                 }
                 if let Some((offer, at, bytes, image)) = sample
@@ -422,13 +334,9 @@ pub(super) fn run(
             .pixel_probe
             .measurement
             .next_deadline();
-        let deadline = match &phase {
-            Phase::Ack { deadline, .. } => Some(measured.map_or(*deadline, |at| at.min(*deadline))),
-            _ => measured,
-        };
         // IO, input and producer completions wake this driver directly. The
         // existing tick only bounds observation of external AtomicBool cancel.
-        let wait = deadline.map_or(super::TICK, |deadline| {
+        let wait = measured.map_or(super::TICK, |deadline| {
             deadline
                 .saturating_duration_since(Instant::now())
                 .min(super::TICK)

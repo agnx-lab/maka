@@ -686,7 +686,7 @@ fn encode_pending(presentation: &Presentation) -> bool {
         if candidate.geometry != inbox.geometry {
             return false;
         }
-        let previous = inbox.displayed_image;
+        let previous = inbox.last_fully_written_image;
         let image = if previous == Some(slots.first) {
             slots.second
         } else {
@@ -729,7 +729,7 @@ fn encode_pending(presentation: &Presentation) -> bool {
     let ended = started.map(|_| Instant::now());
     let bytes = if tracing {
         result.as_ref().ok().map(|encoded| match &encoded.frame {
-            WireFrame::Kitty(frame) => frame.upload().len(),
+            WireFrame::Kitty(frame) => frame.wire().len(),
             WireFrame::Inline(frame) => frame.bytes().len(),
         })
     } else {

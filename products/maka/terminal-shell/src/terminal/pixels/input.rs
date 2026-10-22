@@ -77,14 +77,13 @@ pub(crate) struct Inbox {
     capture: Option<FrameToken>,
     pub(super) pending: Option<Candidate>,
     pub(super) encoded: Option<Result<Encoded, String>>,
-    pub displayed_image: Option<u32>,
+    /// Last image whose entire upload-and-retirement transaction was flushed.
+    pub last_fully_written_image: Option<u32>,
     pub in_flight: Option<FrameToken>,
     pub(super) ready: Option<Offer>,
     pub geometry: u64,
     pub resize: Option<WindowSize>,
     pub cancel_pointer: bool,
-    pub expected_ack: Option<u32>,
-    pub ack: Option<(std::time::Instant, Result<(), String>)>,
     /// Earlier offers cannot enter opaque pointer dispatch; native owners
     /// validate their own target, binding and geometry independently.
     pub exact_reject_through: u64,
@@ -104,14 +103,12 @@ impl Inbox {
             capture: None,
             pending: None,
             encoded: None,
-            displayed_image: None,
+            last_fully_written_image: None,
             in_flight: None,
             ready: None,
             geometry: 1,
             resize: None,
             cancel_pointer: false,
-            expected_ack: None,
-            ack: None,
             exact_reject_through: 0,
             wake: None,
             effects: None,
@@ -127,13 +124,6 @@ impl Inbox {
         {
             return Ok(true);
         }
-        if let Event::KittyGraphicsResponse(reply) = &event {
-            if self.expected_ack == Some(reply.image_id) && reply.placement_id == Some(1) {
-                self.ack
-                    .get_or_insert_with(|| (std::time::Instant::now(), reply.result.clone()));
-            }
-            return Ok(false);
-        }
         if let Event::WindowResized(size) = event {
             self.capabilities.size = size;
             self.invalidate_geometry()?;
@@ -141,7 +131,11 @@ impl Inbox {
         }
         if matches!(
             event,
-            Event::Csi(_) | Event::Osc(_) | Event::Dcs(_) | Event::Iterm2Capabilities(_)
+            Event::Csi(_)
+                | Event::Osc(_)
+                | Event::Dcs(_)
+                | Event::Iterm2Capabilities(_)
+                | Event::KittyGraphicsResponse(_)
         ) {
             return Ok(false);
         }
@@ -242,6 +236,18 @@ impl Inbox {
             self.invalidate_geometry()?;
         }
         Ok(())
+    }
+
+    /// Records a complete writer receipt, independently of whether resize has
+    /// revoked this frame's input geometry. Only the native worker can publish.
+    pub(super) fn written(&mut self, offer: Offer, image: Option<u32>) {
+        if let Some(image) = image {
+            self.last_fully_written_image = Some(image);
+        }
+        self.ready = Some(offer);
+        if let Some(wake) = &self.wake {
+            wake.unpark();
+        }
     }
 
     fn invalidate_geometry(&mut self) -> Result<(), String> {
@@ -401,6 +407,21 @@ mod tests {
         assert!(inbox.cancel_pointer);
         assert_eq!(inbox.keyboard, Some(token.clone()));
         assert_eq!(inbox.pop().unwrap().event, draft);
+
+        // The already-started old viewport transaction must finish physically,
+        // but its receipt alone grants neither new pointer nor keyboard input.
+        inbox.written(
+            Offer {
+                token: token.clone(),
+                geometry: 1,
+            },
+            Some(41),
+        );
+        assert_eq!(inbox.last_fully_written_image, Some(41));
+        assert_eq!(inbox.ready.as_ref().unwrap().geometry, 1);
+        assert!(inbox.published.is_none());
+        assert!(inbox.capture.is_none());
+        assert_eq!(inbox.keyboard, Some(token.clone()));
 
         // A new fact that does not change this canvas must not revoke a click.
         inbox.resize = None;

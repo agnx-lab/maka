@@ -348,11 +348,13 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                         inbox.graphics.observe(&event);
                         #[cfg(target_os = "linux")]
                         {
+                            let graphics_response =
+                                inbox.pixel_probe.check_graphics_response(&event);
                             inbox.pixel_probe.observe(&event, Instant::now());
                             let sixel_geometry = inbox.pixel_probe.sixel_geometry;
                             if let Some(pixels) = &mut inbox.pixels {
-                                let result = pixels
-                                    .set_sixel_geometry(sixel_geometry)
+                                let result = graphics_response
+                                    .and_then(|()| pixels.set_sixel_geometry(sixel_geometry))
                                     .and_then(|()| pixels.push(event));
                                 if let Some(wake) = &pixels.wake {
                                     wake.unpark();

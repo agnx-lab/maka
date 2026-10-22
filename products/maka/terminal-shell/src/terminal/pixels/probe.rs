@@ -175,6 +175,18 @@ pub(crate) struct Probe {
 }
 
 impl Probe {
+    /// Errors remain fatal for both session-owned slots after their write
+    /// receipts. An image id alone cannot identify which reuse failed.
+    pub fn check_graphics_response(&self, event: &Event) -> Result<(), String> {
+        if let Event::KittyGraphicsResponse(reply) = event
+            && [self.slots.first, self.slots.second].contains(&reply.image_id)
+            && let Err(error) = &reply.result
+        {
+            return Err(format!("terminal rejected the pixel frame: {error}"));
+        }
+        Ok(())
+    }
+
     pub fn next_deadline(&self) -> Option<Instant> {
         self.deadline
     }
@@ -427,6 +439,34 @@ mod tests {
         while let Some(event) = parser.pop() {
             probe.observe(&event, at);
         }
+    }
+
+    #[test]
+    fn negative_replies_for_either_owned_slot_remain_fatal_after_discovery() {
+        let now = Instant::now();
+        let mut probe = probe();
+        probe.flushed(now);
+        reply(&mut probe, b"\x1b_Gi=99;OK\x1b\\", now);
+        // Discovery may already have expired when an old frame's error arrives.
+        let late = now + TIMEOUT + Duration::from_secs(1);
+        let mut parser = termina::Parser::default();
+        parser.parse(b"\x1b_Gi=41,p=1;OK\x1b\\\x1b_Gi=73;OK\x1b\\\x1b_Gi=99;EINVAL:query\x1b\\\x1b_Gi=100,p=1;EINVAL:unowned\x1b\\\x1b_Gi=41,p=1;EINVAL:first\x1b\\\x1b_Gi=73;EINVAL:old\x1b\\", false).unwrap();
+        let mut results = Vec::new();
+        while let Some(event) = parser.pop() {
+            probe.observe(&event, late);
+            results.push(probe.check_graphics_response(&event));
+        }
+        assert_eq!(
+            results,
+            vec![
+                Ok(()),
+                Ok(()),
+                Ok(()),
+                Ok(()),
+                Err("terminal rejected the pixel frame: EINVAL:first".into()),
+                Err("terminal rejected the pixel frame: EINVAL:old".into())
+            ]
+        );
     }
 
     #[test]

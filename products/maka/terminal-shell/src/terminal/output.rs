@@ -333,7 +333,10 @@ mod tests {
     }
 
     #[test]
-    fn blocked_output_retains_one_frame_and_restores_after_its_last_byte() {
+    fn blocked_output_finishes_upload_and_retirement_before_cleanup() {
+        // The writer is protocol agnostic. This complete Kitty-shaped payload
+        // includes the retirement suffix that must never become a second job.
+        let transaction = b"\x1b[H\x1b_Ga=T,i=41,p=1,q=1,m=0;AAAA\x1b\\\x1b[?2026h\x1b_Ga=d,d=I,i=73,q=2\x1b\\\x1b[?2026l";
         let bytes = Arc::new(Mutex::new(Vec::new()));
         let (gate, receive) = mpsc::channel();
         let (entered, observing) = mpsc::sync_channel(1);
@@ -345,7 +348,10 @@ mod tests {
         .unwrap();
         let presentation = Presentation::default();
         output
-            .submit(b"ABC".to_vec(), Some((presentation.clone(), 7, snapshot())))
+            .submit(
+                transaction.to_vec(),
+                Some((presentation.clone(), 7, snapshot())),
+            )
             .unwrap();
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(
@@ -354,18 +360,28 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Acquire),
             0
         );
+        let partial = transaction.len() / 2;
+        for _ in 0..partial {
+            gate.send(()).unwrap();
+            observing.recv_timeout(Duration::from_secs(1)).unwrap();
+        }
+        assert_eq!(*bytes.lock().unwrap(), transaction[..partial]);
+        assert_eq!(presentation.presented.load(Ordering::Acquire), 0);
         assert!(!output.poll().unwrap());
         assert!(output.submit(b"replacement".to_vec(), None).is_err());
         let closed = output.close(b"!".to_vec()).unwrap();
         assert!(matches!(closed.try_recv(), Err(mpsc::TryRecvError::Empty)));
-        for _ in 0..4 {
+        for _ in 0..transaction.len() - partial + 1 {
             gate.send(()).unwrap();
         }
         closed
             .recv_timeout(Duration::from_secs(1))
             .unwrap()
             .unwrap();
-        assert_eq!(*bytes.lock().unwrap(), b"ABC!");
+        assert_eq!(
+            *bytes.lock().unwrap(),
+            [transaction.as_slice(), b"!"].concat()
+        );
         // No driver poll observes either completion: the actual flush
         // publishes the frame before the final cleanup receipt arrives.
         assert_eq!(
