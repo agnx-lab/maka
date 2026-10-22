@@ -192,11 +192,17 @@ fn reference(input: &str) -> Option<(usize, String)> {
     let name = &input[1..end];
     let decoded = if let Some(number) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X"))
     {
-        (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .then(|| ::markdown::decode_numeric(number, 16))?
+        if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        u32::from_str_radix(number, 16).ok()?;
+        ::markdown::decode_numeric(number, 16)
     } else if let Some(number) = name.strip_prefix('#') {
-        (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()))
-            .then(|| ::markdown::decode_numeric(number, 10))?
+        if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        number.parse::<u32>().ok()?;
+        ::markdown::decode_numeric(number, 10)
     } else {
         ::markdown::decode_named(name, true)?
     };

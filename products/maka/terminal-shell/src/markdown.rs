@@ -621,6 +621,8 @@ mod tests {
                 (8, 9, 20, 21, MarkdownSourceKind::Literal),
             ]
         );
+        let invalid = parse_source("&amp; &#999999999999999999999999;").unwrap();
+        assert_eq!(invalid[0].runs[0].text, "& &#999999999999999999999999;");
         assert_eq!(blocks[0].runs[1].text, "a🙂");
         assert_eq!(
             blocks[0].runs[1].source,
