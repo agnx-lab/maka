@@ -24,6 +24,18 @@ use maka_agent_facts::configuration::{
 use maka_agent_facts::execution::ThinkingLevel::{High, Low, Max, Off};
 use serde_json::json;
 
+fn from_values(
+    models: Option<&serde_json::Value>,
+    router: Option<&serde_json::Value>,
+) -> Result<Snapshot, String> {
+    let body = |v: &serde_json::Value| {
+        maka_agent_facts::public_catalog::PublicCatalogBody::from_json(v.to_string()).unwrap()
+    };
+    let models = models.map(body);
+    let router = router.map(body);
+    Snapshot::from_sources(models.as_ref(), router.as_ref())
+}
+
 #[test]
 fn newly_published_openrouter_model_is_available_without_a_bundled_entry() {
     let bundled = Snapshot::bundled().unwrap();
@@ -41,7 +53,7 @@ fn newly_published_openrouter_model_is_available_without_a_bundled_entry() {
             "supported_efforts":["max","high","low","none"],"default_effort":"high"},
         "knowledge_cutoff":null
     }]});
-    let snapshot = Snapshot::from_sources(None, Some(&router)).unwrap();
+    let snapshot = from_values(None, Some(&router)).unwrap();
     let model = snapshot.resolve("openrouter", ModelInfo::new(id));
     assert_eq!(
         model.display_name.as_deref(),
@@ -79,7 +91,7 @@ fn new_public_model_keeps_each_routes_own_controls_and_limits() {
         "supported_parameters":["tools","structured_outputs","reasoning"],
         "reasoning":{"mandatory":true,"supported_efforts":["max","high"],"default_effort":"max"}
     }]});
-    let snapshot = Snapshot::from_sources(Some(&models_dev), Some(&openrouter)).unwrap();
+    let snapshot = from_values(Some(&models_dev), Some(&openrouter)).unwrap();
     let native = snapshot.get("deepseek", "brand-new-native").unwrap();
     assert_eq!(native.display_name.as_deref(), Some("Native name"));
     assert_eq!(
@@ -130,7 +142,7 @@ fn compatible_connections_share_exact_public_ids_without_borrowing_route_control
         "top_provider":{"max_completion_tokens":65536},
         "reasoning":{"mandatory":true,"supported_efforts":["high","medium","low"],"default_effort":"medium"}
     }]});
-    let snapshot = Snapshot::from_sources(None, Some(&router)).unwrap();
+    let snapshot = from_values(None, Some(&router)).unwrap();
     let public = ModelInfo {
         id: "vendor/new-model".into(),
         display_name: Some("Public name".into()),
@@ -172,7 +184,7 @@ fn compatible_connections_share_exact_public_ids_without_borrowing_route_control
         "vendor/new-model":{"id":"vendor/new-model","name":"Route name",
             "reasoning":false,"tool_call":false,"limit":{"context":8192}}
     }}});
-    let known = Snapshot::from_sources(Some(&models_dev), Some(&router)).unwrap();
+    let known = from_values(Some(&models_dev), Some(&router)).unwrap();
     assert_eq!(
         known.get("openai-compatible", "vendor/new-model"),
         Some(&ModelInfo {
@@ -226,7 +238,7 @@ fn conflicting_gateway_descriptions_never_cross_routes_or_use_slugs_as_ids() {
             "context_length":2000},
         {"id":"vendor/other","name":"Other name"}
     ]});
-    let snapshot = Snapshot::from_sources(Some(&models_dev), Some(&router)).unwrap();
+    let snapshot = from_values(Some(&models_dev), Some(&router)).unwrap();
     let local = snapshot.get("private-relay", "exact-local").unwrap();
     assert_eq!(local.display_name, None);
     assert_eq!(local.description.as_deref(), Some("Same description"));
@@ -267,7 +279,7 @@ fn a_complete_public_record_replaces_bundled_guesses_and_has_no_invented_default
             "tool_call":false,"structured_output":false,
             "modalities":{"input":["text"],"output":["text"]}}
     }}});
-    let snapshot = Snapshot::from_sources(Some(&models_dev), None).unwrap();
+    let snapshot = from_values(Some(&models_dev), None).unwrap();
     let current = snapshot.get("openai", "gpt-5.2").unwrap();
     assert_eq!(current.display_name.as_deref(), Some("Current record"));
     assert_eq!(current.context_window, None);
@@ -281,7 +293,7 @@ fn a_complete_public_record_replaces_bundled_guesses_and_has_no_invented_default
         snapshot.get("anthropic", "claude-opus-4-8"),
         bundled.get("anthropic", "claude-opus-4-8")
     );
-    let empty = Snapshot::from_sources(Some(&json!({})), Some(&json!({"data":[]}))).unwrap();
+    let empty = from_values(Some(&json!({})), Some(&json!({"data":[]}))).unwrap();
     assert_eq!(
         empty.get("openai", "gpt-5.2"),
         bundled.get("openai", "gpt-5.2")
@@ -294,7 +306,7 @@ fn account_false_empty_and_unknown_defaults_override_public_facts() {
         "supported_parameters":["tools","reasoning"],
         "reasoning":{"mandatory":false,"default_enabled":true,
             "supported_efforts":["high","low","none"],"default_effort":"high"}}]});
-    let snapshot = Snapshot::from_sources(None, Some(&router)).unwrap();
+    let snapshot = from_values(None, Some(&router)).unwrap();
     let reported = ModelInfo {
         thinking_levels: Some(vec![]),
         default_thinking_level: None,
@@ -355,7 +367,7 @@ fn models_dev_efforts_are_explicit_and_native_toggle_is_not_a_gateway_effort() {
             "id":"new-effort","reasoning":true,
             "reasoning_options":[{"type":"effort","values":["none","high"]},{"type":"budget_tokens","min":2048}]}}}
     });
-    let snapshot = Snapshot::from_sources(Some(&models_dev), None).unwrap();
+    let snapshot = from_values(Some(&models_dev), None).unwrap();
     assert_eq!(
         snapshot
             .get("deepseek", "new-model")
@@ -394,7 +406,7 @@ fn malformed_sources_and_conflicting_exact_identities_are_not_empty_successes() 
         json!({"x":{"id":"other","models":{}}}),
         json!({"x":{"id":"x","models":{"key":{"id":"other"}}}}),
     ] {
-        assert!(Snapshot::from_sources(Some(&models_dev), None).is_err());
+        assert!(from_values(Some(&models_dev), None).is_err());
     }
     for router in [
         json!(null),
@@ -402,9 +414,9 @@ fn malformed_sources_and_conflicting_exact_identities_are_not_empty_successes() 
         json!({"data":[{}]}),
         json!({"data":[{"id":"same"},{"id":"same"}]}),
     ] {
-        assert!(Snapshot::from_sources(None, Some(&router)).is_err());
+        assert!(from_values(None, Some(&router)).is_err());
     }
-    let snapshot = Snapshot::from_sources(None, Some(&json!({"data":[{
+    let snapshot = from_values(None, Some(&json!({"data":[{
         "id":"image/new","architecture":{"input_modalities":["text","file","image"],"output_modalities":["image"]}
     }]}))).unwrap();
     let model = snapshot.get("openrouter", "image/new").unwrap();
@@ -458,4 +470,53 @@ async fn explicit_refresh_enqueues_synchronously_and_reports_the_owner_receipt()
     let completed = catalog.request_refresh().unwrap();
     replacement.recv().await.unwrap().send(Ok(())).unwrap();
     completed.await.unwrap().unwrap();
+}
+
+#[test]
+fn raw_sources_resolve_decoded_duplicates_before_schema_validation() {
+    use maka_agent_facts::public_catalog::PublicCatalogBody;
+    let models = r#"{"x":null,"\u0078":{"id":1,"id":"x","models":null,"models":{"m":false,"\u006d":{"id":1,"id":"m","name":"Final","canonical_model_id":null}}}}"#;
+    let router = r#"{"data":null,"\u0064ata":[{"id":null,"id":"raw/model","name":false,"name":"Final router"}]}"#;
+    let raw_models = PublicCatalogBody::from_json(models.into()).unwrap();
+    let raw_router = PublicCatalogBody::from_json(router.into()).unwrap();
+    let actual = Snapshot::from_sources(Some(&raw_models), Some(&raw_router)).unwrap();
+    let expected = from_values(
+        Some(&serde_json::from_str(models).unwrap()),
+        Some(&serde_json::from_str(router).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(actual.models, expected.models);
+    assert_eq!(actual.descriptions, expected.descriptions);
+    assert_eq!(
+        actual.get("x", "m").unwrap().display_name.as_deref(),
+        Some("Final")
+    );
+    assert_eq!(
+        actual
+            .get("openrouter", "raw/model")
+            .unwrap()
+            .display_name
+            .as_deref(),
+        Some("Final router")
+    );
+    for input in [
+        r#"{"data":[],"data":null}"#,
+        r#"{"data":[{"id":"same"},{"id":"same"}]}"#,
+        r#"{"data":[{"id":"valid","id":false}]}"#,
+    ] {
+        let body = PublicCatalogBody::from_json(input.into()).unwrap();
+        assert!(Snapshot::from_sources(None, Some(&body)).is_err());
+    }
+    let bad_model = PublicCatalogBody::from_json(
+        r#"{"x":{"id":"x","models":{"m":{"id":"m","id":"other"}}}}"#.into(),
+    )
+    .unwrap();
+    assert!(Snapshot::from_sources(Some(&bad_model), None).is_err());
+    // Hidden JSON-invalid metadata cannot cross the validated input boundary.
+    for input in [
+        r#"{"x":1e400,"x":{}}"#,
+        r#"{"data":[],"unknown":"\ud800","unknown":null}"#,
+    ] {
+        assert!(PublicCatalogBody::from_json(input.into()).is_err());
+    }
 }

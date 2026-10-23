@@ -21,7 +21,10 @@
 //! and publication belong to the product owner; account observations and user
 //! policy remain separate.
 
-use maka_agent_facts::configuration::{ModelInfo, validation};
+use maka_agent_facts::{
+    configuration::{ModelInfo, validation},
+    public_catalog::PublicCatalogBody,
+};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -133,8 +136,8 @@ impl Snapshot {
     /// Each present source must be a complete valid JSON payload. Cache/fallback
     /// selection occurs before this pure boundary, without changing source IDs.
     pub fn from_sources(
-        models_dev: Option<&Value>,
-        openrouter: Option<&Value>,
+        models_dev: Option<&PublicCatalogBody>,
+        openrouter: Option<&PublicCatalogBody>,
     ) -> Result<Self, String> {
         let mut snapshot = Self::bundled()?;
         let entries = models_dev

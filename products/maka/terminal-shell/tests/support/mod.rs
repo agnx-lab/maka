@@ -1325,7 +1325,13 @@ impl ReplyGate {
         disconnect: bool,
         before: Option<Value>,
     ) -> Self {
-        let address = socket(directory, &format!("gate-{method}-{disconnect}"));
+        // Keep the basename independent of RPC spelling: macOS expands /var
+        // to /private/var before binding its bounded Unix socket path.
+        static NEXT_GATE: AtomicUsize = AtomicUsize::new(0);
+        let address = socket(
+            directory,
+            &format!("gate-{}", NEXT_GATE.fetch_add(1, Ordering::Relaxed)),
+        );
         let mut listener = LocalListener::bind(&address).unwrap();
         let armed = Arc::new(AtomicUsize::new(0));
         let held = Arc::new(Notify::new());

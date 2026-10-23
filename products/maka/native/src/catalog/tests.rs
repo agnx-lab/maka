@@ -21,7 +21,7 @@ use super::*;
 use futures_util::future::BoxFuture;
 use maka_agent_ports::model::{Connect, Error, Socket};
 use maka_event_log::root::{RootNamespaces, RootOwner};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::Mutex};
 use tokio::sync::Semaphore;
 
@@ -84,7 +84,7 @@ impl http::Body for Bytes {
 }
 fn record(body: Value, etag: &str) -> PublicCatalogRecord {
     PublicCatalogRecord {
-        body,
+        body: PublicCatalogBody::from_json(body.to_string()).unwrap(),
         etag: Some(etag.into()),
         last_modified: Some("Wed, 21 Oct 2026 08:00:00 GMT".into()),
         checked_at: 1,
@@ -218,7 +218,13 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
         "304 freshness must not advance the catalog"
     );
     assert_eq!(
-        current.sources[&PublicCatalogSource::ModelsDev].body,
+        serde_json::from_str::<Value>(
+            current.sources[&PublicCatalogSource::ModelsDev]
+                .body
+                .as_raw()
+                .get()
+        )
+        .unwrap(),
         json!({})
     );
     assert_eq!(
@@ -229,7 +235,13 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
     );
     assert!(current.sources[&PublicCatalogSource::ModelsDev].checked_at > 1);
     assert_eq!(
-        current.sources[&PublicCatalogSource::OpenRouter].body,
+        serde_json::from_str::<Value>(
+            current.sources[&PublicCatalogSource::OpenRouter]
+                .body
+                .as_raw()
+                .get()
+        )
+        .unwrap(),
         updated
     );
     assert_eq!(
@@ -269,11 +281,21 @@ async fn conditional_refresh_is_single_flight_and_keeps_last_good_after_invalid_
     }
     transport.release.add_permits(2);
     assert!(catalog.request_refresh().unwrap().await.unwrap().is_err());
+    let retained = audit.public_catalog().await.unwrap();
+    let why = "invalid sources must preserve both durable last-good records";
+    assert_eq!(retained.catalog_revision, current.catalog_revision, "{why}");
+    assert_eq!(retained.sources.len(), current.sources.len(), "{why}");
     assert_eq!(
-        audit.public_catalog().await.unwrap(),
-        current,
-        "invalid sources must preserve both durable last-good records"
+        retained.sources.keys().collect::<Vec<_>>(),
+        current.sources.keys().collect::<Vec<_>>(),
+        "{why}"
     );
+    for (source, original) in &current.sources {
+        assert!(
+            retained.sources[source].same_content(original).unwrap(),
+            "{why}"
+        );
+    }
     assert_eq!(
         catalog
             .snapshot
@@ -396,7 +418,11 @@ async fn failed_publication_reconciles_durable_state_or_fails_the_reader_closed(
     assert!(receipt.is_err());
     let durable = audit.public_catalog().await.unwrap();
     assert_eq!(durable.catalog_revision, revision);
-    assert_eq!(durable.sources[&PublicCatalogSource::OpenRouter], original);
+    assert!(
+        durable.sources[&PublicCatalogSource::OpenRouter]
+            .same_content(&original)
+            .unwrap()
+    );
     assert_eq!(
         catalog
             .snapshot
@@ -531,5 +557,73 @@ async fn shutdown_joins_both_bodies_and_preserves_unconfirmed_cleanup() {
         transport.acknowledgement.add_permits(1);
         assert_eq!(shutdown.await.unwrap().is_err(), unconfirmed);
         drop(root);
+    }
+}
+
+struct RawResponse(Arc<RawBody>);
+struct RawBody {
+    bytes: Mutex<Option<Vec<u8>>>,
+    cancelled: std::sync::atomic::AtomicBool,
+    closed: std::sync::atomic::AtomicBool,
+}
+impl Transport for RawResponse {
+    fn identity(&self) -> u64 {
+        3
+    }
+    fn request(&self, _: http::Request) -> BoxFuture<'_, Result<http::Response, Error>> {
+        Box::pin(async {
+            Ok(http::Response {
+                head: http::Head {
+                    status: 200,
+                    url: String::new(),
+                    headers: vec![],
+                },
+                body: self.0.clone(),
+            })
+        })
+    }
+    fn connect(&self, _: Connect) -> BoxFuture<'_, Result<Arc<dyn Socket>, Error>> {
+        Box::pin(async { Err(Error::Adapter("catalogs do not use WebSockets".into())) })
+    }
+}
+impl http::Body for RawBody {
+    fn next(&self) -> BoxFuture<'_, Result<Option<Vec<u8>>, http::Error>> {
+        Box::pin(async { Ok(self.bytes.lock().unwrap().take()) })
+    }
+    fn cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn close(&self) -> BoxFuture<'_, Result<(), http::Error>> {
+        Box::pin(async {
+            self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+#[tokio::test]
+async fn invalid_utf8_and_hidden_invalid_json_still_close_the_http_body() {
+    for bytes in [
+        b"{\"unknown\":\"\xff\"}".to_vec(),
+        br#"{"data":[],"unknown":1e400,"unknown":null}"#.to_vec(),
+        br#"{"data":[],"unknown":"\ud800","unknown":null}"#.to_vec(),
+    ] {
+        let body = Arc::new(RawBody {
+            bytes: Mutex::new(Some(bytes)),
+            cancelled: false.into(),
+            closed: false.into(),
+        });
+        assert!(
+            fetch(
+                Arc::new(RawResponse(body.clone())),
+                SOURCES[1].1,
+                None,
+                &CancellationToken::new()
+            )
+            .await
+            .is_err()
+        );
+        assert!(body.cancelled.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(body.closed.load(std::sync::atomic::Ordering::SeqCst));
     }
 }
