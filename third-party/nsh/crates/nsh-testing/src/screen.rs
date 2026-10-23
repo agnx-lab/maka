@@ -9,7 +9,10 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
 };
 
 use nsh_core::{
@@ -76,6 +79,62 @@ pub(crate) enum Back {
     Nothing,
 }
 
+#[derive(Debug)]
+pub(crate) enum InputResult {
+    CancelTouch(u32),
+    SetStates(NodeId, u8),
+    RetireListCell {
+        id: NodeId,
+        request: u64,
+        /// A focused descendant refused retirement; its path precedes the reply.
+        focus_path: Option<Vec<NodeId>>,
+    },
+}
+
+/// One actual finger, shared with the driver while its gesture is running.
+/// Removing its owners ends this contact even if their ids mount again.
+#[derive(Debug)]
+pub(crate) struct Contact {
+    pub(crate) id: u32,
+    pub(crate) target: NodeId,
+    owners: Vec<NodeId>,
+    active: AtomicBool,
+    reporting: AtomicBool,
+    native: AtomicU32,
+}
+
+/// The window's native modal presentation slots, including parked ones.
+#[derive(Debug)]
+struct Presentation {
+    id: NodeId,
+    live: bool,
+}
+
+impl Contact {
+    pub(crate) fn active(&self) -> bool {
+        self.active.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn reporting(&self) -> bool {
+        self.reporting.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn stop_reporting(&self) {
+        self.reporting.store(false, Ordering::Relaxed);
+    }
+
+    pub(crate) fn capture_native(&self, owner: NodeId) {
+        self.native.store(owner, Ordering::Relaxed);
+    }
+
+    pub(crate) fn native_owner(&self) -> Option<NodeId> {
+        match self.native.load(Ordering::Relaxed) {
+            0 => None,
+            owner => Some(owner),
+        }
+    }
+}
+
 /// The native views as the mount items built them: their tree, what they
 /// show (text, test id, accessibility label), the events they report,
 /// inputs' text, scroll views' offsets, the screens and modals a back
@@ -89,6 +148,10 @@ pub struct Screen {
     commands: Vec<(NodeId, Command)>,
     /// The input that has the focus.
     focused: Option<NodeId>,
+    /// Actual fingers down, until they lift or the native tree revokes them.
+    contacts: Vec<Arc<Contact>>,
+    /// Native input results retain their order within each consumed batch.
+    input_results: Vec<InputResult>,
     /// Scroll views a command moved, whose offset the engine is told
     /// ([`Screen::take_scrolled`]), as a platform reports it.
     scrolled: Vec<NodeId>,
@@ -96,8 +159,10 @@ pub struct Screen {
     popped: HashSet<NodeId>,
     /// Modals a back closed natively, until the app removes them.
     closed: HashSet<NodeId>,
-    /// Modals presented since the last call (`onShow`).
-    presented: Vec<NodeId>,
+    /// Canonical native modal order: projection restores the existing slot.
+    presented: Vec<Presentation>,
+    /// New presentations waiting for `onShow`; this is only an event queue.
+    shows: Vec<NodeId>,
     /// The dialogs shown, in order, and how many were answered.
     dialogs: Vec<Dialog>,
     answered: usize,
@@ -280,6 +345,26 @@ impl Screen {
         }
     }
 
+    /// A real host owns retirement decisions; only the core's confirmation
+    /// updates this mirror after the native reply reaches the core.
+    #[cfg(feature = "agent")]
+    pub(crate) fn observe(&mut self, batch: &MountBatch) {
+        for item in &batch.items {
+            match item {
+                MountItem::RetireListCell { .. } => {}
+                MountItem::ListCellRetired { roots } => {
+                    for root in roots {
+                        self.park_presentations(*root);
+                        self.detach(*root);
+                        self.popped.remove(root);
+                        self.closed.remove(root);
+                    }
+                }
+                _ => self.apply_item(item),
+            }
+        }
+    }
+
     fn apply_item(&mut self, item: &MountItem) {
         match item {
             MountItem::Create { id, kind } => {
@@ -295,24 +380,83 @@ impl Screen {
                 parent,
                 child,
                 before,
+            } => self.insert(*parent, *child, *before),
+            MountItem::ProjectRoot {
+                parent,
+                id,
+                following,
             } => {
-                self.detach(*child);
-                let siblings = self.children.entry(*parent).or_default();
-                let at = before
-                    .and_then(|b| siblings.iter().position(|s| *s == b))
-                    .unwrap_or(siblings.len());
-                siblings.insert(at, *child);
-                self.nodes.entry(*child).or_default().parent = Some(*parent);
-                if self.kind(*child) == Some(ViewKind::Modal) {
-                    self.presented.push(*child);
-                }
+                // Logical siblings do not describe the window's modal stack.
+                let before = if self.kind(*id) == Some(ViewKind::Modal) {
+                    None
+                } else {
+                    // These roots have platform-owned presentation slots,
+                    // rather than their parent's ordinary content host.
+                    let slot = |node| {
+                        self.kind(node).filter(|kind| {
+                            matches!(
+                                kind,
+                                ViewKind::Modal
+                                    | ViewKind::Screen
+                                    | ViewKind::HeaderItem
+                                    | ViewKind::InputAccessory
+                            )
+                        })
+                    };
+                    let host = slot(*id);
+                    following.iter().copied().find(|next| {
+                        next != id
+                            && slot(*next) == host
+                            && self
+                                .nodes
+                                .get(next)
+                                .is_some_and(|view| view.parent == Some(*parent))
+                            && self
+                                .children
+                                .get(parent)
+                                .is_some_and(|siblings| siblings.contains(next))
+                    })
+                };
+                self.insert(*parent, *id, before);
             }
+            MountItem::RetireListCell { id, request, roots } => {
+                let actual = self.focus_path();
+                let focus_path = roots
+                    .iter()
+                    .any(|root| actual.contains(root))
+                    .then_some(actual);
+                if focus_path.is_none() {
+                    for root in roots {
+                        self.revoke_contacts(*root);
+                        self.revoke_hovered(*root);
+                        self.park_presentations(*root);
+                        self.detach(*root);
+                        self.popped.remove(root);
+                        self.closed.remove(root);
+                    }
+                }
+                self.input_results.push(InputResult::RetireListCell {
+                    id: *id,
+                    request: *request,
+                    focus_path,
+                });
+            }
+            // The real host already detached these roots before replying.
+            MountItem::ListCellRetired { .. } => {}
             MountItem::Remove { id } => {
+                self.revoke_contacts(*id);
+                self.revoke_hovered(*id);
+                self.revoke_focus(*id);
+                self.remove_presentations(*id);
                 self.detach(*id);
                 self.popped.remove(id);
                 self.closed.remove(id);
             }
             MountItem::Delete { id } => {
+                self.revoke_contacts(*id);
+                self.revoke_hovered(*id);
+                self.revoke_focus(*id);
+                self.remove_presentations(*id);
                 self.drop_spans(*id);
                 self.canvas(*id, &[]);
                 self.detach(*id);
@@ -320,9 +464,6 @@ impl Screen {
                 self.children.remove(id);
                 self.popped.remove(id);
                 self.closed.remove(id);
-                if self.focused == Some(*id) {
-                    self.focused = None;
-                }
             }
             MountItem::ScreenConfig { id, config } => {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
@@ -521,6 +662,26 @@ impl Screen {
     /// `text`: each a view in the model, inside the text view (or the span
     /// around it), as a platform finds the one under a finger.
     fn set_spans(&mut self, id: NodeId, text: &nsh_core::AttributedText) {
+        let retired = self
+            .nodes
+            .get(&id)
+            .map(|view| {
+                view.spans
+                    .iter()
+                    .copied()
+                    .filter(|old| {
+                        !text
+                            .links
+                            .iter()
+                            .any(|next| next.node == *old && next.is_enabled())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for old in retired {
+            self.revoke_contacts(old);
+            self.revoke_hovered(old);
+        }
         self.drop_spans(id);
         let mut links = text.links.clone();
         // Outer spans first, so each finds the one around it made.
@@ -586,6 +747,127 @@ impl Screen {
         {
             siblings.retain(|s| *s != id);
         }
+    }
+
+    fn insert(&mut self, parent: NodeId, child: NodeId, before: Option<NodeId>) {
+        self.detach(child);
+        let siblings = self.children.entry(parent).or_default();
+        let at = before
+            .and_then(|before| siblings.iter().position(|sibling| *sibling == before))
+            .unwrap_or(siblings.len());
+        siblings.insert(at, child);
+        self.nodes.entry(child).or_default().parent = Some(parent);
+        if self.kind(child) == Some(ViewKind::Modal) {
+            if let Some(presentation) = self.presented.iter_mut().find(|entry| entry.id == child) {
+                presentation.live = true;
+            } else {
+                self.presented.push(Presentation {
+                    id: child,
+                    live: true,
+                });
+                self.shows.push(child);
+            }
+        }
+    }
+
+    fn park_presentations(&mut self, root: NodeId) {
+        for at in 0..self.presented.len() {
+            let id = self.presented[at].id;
+            if id == root || self.is_inside(id, root) {
+                self.presented[at].live = false;
+                self.shows.retain(|shown| *shown != id);
+            }
+        }
+    }
+
+    fn remove_presentations(&mut self, root: NodeId) {
+        let presentations = std::mem::take(&mut self.presented);
+        for presentation in presentations {
+            if presentation.id == root || self.is_inside(presentation.id, root) {
+                self.shows.retain(|shown| *shown != presentation.id);
+            } else {
+                self.presented.push(presentation);
+            }
+        }
+    }
+
+    fn top_modal(&self, attached: &[NodeId]) -> Option<NodeId> {
+        self.presented
+            .iter()
+            .rev()
+            .find(|entry| entry.live && attached.contains(&entry.id))
+            .map(|entry| entry.id)
+    }
+
+    fn revoke_focus(&mut self, id: NodeId) {
+        if self
+            .focused
+            .is_some_and(|focus| focus == id || self.is_inside(focus, id))
+        {
+            self.focused = None;
+        }
+    }
+
+    /// Revoke before changing ancestry: a later Insert cannot revive a finger.
+    fn revoke_contacts(&mut self, root: NodeId) {
+        let contains = |id| id == root || self.is_inside(id, root);
+        let mut cancelled = Vec::new();
+        for contact in &self.contacts {
+            if contact.owners.iter().copied().any(contains) {
+                contact.active.store(false, Ordering::Relaxed);
+                if contact.reporting.swap(false, Ordering::Relaxed) {
+                    cancelled.push(InputResult::CancelTouch(contact.id));
+                }
+            }
+            if contact.native_owner().is_some_and(contains) {
+                contact.native.store(0, Ordering::Relaxed);
+            }
+        }
+        self.input_results.extend(cancelled);
+    }
+
+    /// Forget the actual hovered owners before their ids can be reused.
+    fn revoke_hovered(&mut self, root: NodeId) {
+        let hovered = std::mem::take(&mut self.hovered);
+        for owner in hovered {
+            if owner == root || self.is_inside(owner, root) {
+                if let Some(states) =
+                    self.set_state(owner, nsh_core::tailwind::state::HOVERED, false)
+                {
+                    self.input_results
+                        .push(InputResult::SetStates(owner, states));
+                }
+            } else {
+                self.hovered.push(owner);
+            }
+        }
+    }
+
+    pub(crate) fn begin_contact(
+        &mut self,
+        id: u32,
+        target: NodeId,
+        mut owners: Vec<NodeId>,
+        reporting: bool,
+    ) -> Arc<Contact> {
+        owners.push(target);
+        let contact = Arc::new(Contact {
+            id,
+            target,
+            owners,
+            active: AtomicBool::new(true),
+            reporting: AtomicBool::new(reporting),
+            native: AtomicU32::new(0),
+        });
+        self.contacts.push(contact.clone());
+        contact
+    }
+
+    pub(crate) fn end_contact(&mut self, contact: &Arc<Contact>) {
+        self.contacts.retain(|other| !Arc::ptr_eq(other, contact));
+        contact.active.store(false, Ordering::Relaxed);
+        contact.stop_reporting();
+        contact.native.store(0, Ordering::Relaxed);
     }
 
     /// The views on screen, in tree order: below the root, of a stack
@@ -739,11 +1021,7 @@ impl Screen {
     /// without one, the newest modal asks to close.
     pub(crate) fn back_target(&self) -> Back {
         let attached = self.attached();
-        let modal = attached
-            .iter()
-            .rev()
-            .copied()
-            .find(|id| self.kind(*id) == Some(ViewKind::Modal));
+        let modal = self.top_modal(&attached);
         let can_go_back = |stack: NodeId| {
             let screens = self.screens(stack);
             screens.len() >= 2
@@ -794,7 +1072,7 @@ impl Screen {
 
     /// The modals presented since the last call.
     pub(crate) fn take_presented(&mut self) -> Vec<NodeId> {
-        std::mem::take(&mut self.presented)
+        std::mem::take(&mut self.shows)
     }
 
     /// Whether the app asked for a back since the last call.
@@ -873,17 +1151,12 @@ impl Screen {
     /// topmost modal's first (the last presented), then the rest.
     fn by_layer(&self) -> Vec<NodeId> {
         let attached = self.shown();
-        let modals: Vec<NodeId> = attached
-            .iter()
-            .copied()
-            .filter(|id| self.kind(*id) == Some(ViewKind::Modal))
-            .collect();
-        let Some(top) = modals.last() else {
+        let Some(top) = self.top_modal(&attached) else {
             return attached;
         };
         let (mut first, rest): (Vec<NodeId>, Vec<NodeId>) = attached
             .into_iter()
-            .partition(|id| *id == *top || self.is_inside(*id, *top));
+            .partition(|id| *id == top || self.is_inside(*id, top));
         first.extend(rest);
         first
     }
@@ -1429,7 +1702,6 @@ impl Screen {
 
     /// View `id`'s interaction states with `bit` set (or cleared), when it
     /// tracks it and they change.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_state(&mut self, id: NodeId, bit: u8, on: bool) -> Option<u8> {
         let view = self.nodes.get_mut(&id)?;
         let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
@@ -1481,9 +1753,19 @@ impl Screen {
 
     /// Whether view `id` reports `event`.
     pub(crate) fn hears(&self, id: NodeId, event: EventKind) -> bool {
-        self.nodes
-            .get(&id)
-            .is_some_and(|v| v.events.contains(event))
+        self.is_attached(id)
+            && self
+                .nodes
+                .get(&id)
+                .is_some_and(|view| view.events.contains(event))
+    }
+
+    pub(crate) fn is_attached(&self, id: NodeId) -> bool {
+        id == ROOT || self.is_inside(id, ROOT)
+    }
+
+    pub(crate) fn take_input_results(&mut self) -> Vec<InputResult> {
+        std::mem::take(&mut self.input_results)
     }
 
     pub(crate) fn input(&self, id: NodeId) -> Option<&Input> {
@@ -1497,6 +1779,18 @@ impl Screen {
     /// The input that has the focus.
     pub(crate) fn focused(&self) -> Option<NodeId> {
         self.focused
+    }
+
+    pub(crate) fn focus_path(&self) -> Vec<NodeId> {
+        let Some(mut id) = self.focused else {
+            return Vec::new();
+        };
+        let mut path = vec![id];
+        while let Some(parent) = self.nodes.get(&id).and_then(|view| view.parent) {
+            path.push(parent);
+            id = parent;
+        }
+        path
     }
 
     pub(crate) fn set_focused(&mut self, id: Option<NodeId>) {
@@ -1549,7 +1843,7 @@ mod tests {
             frame(2, 0.0, 0.0, 200.0, 40.0),
             frame(4, 0.0, 0.0, 200.0, 40.0),
             frame(6, 0.0, 0.0, 200.0, 40.0),
-            insert(1, 2),
+            project(1, 2, &[]),
             insert(2, 6),
             insert(2, 4),
         ]));
@@ -1630,6 +1924,14 @@ mod tests {
         }
     }
 
+    fn project(parent: NodeId, id: NodeId, following: &[NodeId]) -> MountItem {
+        MountItem::ProjectRoot {
+            parent,
+            id,
+            following: following.to_vec(),
+        }
+    }
+
     fn frame(id: NodeId, x: f32, y: f32, width: f32, height: f32) -> MountItem {
         MountItem::Frame {
             id,
@@ -1678,16 +1980,30 @@ mod tests {
             frame(6, 0.0, 0.0, 100.0, 20.0),
             frame(10, 0.0, 0.0, 100.0, 20.0),
             frame(14, 0.0, 0.0, 100.0, 20.0),
-            insert(1, 2),
-            insert(2, 4),
+            project(1, 2, &[]),
+            project(2, 4, &[]),
             insert(4, 6),
-            insert(2, 8),
+            project(2, 8, &[]),
             insert(8, 10),
         ]));
         assert_eq!(screen.texts(), ["Details"]);
         screen.apply(&batch(vec![
+            create(16, ViewKind::Screen), // An independent root still parked.
+            create(18, ViewKind::Screen),
+            create(20, ViewKind::Stack),
+            project(1, 20, &[]),
+            project(20, 18, &[]), // An existing root in another native host.
+            project(2, 4, &[16, 18, 8]),
+        ]));
+        // A missing or foreign first candidate must not append Home on top.
+        assert_eq!(screen.texts(), ["Details"]);
+        screen.apply(&batch(vec![project(2, 8, &[16, 18, 4])]));
+        assert_eq!(screen.texts(), ["Home"]);
+        screen.apply(&batch(vec![project(2, 4, &[16, 18, 8])]));
+        assert_eq!(screen.texts(), ["Details"]);
+        screen.apply(&batch(vec![
             text(10, "Close"),
-            insert(1, 12),
+            project(1, 12, &[]),
             insert(12, 14),
         ]));
         assert_eq!(screen.texts(), ["Close", "Close"]);
@@ -1698,6 +2014,150 @@ mod tests {
         );
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(screen.texts(), ["Home", "Close"]);
+    }
+
+    #[test]
+    fn projected_cells_use_the_first_live_sibling_after_native_retirement() {
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            frame(2, 0.0, 0.0, 400.0, 400.0),
+            project(ROOT, 2, &[]),
+            create(18, ViewKind::View),
+            frame(18, 0.0, 0.0, 400.0, 400.0),
+            project(ROOT, 18, &[]),
+            create(20, ViewKind::View),
+            project(18, 20, &[]),
+            create(22, ViewKind::View), // A root not currently in a native host.
+        ]));
+        for (id, label) in [(4, "A"), (8, "B"), (12, "C")] {
+            screen.apply(&batch(vec![
+                create(id, ViewKind::View),
+                create(id + 2, ViewKind::Text),
+                text(id + 2, label),
+                frame(id, 0.0, 0.0, 100.0, 40.0),
+                frame(id + 2, 0.0, 0.0, 100.0, 20.0),
+                project(2, id, &[]),
+                insert(id, id + 2),
+            ]));
+        }
+        screen.apply(&batch(vec![
+            create(24, ViewKind::Modal),
+            project(2, 24, &[]), // Same logical parent, a different native host.
+            create(16, ViewKind::Input),
+            insert(8, 16),
+            MountItem::Command {
+                id: 16,
+                command: Command::Focus,
+            },
+            MountItem::RetireListCell {
+                id: 8,
+                request: 1,
+                roots: vec![8],
+            },
+            project(2, 4, &[22, 20, 24, 8, 12]),
+        ]));
+        assert_eq!(screen.texts(), ["A", "B", "C"]);
+        assert!(matches!(screen.take_input_results().as_slice(),
+            [InputResult::RetireListCell { id: 8, request: 1, focus_path: Some(path) }]
+                if path.first() == Some(&16)));
+
+        screen.apply(&batch(vec![
+            MountItem::Command {
+                id: ROOT,
+                command: Command::Blur,
+            },
+            MountItem::RetireListCell {
+                id: 8,
+                request: 2,
+                roots: vec![8],
+            },
+            project(2, 4, &[22, 20, 24, 8, 12]),
+        ]));
+        assert_eq!(screen.texts(), ["A", "C"]);
+        assert!(matches!(
+            screen.take_input_results().as_slice(),
+            [InputResult::RetireListCell {
+                id: 8,
+                request: 2,
+                focus_path: None
+            }]
+        ));
+        screen.apply(&batch(vec![project(2, 8, &[12])]));
+        assert_eq!(screen.texts(), ["A", "B", "C"]);
+    }
+
+    #[test]
+    fn parked_modals_keep_their_window_slot_across_projection_parents() {
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(18, ViewKind::View),
+            project(ROOT, 2, &[]),
+            project(ROOT, 18, &[]),
+            create(4, ViewKind::Modal),
+            create(6, ViewKind::Text),
+            text(6, "Choose"),
+            frame(6, 0.0, 0.0, 100.0, 20.0),
+            project(2, 4, &[]),
+            insert(4, 6),
+            create(8, ViewKind::Modal),
+            create(10, ViewKind::Text),
+            text(10, "Choose"),
+            frame(10, 0.0, 0.0, 100.0, 20.0),
+            project(18, 8, &[]),
+            insert(8, 10),
+            create(12, ViewKind::Input),
+            insert(8, 12),
+        ]));
+        let choose = Selector::parse("text:Choose").unwrap();
+        assert_eq!(screen.resolve(&choose), [10, 6]);
+        assert_eq!(screen.take_presented(), [4, 8]);
+        screen.apply(&batch(vec![
+            MountItem::Command {
+                id: 12,
+                command: Command::Focus,
+            },
+            MountItem::RetireListCell {
+                id: 8,
+                request: 1,
+                roots: vec![8],
+            },
+            project(18, 4, &[]),
+        ]));
+        assert!(matches!(
+            screen.take_input_results().as_slice(),
+            [InputResult::RetireListCell {
+                id: 8,
+                request: 1,
+                focus_path: Some(_)
+            }]
+        ));
+        assert_eq!(screen.resolve(&choose), [10, 6]);
+        assert!(screen.take_presented().is_empty());
+
+        screen.apply(&batch(vec![
+            MountItem::Command {
+                id: ROOT,
+                command: Command::Blur,
+            },
+            MountItem::RetireListCell {
+                id: 4,
+                request: 2,
+                roots: vec![4],
+            },
+        ]));
+        assert_eq!(screen.resolve(&choose), [10]);
+        screen.apply(&batch(vec![project(2, 4, &[])]));
+        assert_eq!(screen.resolve(&choose), [10, 6]);
+        assert!(screen.take_presented().is_empty());
+
+        screen.apply(&batch(vec![
+            MountItem::Remove { id: 4 },
+            project(2, 4, &[]),
+        ]));
+        assert_eq!(screen.resolve(&choose), [6, 10]);
+        assert_eq!(screen.take_presented(), [4]);
     }
 
     #[test]
@@ -1728,7 +2188,7 @@ mod tests {
             frame(12, 0.0, 0.0, 100.0, 20.0),
             frame(14, 0.0, 200.0, 400.0, 100.0),
             frame(16, 0.0, 1000.0, 100.0, 20.0),
-            insert(1, 2),
+            project(1, 2, &[]),
             insert(2, 4),
             insert(2, 6),
             insert(2, 8),
@@ -1793,7 +2253,7 @@ mod tests {
             create(4, ViewKind::Text),
             frame(2, 0.0, 0.0, 400.0, 800.0),
             frame(4, 0.0, 0.0, 300.0, 40.0),
-            insert(1, 2),
+            project(1, 2, &[]),
             insert(2, 4),
             // "Terms 🙂" (the emoji is two UTF-16 units), and "Privacy".
             linked(vec![link(13, 21, 100), link(26, 33, 102)]),

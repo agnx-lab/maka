@@ -18,9 +18,8 @@
  */
 
 import { tr } from './locale';
-import { cleanup, computed, Input, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, computed, Input, inputAction, signal, Text, View, List } from 'nsh';
 import type { YNode } from 'nsh';
-import { List } from 'nsh/list';
 import { keymap } from 'nsh/keymap';
 import { Button, Dialog } from 'nsh/base';
 import { Icon } from './Icon';

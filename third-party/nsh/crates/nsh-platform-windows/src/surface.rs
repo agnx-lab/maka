@@ -356,6 +356,23 @@ impl Surface {
         }
     }
 
+    /// The native keyboard owner followed by its mounted ancestors.
+    pub(crate) fn focus_path(&self) -> Vec<NodeId> {
+        let mut current = crate::native::focused(self)
+            .or_else(|| crate::text_input::focused(self))
+            .filter(NshView::attached);
+        let mut path = Vec::new();
+        while let Some(view) = current {
+            path.push(view.id());
+            current = view.parent_view();
+        }
+        path
+    }
+
+    pub(crate) fn sync_focus(&self) {
+        self.control(|control| control.set_focus_path(self.focus_path()));
+    }
+
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
         self.control(|c| c.dispatch_event(id, kind, payload));

@@ -126,6 +126,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
         }
         assert!(Instant::now() < deadline, "real Input did not load");
     }
+    assert!(platform.input_caret_bounds().is_none());
     let initial_count = Cell::new(count.get());
     let click = |y| {
         let position = point(px(32.0), px(y));
@@ -217,10 +218,20 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     stroke("a", Some("a"), false);
     platform.paste("你好😀").unwrap();
     assert_eq!(copied(), "a你好😀");
+    stroke("home", None, false);
+    let start = platform.input_caret_bounds().unwrap();
+    assert_eq!(start.origin.x, px(16.0));
+    assert!(start.origin.y >= px(16.0) && start.bottom() <= px(64.0));
+    stroke("end", None, false);
+    let end = platform.input_caret_bounds().unwrap();
+    assert!(end.origin.x > start.origin.x);
+    assert_eq!(end.origin.y, start.origin.y);
+    assert_eq!(count.get(), initial_count.get());
 
     // The same registered handler must consult live focus: clicking another
     // native press target stops paste without a paint to unregister it.
     click(96.0);
+    assert!(platform.input_caret_bounds().is_none());
     platform.paste("must not enter the old editor").unwrap();
     click(32.0);
     assert_eq!(copied(), "a你好😀");
@@ -229,6 +240,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     // native field focus can remain ready to resume when activation returns.
     platform.set_active(false).unwrap();
     platform.pump_with_draw(false);
+    assert!(platform.input_caret_bounds().is_none());
     platform.paste("must not enter an inactive editor").unwrap();
     platform.set_active(true).unwrap();
     platform.pump_with_draw(false);
@@ -311,6 +323,82 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
         scaled_count,
         "scaled input must not wait for another image"
     );
+    application.update(|cx| {
+        window
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .update(cx, |view, _, _| {
+                view.load_with_config(EngineConfig {
+                    ui_sets: vec![nsh_base::registry()],
+                    ..EngineConfig::new(App::Js(Bundle::source(
+                        r#"
+                        import { mount } from 'nsh';
+                        import { element, prop, append } from 'nsh:rt';
+                        mount(() => {
+                            const root = element('view');
+                            prop(root, 'style', {flex: 1, paddingTop: 64, paddingLeft: 16});
+                            const scroll = element('scroll');
+                            prop(scroll, 'style', {width: 240, height: 48});
+                            const input = element('input');
+                            prop(input, 'style', {width: 240, height: 48, backgroundColor: '#204060'});
+                            const tail = element('view');
+                            prop(tail, 'style', {height: 96});
+                            append(scroll, input);
+                            append(scroll, tail);
+                            append(root, scroll);
+                            return root;
+                        });
+                        "#
+                        .into(),
+                    )))
+                });
+            })
+            .unwrap();
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        platform.pump();
+        let ready = frames.borrow_mut().drain(..).any(|frame| {
+            let frame = frame.complete().unwrap();
+            frame.pixels()[(160 * 700 + 52) * 4..][..4] == [32, 64, 96, 255]
+        });
+        if ready {
+            break;
+        }
+        assert!(Instant::now() < deadline, "scrolling input did not paint");
+    }
+    initial_count.set(count.get());
+    click(80.0);
+    let visible = platform.input_caret_bounds().unwrap();
+    assert!(visible.origin.y > px(64.0) && visible.bottom() <= px(112.0));
+    let wheel = |dy| {
+        platform
+            .dispatch_input(PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+                position: point(px(32.0), px(80.0)),
+                delta: gpui::ScrollDelta::Pixels(point(px(0.0), px(dy))),
+                touch_phase: gpui::TouchPhase::Moved,
+                ..Default::default()
+            }))
+            .unwrap();
+        platform.pump_with_draw(false);
+    };
+    wheel(-24.0);
+    let partial = platform.input_caret_bounds().unwrap();
+    assert_eq!(partial.origin.y, px(64.0));
+    assert!(partial.size.height < visible.size.height);
+    wheel(-24.0);
+    // Focus is retained while the field's caret is above this Scroll, yet
+    // still inside the window. Native text acceptance must remain independent
+    // of the absent candidate-window anchor and of another GPU frame.
+    assert!(platform.input_caret_bounds().is_none());
+    platform.paste("hidden 你好😀").unwrap();
+    assert!(platform.input_caret_bounds().is_none());
+    wheel(48.0);
+    let restored = platform.input_caret_bounds().unwrap();
+    assert!(restored.origin.y > px(64.0) && restored.bottom() <= px(112.0));
+    assert_eq!(copied(), "hidden 你好😀");
+    assert_eq!(count.get(), initial_count.get());
     application.update(|cx| {
         window
             .borrow()

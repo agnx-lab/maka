@@ -3882,7 +3882,9 @@ impl<M: TextEngine> Core<M> {
                 return true;
             }
             for &(slot, index) in &bind.binds {
-                self.bind_virtual_cell(bind.list, slot as usize, index as usize);
+                if self.current_list_bind(bind.list, slot, index) {
+                    self.bind_virtual_cell(bind.list, slot as usize, index as usize);
+                }
             }
             bound = true;
             false

@@ -19,11 +19,9 @@
 
 import { createText, errorText, renderText, UiError, type UiText } from './text';
 import { tr } from './locale';
-import { cleanup, computed, inputAction, Scroll, signal, Text, View } from 'nsh';
+import { cleanup, computed, inputAction, Scroll, signal, Text, View, Image, List } from 'nsh';
 import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
-import { Image } from 'nsh/image';
-import { List } from 'nsh/list';
 import { host, type FileView } from './host';
 import type { AgentFileChange } from '../../../../packages/plugin-sdk/src/index.js';
 import type { WorkspaceFileTarget } from './workspaceFileState';

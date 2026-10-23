@@ -71,6 +71,26 @@ impl Presentation {
     }
 }
 
+/// Per-engine display control. Business configuration remains with the Host.
+pub(crate) struct UiScaleControl(Presentation);
+
+impl UiScaleControl {
+    pub(crate) fn preview(&self, scale: f32) -> Result<(), String> {
+        let mut state = self.0.state.lock().unwrap();
+        let inbox = state
+            .pixels
+            .as_mut()
+            .ok_or("pixel display is unavailable")?;
+        inbox.set_ui_scale(scale)?;
+        if let Some(wake) = &inbox.wake {
+            wake.unpark();
+        }
+        drop(state);
+        self.0.wake_driver();
+        Ok(())
+    }
+}
+
 /// Runs the first-party terminal UI. Ctrl+Q cancels independently of the
 /// UI and writer; Ctrl+C retains the surface's copy/exit behavior.
 /// An error reports incomplete output restoration;
@@ -117,13 +137,14 @@ pub(crate) fn run(
                 protocol: None,
                 synchronized: false,
                 sixel_geometry: Default::default(),
+                ui_scale: 1.0,
             },
             tracing,
         ));
         setup.extend(state.pixel_probe.query()?);
         setup
     };
-    output.submit(setup)?;
+    output.submit([setup])?;
     let mut input = None;
     let result = (|| {
         input = Some(start_reader(presentation.clone(), reader)?);
@@ -242,10 +263,10 @@ fn drive(
         }
         if writable {
             if let Some(bytes) = ready.take() {
-                output.submit(bytes)?;
+                output.submit([bytes])?;
                 writable = false;
             } else if let Some(query) = state.lock().unwrap().graphics.query() {
-                output.submit(query.to_vec())?;
+                output.submit([query.to_vec()])?;
                 setup = true;
                 writable = false;
             }
@@ -434,7 +455,7 @@ mod tests {
                     ..Default::default()
                 };
                 let mut output = Output::new(io::sink()).unwrap();
-                output.submit(b"SETUP".to_vec()).unwrap();
+                output.submit([b"SETUP".to_vec()]).unwrap();
                 started.send(thread::current()).unwrap();
                 drive(&mut output, &presentation, &commands, &receive, &pending)
             })
@@ -514,7 +535,7 @@ mod tests {
             resume: gate,
         })
         .unwrap();
-        output.submit(b"SETUP".to_vec()).unwrap();
+        output.submit([b"SETUP".to_vec()]).unwrap();
         let (commands, _worker) = mpsc::sync_channel(1);
         let (frames, receive) = mpsc::sync_channel(1);
         frames

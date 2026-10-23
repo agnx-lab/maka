@@ -47,6 +47,9 @@ final class InputBox extends FrameLayout implements Node {
     private int pendingCount;
     /** Inside the text watcher, where replacing the text would corrupt the IME's edit. */
     private boolean watching;
+    private final Runnable autoFocus = () -> {
+        if (isAttachedToWindow()) focus();
+    };
 
     InputBox(Context context, Mounter mounter, int id) {
         super(context);
@@ -240,7 +243,7 @@ final class InputBox extends FrameLayout implements Node {
         }
         boolean first = !configured;
         configured = true;
-        if (first && autoFocus) post(this::focus);
+        if (first && autoFocus) post(this.autoFocus);
         // The keyboard reads the action key when the input connects.
         if (restart && edit.hasFocus()) {
             InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -427,6 +430,10 @@ final class InputBox extends FrameLayout implements Node {
         edit.requestFocus();
         InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
+    }
+
+    void cancelAutoFocus() {
+        removeCallbacks(autoFocus);
     }
 
     void blur() {

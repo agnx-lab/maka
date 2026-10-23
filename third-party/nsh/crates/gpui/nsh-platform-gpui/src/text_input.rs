@@ -1089,22 +1089,83 @@ pub(crate) mod ime {
         let (x1, y1, _) = input.caret_rect(Some(end))?;
         let x1 = if y1 == y0 { x1.max(x0) } else { x0 };
         let content = content_rect(&view, &input);
-        let m = view.to_root()?;
-        let (ox, oy) = surface.origin.get();
-        let (Some(a), Some(b)) = (
-            m.map(content.origin.x.0 + x0, content.origin.y.0 + y0),
-            m.map(
-                content.origin.x.0 + x1 + CARET_WIDTH,
-                content.origin.y.0 + y0 + h,
-            ),
-        ) else {
+        let caret = crate::geom::rect(
+            content.origin.x.0 + x0,
+            content.origin.y.0 + y0,
+            x1 - x0 + CARET_WIDTH,
+            h,
+        )
+        .intersect(&content);
+        if caret.size.width.0 <= 0.0 || caret.size.height.0 <= 0.0 {
             return None;
-        };
+        }
+        let rectangle =
+            |x: f32, y: f32, w: f32, h: f32| [(x, y), (x + w, y), (x + w, y + h), (x, y + h)];
+        let mut polygon = rectangle(
+            caret.origin.x.0,
+            caret.origin.y.0,
+            caret.size.width.0,
+            caret.size.height.0,
+        )
+        .to_vec();
+        let mut current = view;
+        loop {
+            let state = current.state();
+            if state.opacity() <= 0.0 {
+                return None;
+            }
+            if state.clips() {
+                polygon = crate::decor::shape::clip_convex(
+                    &polygon,
+                    &rectangle(
+                        0.0,
+                        0.0,
+                        state.frame.size.width.0,
+                        state.frame.size.height.0,
+                    ),
+                );
+                if polygon.is_empty() {
+                    return None;
+                }
+            }
+            let Some(parent) = current.parent_view() else {
+                break;
+            };
+            let (x, y) = parent.state().child_origin(state.frame, state.shift);
+            let mut transform = crate::geom::Mat4::new().translate(x, y);
+            if let Some(local) = state.transform() {
+                transform = crate::geom::Mat4::mul(&local, &transform);
+            }
+            drop(state);
+            for point in &mut polygon {
+                *point = transform.map(point.0, point.1)?;
+            }
+            current = parent;
+        }
+        let (width, height) = surface.size();
+        let polygon =
+            crate::decor::shape::clip_convex(&polygon, &rectangle(0.0, 0.0, width, height));
+        let (mut left, mut top, mut right, mut bottom) = (
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        );
+        for (x, y) in polygon {
+            left = left.min(x);
+            top = top.min(y);
+            right = right.max(x);
+            bottom = bottom.max(y);
+        }
+        if left >= right || top >= bottom {
+            return None;
+        }
+        let (ox, oy) = surface.origin.get();
         Some(crate::render::bounds(
-            ox + a.0.min(b.0),
-            oy + a.1.min(b.1),
-            (b.0 - a.0).abs(),
-            (b.1 - a.1).abs(),
+            ox + left,
+            oy + top,
+            right - left,
+            bottom - top,
         ))
     }
 
@@ -1584,7 +1645,7 @@ pub(crate) fn set_selection(view: &NshView, start: u32, end: u32) {
 
 /// Characters typed into the focused field (the test agent's), as the
 /// input handler's `replace_text_in_range` brings them.
-#[cfg(any(feature = "dev", all(test, feature = "shot")))]
+#[cfg(any(feature = "dev", test))]
 pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
     ime::replace_text_in_range(surface, None, text);
 }

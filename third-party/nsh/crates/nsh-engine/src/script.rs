@@ -230,6 +230,14 @@ mod imp {
             self.host.cancel_touch(contact);
         }
 
+        pub(crate) fn invalid_touch_contacts(
+            &self,
+            accepts: impl FnMut(NodeId) -> bool,
+            contacts: &mut Vec<u32>,
+        ) {
+            self.host.invalid_touch_contacts(accepts, contacts);
+        }
+
         pub(crate) fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
             self.host.bind_list(list, binds);
         }
@@ -387,6 +395,14 @@ mod stub {
         }
 
         pub(crate) fn cancel_touch(&self, _: u32) {
+            match *self {}
+        }
+
+        pub(crate) fn invalid_touch_contacts(
+            &self,
+            _: impl FnMut(NodeId) -> bool,
+            _: &mut Vec<u32>,
+        ) {
             match *self {}
         }
 

@@ -391,7 +391,10 @@ impl Surface {
 
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
-        self.control(|c| c.dispatch_event(id, kind, payload));
+        self.control(|c| {
+            c.set_focus_path(crate::input::focus_path(self));
+            c.dispatch_event(id, kind, payload);
+        });
     }
 
     /// Shows fatal app errors with `f` (development hosts).

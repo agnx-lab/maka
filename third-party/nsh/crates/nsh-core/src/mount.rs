@@ -618,10 +618,46 @@ pub enum MountItem {
         /// The app sibling to insert below.
         before: Option<NodeId>,
     },
+    /// Projects an independent native root. A following root may still be
+    /// parked by an earlier retirement, or kept by native focus. Insert
+    /// below the first candidate actually attached to the same native host.
+    /// SDK-owned modal/route hosts retain their existing presentation order;
+    /// logical row siblings do not specify a global window stacking order.
+    ProjectRoot {
+        /// The root's native projection parent.
+        parent: NodeId,
+        /// The cell or promoted layout root to project.
+        id: NodeId,
+        /// Following siblings in core order, nearest first.
+        following: Vec<NodeId>,
+    },
     /// Remove a view from its superview, keeping it alive.
     Remove {
         /// View to detach.
         id: NodeId,
+    },
+    /// Retire a recycling cell only after native input can no longer target
+    /// its current owner. A focused descendant refuses retirement: publish
+    /// its native focus path before confirming `false`. Otherwise detach the
+    /// cell immediately, then confirm `true` through the engine's input FIFO.
+    /// This must be consumed by every platform, never silently ignored.
+    RetireListCell {
+        /// Cell to detach, keeping its current content alive until confirmed.
+        id: NodeId,
+        /// Correlates this request; cancelled and superseded replies are inert.
+        request: u64,
+        /// Native roots owned by this cell in the core's logical tree:
+        /// the cell itself and its promoted layout roots. Check focus for
+        /// the whole group before parking any root, then acknowledge once.
+        roots: Vec<NodeId>,
+    },
+    /// Confirms native roots have been parked by a list-cell retirement.
+    /// Native input is already excluded. A platform may collect the old
+    /// native presentation resources, isolated from any new projection;
+    /// otherwise it does nothing. Scene observers detach these roots.
+    ListCellRetired {
+        /// The retired cell and its promoted native roots.
+        roots: Vec<NodeId>,
     },
     /// Destroy a view.
     Delete {

@@ -285,6 +285,16 @@ pub(crate) fn drag_begin(surface: &Rc<Surface>, view: &NshView) {
     shared::drag_begin(&Host::new(surface, view));
 }
 
+/// Stops the row's scroll owners before its recycling acknowledgement.
+pub(crate) fn detached(surface: &Rc<Surface>, view: &NshView) {
+    if view.kind() == ViewKind::Scroll {
+        shared::detached(&Host::new(surface, view));
+    }
+    for child in view.child_views() {
+        detached(surface, &child);
+    }
+}
+
 /// The drag moved by `(dx, dy)` points since the last move (content
 /// follows the pointer: positive scrolls toward the start).
 pub(crate) fn drag_move(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {

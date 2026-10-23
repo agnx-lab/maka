@@ -143,7 +143,7 @@ impl Model {
             send(Outgoing::Trace(crate::trace::item_lines(batch)));
         }
         let mut state = self.lock();
-        state.screen.apply(batch);
+        state.screen.observe(batch);
         state.batches += 1;
         state.last = Some(Instant::now());
         drop(state);

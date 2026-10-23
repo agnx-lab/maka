@@ -98,6 +98,12 @@ public class NshView extends FrameLayout {
     private final TouchTracker touches;
 
     @Override
+    public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (handle != 0) mounter.publishFocusPath();
+    }
+
+    @Override
     public boolean dispatchTouchEvent(android.view.MotionEvent e) {
         boolean tracking = touches.onTouch(e);
         // A tracked finger went down: hear the rest of the gesture even if

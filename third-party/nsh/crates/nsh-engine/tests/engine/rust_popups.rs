@@ -79,7 +79,10 @@ fn a_popover_shows_its_content_over_the_box_that_clips_its_trigger() {
     while let Ok(batch) = rx.recv_deadline(deadline) {
         for item in &batch.items {
             match item {
-                MountItem::Insert { parent, child, .. } => parents.push((*parent, *child)),
+                MountItem::Insert { parent, child, .. }
+                | MountItem::ProjectRoot {
+                    parent, id: child, ..
+                } => parents.push((*parent, *child)),
                 MountItem::Frame { id, frame } => frames.push((*id, *frame)),
                 MountItem::ViewProps { id, props } if props.focus_return_parent.is_some() => {
                     focus_parents.push((*id, props.focus_return_parent));
@@ -164,7 +167,10 @@ fn a_toast_stack_from_rust_lays_its_toasts_out_as_layers() {
                     command: nsh_core::Command::Announce(m),
                     ..
                 } => announced.push(m.clone()),
-                MountItem::Insert { parent, child, .. } => parents.push((*parent, *child)),
+                MountItem::Insert { parent, child, .. }
+                | MountItem::ProjectRoot {
+                    parent, id: child, ..
+                } => parents.push((*parent, *child)),
                 MountItem::Frame { id, frame } => frames.push((*id, *frame)),
                 MountItem::Text { id, text, .. } => texts.push((*id, text.text.to_string())),
                 _ => {}

@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod cursor;
 mod geometry;
 mod input;
 mod mapping;
@@ -136,11 +137,12 @@ pub(super) fn run(
         }
         state.trace.is_some()
     };
-    output.submit(setup)?;
+    output.submit([setup])?;
     let (startup, handle) = session::spawn(config, presentation.clone())?;
     *worker = Some(handle);
     let mut starting = true;
     let mut phase = Phase::Setup;
+    let mut submitted_cursor = None;
     loop {
         if presentation.stop.load(Ordering::Acquire) {
             return Ok(());
@@ -221,7 +223,7 @@ pub(super) fn run(
                         // original character modes. Re-enable those after
                         // cleanup without re-entering the alternate screen.
                         restore.extend_from_slice(b"\x1b[?1000h\x1b[?1002h\x1b[?1006h");
-                        output.submit(restore)?;
+                        output.submit([restore])?;
                         while !output.poll()? {
                             if presentation.stop.load(Ordering::Acquire)
                                 || presentation.state.lock().unwrap().quit
@@ -273,15 +275,15 @@ pub(super) fn run(
             if let Some(generation) = missing
                 && state.pixel_probe.measurement.begin(generation)?
             {
-                output.submit(geometry::QUERY.to_vec())?;
+                drop(state);
+                output.submit([geometry::QUERY.to_vec()])?;
                 phase = Phase::Measure;
-            }
-            let inbox = state.pixels.as_mut().unwrap();
-            if !matches!(phase, Phase::Idle) {
                 continue;
             }
+            let inbox = state.pixels.as_mut().unwrap();
             if let Some(bytes) = inbox.effects.take() {
-                output.submit(bytes)?;
+                drop(state);
+                output.submit([bytes])?;
                 phase = Phase::Effect;
             } else if let Some(encoded) = inbox.take_encoded() {
                 if let Some(wake) = &inbox.wake {
@@ -291,43 +293,51 @@ pub(super) fn run(
                     token: encoded.frame.token(),
                     geometry: encoded.geometry,
                 };
-                let sample = tracing.then(|| {
-                    let at = Instant::now();
-                    let (bytes, image) = match &encoded.frame {
-                        input::WireFrame::Kitty(frame) => {
-                            (frame.wire().len(), Some(frame.image_id()))
-                        }
-                        input::WireFrame::Inline(frame) => (frame.bytes().len(), None),
-                    };
-                    (offer.clone(), at, bytes, image)
-                });
-                match encoded.frame {
+                let sample = tracing.then(|| (offer.clone(), Instant::now()));
+                let (bytes, image) = match encoded.frame {
                     input::WireFrame::Kitty(frame) => {
                         let image = frame.image_id();
                         // Upload and retirement share one indivisible writer
                         // transaction. q=1 preserves errors without a success
                         // reply round trip on the frame publication path.
-                        output.submit(frame.wire().to_vec())?;
-                        phase = Phase::Publish {
-                            offer,
-                            image: Some(image),
-                        };
+                        (frame.into_wire(), Some(image))
                     }
                     input::WireFrame::Inline(frame) => {
                         // Sixel and OSC File have no per-image ACK. Only the
                         // original writer's full flush publishes this draw.
-                        output.submit(frame.bytes().to_vec())?;
-                        phase = Phase::Publish { offer, image: None };
+                        (frame.into_bytes(), None)
+                    }
+                };
+                let cursor = inbox.cursor;
+                drop(state);
+                let parts = cursor.frame_parts(bytes);
+                let wire_bytes = parts.iter().map(Vec::len).sum();
+                output.submit(parts)?;
+                submitted_cursor = Some(cursor);
+                phase = Phase::Publish { offer, image };
+                if let Some((offer, at)) = sample {
+                    let mut state = presentation.state.lock().unwrap();
+                    if let Some(trace) = &mut state.trace {
+                        let sample = trace.record(
+                            &offer.token,
+                            offer.geometry,
+                            "upload_submit_begin",
+                            at,
+                            at,
+                        );
+                        sample.bytes = Some(wire_bytes);
+                        sample.image = image;
                     }
                 }
-                if let Some((offer, at, bytes, image)) = sample
-                    && let Some(trace) = &mut state.trace
-                {
-                    let sample =
-                        trace.record(&offer.token, offer.geometry, "upload_submit_begin", at, at);
-                    sample.bytes = Some(bytes);
-                    sample.image = image;
-                }
+            } else if submitted_cursor != Some(inbox.cursor)
+                && inbox.last_fully_written_geometry == Some(inbox.geometry)
+                && inbox.resize.is_none()
+            {
+                let cursor = inbox.cursor;
+                drop(state);
+                output.submit([cursor.bytes()])?;
+                submitted_cursor = Some(cursor);
+                phase = Phase::Effect;
             }
         }
         let measured = presentation

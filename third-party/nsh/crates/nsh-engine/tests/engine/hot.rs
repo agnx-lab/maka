@@ -64,7 +64,10 @@ impl Screen {
                 MountItem::Text { id, text, .. } => {
                     self.texts.insert(*id, text.text.clone());
                 }
-                MountItem::Insert { parent, child, .. } => {
+                MountItem::Insert { parent, child, .. }
+                | MountItem::ProjectRoot {
+                    parent, id: child, ..
+                } => {
                     self.parents.insert(*child, *parent);
                 }
                 MountItem::Remove { id } | MountItem::Delete { id } => {

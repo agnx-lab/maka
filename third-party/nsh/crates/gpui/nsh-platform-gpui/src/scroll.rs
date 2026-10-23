@@ -354,6 +354,19 @@ pub(crate) fn cancel_pointer(surface: &Rc<Surface>, view: &NshView) {
     shared::cancel_pointer(&Host::new(surface, view));
 }
 
+/// Ends the removed owner's scroll work before its native ancestry changes.
+/// A retained view may be inserted again before the next frame; that does
+/// not resume an old wheel settle, glide or animated command.
+pub(crate) fn retire_motion(surface: &Rc<Surface>, root: &NshView) {
+    let mut pending = vec![root.clone()];
+    while let Some(view) = pending.pop() {
+        pending.extend(view.child_views());
+        if view.kind() == ViewKind::Scroll {
+            shared::stop_motion(&Host::new(surface, &view));
+        }
+    }
+}
+
 /// Draws a scroll view's indicator, over its content (inside its clip),
 /// and the refresh spinner; the context is in the view's coordinates.
 pub(crate) fn draw_indicator(cx: &mut DrawCx<'_>, state: &ViewState) {
@@ -672,6 +685,77 @@ mod tests {
             s.horizontal = horizontal;
         }
         view
+    }
+
+    #[test]
+    fn source_removal_stops_owned_scroll_motion_but_insert_only_moves_continue() {
+        use nsh_core::{MountItem, ROOT_ID};
+
+        for removed in [false, true] {
+            let surface = Surface::new(nsh_engine::Environment::default());
+            surface.root.state_mut().frame = crate::geom::rect(0.0, 0.0, 300.0, 400.0);
+            for (id, kind, parent) in [(2, ViewKind::View, ROOT_ID), (4, ViewKind::Scroll, 2)] {
+                for item in [
+                    MountItem::Create { id, kind },
+                    MountItem::Frame {
+                        id,
+                        frame: crate::geom::rect(0.0, 0.0, 300.0, 400.0),
+                    },
+                    MountItem::Insert {
+                        parent,
+                        child: id,
+                        before: None,
+                    },
+                ] {
+                    surface.mounter.borrow_mut().apply(&surface, &item);
+                }
+            }
+            let scroll = surface.view(4).unwrap();
+            scroll.state_mut().scroll.as_mut().unwrap().content =
+                nsh_core::geometry::size(Points(300.0), Points(2000.0));
+            shared::command(
+                &Host::new(&surface, &scroll),
+                &Command::ScrollTo {
+                    x: Points(0.0),
+                    y: Points(200.0),
+                    animated: true,
+                },
+            );
+            if removed {
+                surface
+                    .mounter
+                    .borrow_mut()
+                    .apply(&surface, &MountItem::Remove { id: 2 });
+            }
+            surface.mounter.borrow_mut().apply(
+                &surface,
+                &MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            );
+            assert!(scroll.attached());
+            let now = surface.clock() * 1000.0;
+            shared::frame(&Host::new(&surface, &scroll), now + 1000.0);
+            assert_eq!(
+                scroll.state().scroll.as_ref().unwrap().y,
+                Points(if removed { 0.0 } else { 200.0 })
+            );
+
+            // Termination affects the old task, not future input on a
+            // retained native view.
+            shared::command(
+                &Host::new(&surface, &scroll),
+                &Command::ScrollTo {
+                    x: Points(0.0),
+                    y: Points(300.0),
+                    animated: true,
+                },
+            );
+            shared::frame(&Host::new(&surface, &scroll), now + 2000.0);
+            assert_eq!(scroll.state().scroll.as_ref().unwrap().y, Points(300.0));
+        }
     }
 
     #[test]

@@ -332,6 +332,30 @@ impl WindowState {
         }
     }
 
+    pub(crate) fn input_caret_bounds(state: &Rc<RefCell<Self>>) -> Option<Bounds<Pixels>> {
+        {
+            let state = state.borrow();
+            if state.closed || !state.active || !state.visible.is_visible() {
+                return None;
+            }
+        }
+        let mut handler = state.borrow_mut().input_handler.take()?;
+        let bounds = (|| {
+            if !handler.query_accepts_focused_text_input() {
+                return None;
+            }
+            let selection = handler.selected_text_range(false)?;
+            let caret = if selection.reversed {
+                selection.range.start
+            } else {
+                selection.range.end
+            };
+            handler.bounds_for_range(caret..caret)
+        })();
+        state.borrow_mut().input_handler.get_or_insert(handler);
+        bounds
+    }
+
     pub(crate) fn request_close(state: &Rc<RefCell<Self>>) {
         if state.borrow().closed {
             return;

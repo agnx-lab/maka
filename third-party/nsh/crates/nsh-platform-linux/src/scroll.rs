@@ -299,6 +299,16 @@ pub(crate) fn drag_begin(surface: &Rc<Surface>, view: &NshView) {
     shared::drag_begin(&Host::new(surface, view));
 }
 
+/// Stops the row's scroll owners before its recycling acknowledgement.
+pub(crate) fn detached(surface: &Rc<Surface>, view: &NshView) {
+    if view.kind() == ViewKind::Scroll {
+        shared::detached(&Host::new(surface, view));
+    }
+    for child in view.child_views() {
+        detached(surface, &child);
+    }
+}
+
 /// The drag moved by `(dx, dy)` points since it began.
 pub(crate) fn drag_move(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
     shared::drag_to(&Host::new(surface, view), point(Points(dx), Points(dy)));
@@ -479,8 +489,14 @@ pub(crate) fn install_keyboard(surface: &Rc<Surface>) {
         window.add_controller(keys);
         let weak = weak.clone();
         window.connect_focus_widget_notify(move |window| {
-            if let (Some(surface), Some(focus)) = (weak.upgrade(), GtkWindowExt::focus(window)) {
-                reveal(&surface, &focus);
+            if let Some(surface) = weak.upgrade() {
+                let focus = GtkWindowExt::focus(window);
+                surface.control(|control| {
+                    control.set_focus_path(crate::input::focus_path(&surface, focus.clone()));
+                });
+                if let Some(focus) = focus {
+                    reveal(&surface, &focus);
+                }
             }
         });
     });

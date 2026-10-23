@@ -19,9 +19,8 @@
 
 import { errorText, renderText, type UiText } from './text';
 import { tr } from './locale';
-import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, computed, inputAction, signal, Text, View, List } from 'nsh';
 import { Button } from 'nsh/base';
-import { List } from 'nsh/list';
 import { host } from './host';
 import type { GitArea, GitDiff, WorkspacePath } from '../../../../packages/plugin-sdk/src/index.js';
 import { parsePatch } from '../../desktop-shell/app/patch.js';

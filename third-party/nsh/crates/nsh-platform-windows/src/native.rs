@@ -461,6 +461,46 @@ impl Host {
     }
 }
 
+/// The page or registered child window that currently owns the keyboard.
+pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
+    use windows::Win32::UI::{Input::KeyboardAndMouse::GetFocus, WindowsAndMessaging::IsChild};
+    // SAFETY: querying this UI thread's native keyboard owner.
+    let focus = unsafe { GetFocus() };
+    surface.native.hosts.borrow().iter().find_map(|(id, host)| {
+        let focused = match host {
+            Host::Web(item) => item.focused(),
+            Host::Component(item) => item.window.get().is_some_and(|window| {
+                !focus.is_invalid()
+                    // SAFETY: both handles belong to this UI thread.
+                    && (focus == window || unsafe { IsChild(window, focus) }.as_bool())
+            }),
+            Host::Video(_) => false,
+        };
+        focused
+            .then(|| surface.view(*id))
+            .flatten()
+            .filter(NshView::attached)
+    })
+}
+
+/// Hides hosted input surfaces synchronously when a recycling row leaves
+/// the mounted tree, rather than waiting for the next drawn frame.
+pub(crate) fn detached(view: &NshView) {
+    let items: Vec<_> = view
+        .state()
+        .natives
+        .iter()
+        .map(|native| native.item.clone())
+        .collect();
+    for item in items {
+        item.placed(None);
+        item.compose_at(None);
+    }
+    for child in view.child_views() {
+        detached(&child);
+    }
+}
+
 /// Content that takes the keyboard (a dialog, a modal) comes over the
 /// views: a page that had the focus gives it back to the window, as a web
 /// view resigns first responder when something is presented over it.

@@ -211,9 +211,17 @@ zoomable Scroll on its pointer path takes the input. Each delivery pairs
 Hover entry and exit are reported, but continuous `onHoverMove` and
 `onMouseMove` callbacks are not emitted by this backend. The scripted
 `hover` step moves the pointer; it does not add those callbacks.
-Selection remains local to one selectable text node: `SelectionArea`
-does not yet enable cross-node selection or copying in the terminal,
-including across `TextView` blocks.
+`SelectionArea` shares one `nsh_core::selection::SelectionModel` across
+its text nodes, including multiline text and `TextView` blocks. It uses
+the shaped text's UTF-16 hit positions and text values, rather than copying
+terminal cells; `selectable={false}` labels and control captions stay out. Mouse
+dragging and Shift+click extend the selection, and dragging beyond a Scroll
+edge scrolls while the pointer is held. Ctrl+A selects the area, Ctrl+C or
+Ctrl+Insert copies, and Escape clears a nonempty selection. App keymaps
+retain their priority. A retained background selection receives these keys
+only in the active input scope: a modal or focused popup suspends its
+keyboard ownership until that scope closes. Selection copies use the same
+host clipboard services and complete OSC 52 output as other clipboard writes.
 
 The native animation graph and `motion.rs` presentation tracks run on
 terminal ticks. Layout animations interpolate frames and retain exiting

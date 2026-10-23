@@ -160,6 +160,11 @@ impl Gate {
         self.outer
     }
 
+    /// The view that owns this gate, even if the pointer target moved.
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+
     /// Decides on a drag by `(dx, dy)` from where the pointer went down:
     /// the gated view when its pan activates (the candidates around it are
     /// dropped), and whether the gate is still undecided.

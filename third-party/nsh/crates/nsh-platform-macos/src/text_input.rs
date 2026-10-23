@@ -238,6 +238,8 @@ pub(crate) struct InputState {
     config: RefCell<InputConfig>,
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
+    /// The first configuration's native autofocus callback is still live.
+    focus_pending: Cell<bool>,
     /// Content box; the whole view until the core sends one.
     content: Cell<Option<Bounds<Points>>>,
     /// User edits reported to the engine.
@@ -1179,6 +1181,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             placeholder,
             config: RefCell::new(InputConfig::default()),
             configured: Cell::new(false),
+            focus_pending: Cell::new(false),
             content: Cell::new(None),
             count: Cell::new(0),
             applying: Cell::new(false),
@@ -1421,6 +1424,7 @@ fn placeholder(
 /// Focuses the input once it is in a window (`autoFocus`): the view is
 /// configured before it is inserted.
 fn auto_focus(surface: &Rc<Surface>, input: &Rc<InputState>) {
+    input.focus_pending.set(true);
     let weak = Rc::downgrade(input);
     let mut frames = 0;
     surface.add_frame_callback(move |_, _| {
@@ -1428,14 +1432,33 @@ fn auto_focus(surface: &Rc<Surface>, input: &Rc<InputState>) {
         let Some(input) = weak.upgrade() else {
             return false;
         };
+        if !input.focus_pending.get() {
+            return false;
+        }
         let editor = input.editor.borrow().clone();
         if editor.responder().window().is_none() {
             // Not on screen yet; an input never shown stops trying.
-            return frames < 120;
+            if frames >= 120 {
+                input.focus_pending.set(false);
+                return false;
+            }
+            return true;
         }
+        input.focus_pending.set(false);
         editor.focus();
         false
     });
+}
+
+/// A pending autofocus must not steal focus after a virtual row's native
+/// subtree has detached but its input owner has not been deleted yet.
+pub(crate) fn cancel_auto_focus(view: &NshView) {
+    if let Some(input) = view.state().input.as_ref() {
+        input.focus_pending.set(false);
+    }
+    for child in view.child_views() {
+        cancel_auto_focus(&child);
+    }
 }
 
 /// Places the pad over the whole view and the editor (and a text view's

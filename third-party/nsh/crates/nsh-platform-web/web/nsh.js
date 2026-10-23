@@ -660,7 +660,13 @@ class Player {
         },
         submit: (p, l) => {
           const batch = JSON.parse(this.str(p, l));
-          this.apply(batch);
+          const retired = this.apply(batch);
+          this.submitResult = retired.length ? encoder.encode(JSON.stringify(retired)) : null;
+          return this.submitResult?.length ?? 0;
+        },
+        submit_result: (p, l) => {
+          this.bytes(p, l).set(this.submitResult);
+          this.submitResult = null;
         },
         request_frame: () => this.requestFrame(),
         request_pump: () => this.requestPump(),
@@ -1349,13 +1355,18 @@ class Player {
   // Mounting ------------------------------------------------------------
 
   apply(batch) {
+    const retired = [];
     for (const item of batch) {
       const handler = this[`op_${item[0]}`];
-      if (handler) handler.call(this, item);
+      if (handler) {
+        const result = handler.call(this, item);
+        if (item[0] === "rc") retired.push(result);
+      }
     }
     this.endLayoutAnimation();
     if (this.changedStacks.size) this.reconcileStacks();
     if (this.removals.length) this.finishRemovals();
+    return retired;
   }
 
   /** The batch is applied: views it removed leave the page, unless they
@@ -1440,17 +1451,57 @@ class Player {
     this.views.set(id, el);
   }
 
+  op_pr([, parentId, id, following]) {
+    const parent = this.view(parentId);
+    const child = this.view(id);
+    if (!parent || !child) return;
+    // Modal windows have their own presentation lifetime and global order;
+    // their logical siblings do not describe that native stack.
+    if (child._kind === "modal") {
+      this.op_i(["i", parentId, id, null]);
+      return;
+    }
+    const host = parent._layer ?? parent;
+    const before = following.map((sibling) => this.view(sibling)).find((view) =>
+      view && view !== child && (view._track ?? view).parentNode === host);
+    this.op_i(["i", parentId, id, before?._id ?? null]);
+    if (child._kind === "header" && child.parentNode === host) {
+      this.insertView(host, child, before?._track ?? before ?? null);
+    }
+  }
+
+  insertView(host, child, before) {
+    if (child.parentNode === host && child.nextSibling === before) return;
+    host.insertBefore(child, before);
+  }
+
   op_i([, parentId, childId, beforeId]) {
     const parent = this.view(parentId);
     const child = this.view(childId);
     if (!parent || !child) return;
+    const retired = child._listRetired;
+    if (retired) {
+      child._listRetired = false;
+      child.inert = false;
+    }
     if (child._kind === "modal") {
-      this.present(child);
+      if (retired) {
+        // A cancelled retirement restores the existing SDK presentation slot.
+        const before = [...this.root.children].find((view) => view._kind === "modal" && view._modalOrder > child._modalOrder);
+        this.insertView(this.root, child, before ?? null);
+        this.placeModal(child);
+        this.scopeFocus();
+        this.syncHistorySoon();
+      } else if (child.parentNode !== this.root || child._leaving) this.present(child);
       return;
     }
-    const before = beforeId == null ? null : this.view(beforeId);
+    const beforeView = beforeId == null ? null : this.view(beforeId);
+    const before = beforeView?._track ?? beforeView;
     if (child._kind === "header") {
       child._headerParent = parent;
+      if (retired) for (const screen of this.views.values()) {
+        if (screen._screen?.header === childId) this.placeHeader(screen);
+      }
       return;
     }
     // Back before its removal finished animating.
@@ -1459,16 +1510,26 @@ class Player {
     child._removing = false;
     child._leftWith = null;
     const host = parent._layer ?? parent;
-    host.insertBefore(child, before && before.parentNode === host ? before : null);
+    const projection = child._track ?? child;
+    if (projection !== child && child.parentNode !== projection) projection.append(child);
+    this.insertView(host, projection, before && before.parentNode === host ? before : null);
     if (parent._kind === "stack") {
-      this.changedStacks.add(parent);
-      this.stackChanged(parent, child);
+      if (retired) {
+        this.resetStack(parent);
+        if (parent._frame) this.reportRoot(child, parent._frame[2], parent._frame[3], this.screenInsets(child));
+      } else {
+        this.changedStacks.add(parent);
+        this.stackChanged(parent, child);
+      }
     }
+    if (retired) this.scopeFocus();
   }
 
   op_r([, id]) {
     const el = this.view(id);
     if (!el) return;
+    // A source removal ends a previously parked projection, not a new ACK.
+    if (el._listRetired) { el._listRetired = false; el.inert = false; }
     if (el._kind === "modal") {
       this.dismiss(el);
       return;
@@ -1478,6 +1539,161 @@ class Player {
     this.detach(el, parent);
     if (parent?._kind === "stack") this.stackChanged(parent);
     this.screenGone(el, focused);
+  }
+
+  op_rc([, id, request, rootIds]) {
+    const result = { id, request, retired: true, focus: this.focusPath(), cancelled: [], states: [] };
+    if (rootIds.some((root) => result.focus.includes(root))) {
+      result.retired = false;
+      return result;
+    }
+    // Detach immediately: a pooled cell must stop taking input and Tab
+    // before its old item can be rebound, regardless of exit animations.
+    const roots = rootIds.map((root) => this.view(root)).filter(Boolean);
+    for (const root of roots) {
+      root._listRetired = true;
+      root.inert = true;
+    }
+    Object.assign(result, this.cancelInput(roots));
+    for (const root of roots) {
+      for (const view of [root, ...root.querySelectorAll(".nsh-v")]) {
+        clearTimeout(view._modalDismissTimer);
+        view._modalDismissTimer = 0;
+        if (view._kind === "modal") {
+          view._entering = view._leaving = false;
+          view._closed = false;
+          view._restoreFocus = null;
+          view.style.transition = "";
+          view.style.transform = "";
+          view.style.opacity = "";
+        }
+        if (view._kind === "screen") {
+          view._popping = false;
+          view._removedFrom = null;
+          view._restoreFocus = null;
+          view.style.pointerEvents = "";
+          view.style.visibility = "";
+        }
+      }
+      const projection = root._track ?? root;
+      const parent = projection.parentNode;
+      projection.remove();
+      if (parent?._kind === "stack") this.resetStack(parent);
+    }
+    this.scopeFocus();
+    this.syncHistorySoon();
+    result.focus = this.focusPath();
+    return result;
+  }
+
+  // Retirement alone must revoke the old cell's native captures before ACK.
+  cancelInput(roots) {
+    const result = { cancelled: [], states: [] };
+    const contains = (view) => view && roots.some((root) => root.contains(view));
+    const states = new Map();
+    const cancelPress = (p) => {
+      clearTimeout(p.longTimer);
+      p.pressed = false;
+      for (const view of p.states) {
+        view._states &= ~PRESSED;
+        states.set(view._id, view._states);
+      }
+    };
+    if (contains(this.keyPress?.press)) {
+      cancelPress(this.keyPress);
+      this.keyPress = null;
+    }
+    if (contains(this.wheelPinchState?.el)) {
+      clearTimeout(this.wheelPinchState.timer);
+      this.wheelPinchState = null;
+    }
+    if (contains(this.gesture)) this.gesture = null;
+    if (contains(this.wheelLock?.el)) this.wheelLock = null;
+    for (const root of roots) {
+      for (const view of [root, ...root.querySelectorAll(".nsh-v")]) {
+        clearTimeout(view._autoFocusTimer);
+        view._autoFocusTimer = null;
+        cancelAnimationFrame(view._modalEnterFrame);
+        clearTimeout(view._modalShowTimer);
+        view._modalEnterFrame = view._modalShowTimer = 0;
+        for (const animation of view.getAnimations?.() ?? []) {
+          animation.onfinish = null;
+          animation.cancel();
+        }
+        if (view._frameAnimation) {
+          view._frameAnimation.onfinish = null;
+          view._frameAnimation.cancel();
+        }
+        view._frameAnimation = null;
+        if (view._kind === "stack") clearTimeout(view._hideTimer);
+        if (view._kind !== "scroll") continue;
+        clearTimeout(view._wheelZoomTimer);
+        view._wheelZoomTimer = null;
+        view._cancelPull?.();
+        cancelAnimationFrame(view._pullAnimation);
+        view._pullAnimation = 0;
+        cancelAnimationFrame(view._zoomAnimation);
+        view._zoomAnimation = 0;
+        if (view._glide) {
+          clearTimeout(view._glide.timer);
+          cancelAnimationFrame(view._glide.frame);
+          view._glide = null;
+          this.drive(view, -1);
+        }
+        if (view._momentumFrame) {
+          cancelAnimationFrame(view._momentumFrame);
+          view._momentumFrame = 0;
+          this.drive(view, -1);
+        }
+        clearTimeout(view._touchEndTimer);
+        view._touchEndTimer = null;
+        this.touchDrags?.delete(view);
+        view._touchDrag = false;
+        view._released = 0;
+        view._momentum = false;
+        view._ownEnd = null;
+        view._smooth = null;
+        view._restoreSnap = false;
+        view.style.scrollSnapType = "";
+        view.scrollTo({ left: view.scrollLeft, top: view.scrollTop, behavior: "instant" });
+      }
+    }
+    const twoFingerOwner = this.twoFinger && (this.twoFinger.el ?? this.twoFinger.zoom);
+    for (const [contact, p] of [...this.pointers]) {
+      const owner = twoFingerOwner ?? (p.mode === "pan" ? p.pan : p.mode === "bar" || p.mode === "scroll" ? p.scroll : null);
+      if (!contains(p.target ?? p.scroll) && !contains(owner)) continue;
+      cancelPress(p);
+      if (p.touchPath.length) result.cancelled.push(contact);
+      p.touchPath = [];
+      p.press = null;
+      p.states = [];
+      if (owner && !contains(owner)) {
+        // The row's touch and press ended, but an ancestor that already
+        // took over the gesture still owns its native drag or pinch.
+        p.target = null;
+        if (contains(p.pan)) p.pan = null;
+        if (contains(p.scroll)) p.scroll = null;
+        if (p.scrolls) p.scrolls = p.scrolls.filter((view) => !contains(view));
+        if (contains(p.zoom)) p.zoom = null;
+        if (contains(p.pinch)) p.pinch = null;
+        if (contains(p.gate)) {
+          p.gate = null;
+          p.gateState = 0;
+        }
+        continue;
+      }
+      this.pointers.delete(contact);
+      if (p.mode === "bar" || p.mode === "scroll") {
+        this.drive(p.scroll, -1);
+        if (p.mode === "bar") {
+          p.scroll._barHeld = false;
+          p.scroll.style.scrollSnapType = "";
+        }
+      }
+    }
+    if (contains(twoFingerOwner)) this.twoFinger = null;
+    result.states = [...states];
+    return result;
   }
 
   /** Takes `el` out of `parent`: a screen once its stack is reconciled
@@ -2549,6 +2765,10 @@ class Player {
     if (el._pullTouch) return;
     el._pullTouch = true;
     let start = null;
+    el._cancelPull = () => {
+      start = null;
+      el._pulling = false;
+    };
     el.addEventListener("touchstart", (e) => {
       start = e.touches.length === 1 && this.refreshable(el) && el._behavior?.enabled !== false
         ? { y: e.touches[0].clientY, v: el.scrollTop - el._pull, pulling: false }
@@ -2817,7 +3037,10 @@ class Player {
     field.classList.toggle("nsh-ph", !!config.placeholderColor);
     if (config.autoFocus && !el._autoFocused) {
       el._autoFocused = true;
-      setTimeout(() => field.focus(), 0);
+      el._autoFocusTimer = setTimeout(() => {
+        el._autoFocusTimer = null;
+        if (el.isConnected) field.focus();
+      }, 0);
     }
   }
 
@@ -2939,6 +3162,7 @@ class Player {
   placeHeader(screen) {
     const id = screen._screen?.header;
     const header = id != null ? this.view(id) : null;
+    if (header?._listRetired) return;
     if (screen._header && screen._header !== header) screen._header.remove();
     screen._header = header;
     if (!header) return;
@@ -2982,6 +3206,21 @@ class Player {
   /** A stack's screens, without one going back. */
   screensOf(stack) {
     return [...stack.children].filter((s) => s._kind === "screen" && !s._popping && !s._removedFrom);
+  }
+
+  /** A parked screen changes the native stack without navigation or focus return. */
+  resetStack(stack) {
+    clearTimeout(stack._hideTimer);
+    const screens = this.screensOf(stack);
+    stack._shown = screens;
+    stack._top = screens[screens.length - 1] ?? null;
+    for (const screen of screens) {
+      const top = screen === stack._top;
+      screen.classList.toggle("nsh-hidden", !top);
+      if (top) screen.style.transform = "";
+      this.placeHeader(screen);
+    }
+    this.syncHistorySoon();
   }
 
   /** How screen `screen` comes and goes: `{ duration, fade }`, or null
@@ -3275,6 +3514,11 @@ class Player {
   }
 
   present(el) {
+    // Retire must cancel pending callbacks before the core rebinds this node.
+    cancelAnimationFrame(el._modalEnterFrame);
+    clearTimeout(el._modalShowTimer);
+    clearTimeout(el._modalDismissTimer);
+    el._modalOrder = this.modalOrder = (this.modalOrder ?? 0) + 1;
     const motion = this.modalMotion(el);
     el._leaving = false;
     this.dropLeftWith(el);
@@ -3292,18 +3536,27 @@ class Player {
     el._entering = true;
     this.scopeFocus();
     this.syncHistorySoon();
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      el._entering = false;
-      el.style.transition = "";
-      el.style.transform = "";
-      el.style.opacity = "";
-      setTimeout(() => this.event(el._id, "onShow"), motion === "none" ? 0 : 350);
-    }));
+    el._modalEnterFrame = requestAnimationFrame(() => {
+      el._modalEnterFrame = requestAnimationFrame(() => {
+        el._modalEnterFrame = 0;
+        if (!el.isConnected || el._leaving || el._listRetired) return;
+        el._entering = false;
+        el.style.transition = "";
+        el.style.transform = "";
+        el.style.opacity = "";
+        el._modalShowTimer = setTimeout(() => {
+          el._modalShowTimer = 0;
+          if (el.isConnected && !el._leaving && !el._listRetired) this.event(el._id, "onShow");
+        }, motion === "none" ? 0 : 350);
+      });
+    });
   }
 
   /** Takes modal `el` away; `onDismiss` follows unless `reported`. */
   dismiss(el, reported = el._closed) {
     if (el._leaving) return;
+    cancelAnimationFrame(el._modalEnterFrame);
+    clearTimeout(el._modalShowTimer);
     el._leaving = true;
     const motion = this.modalMotion(el);
     this.hideModal(el, motion);
@@ -3311,7 +3564,8 @@ class Player {
     this.syncHistorySoon();
     const restore = el._restoreFocus;
     if (restore?.isConnected && !this.topModal()) restore.focus({ preventScroll: true });
-    setTimeout(() => {
+    el._modalDismissTimer = setTimeout(() => {
+      el._modalDismissTimer = 0;
       if (el._leaving) {
         el.remove();
         this.dropLeftWith(el);
@@ -4259,6 +4513,10 @@ class Player {
     return out;
   }
 
+  focusPath(target = document.activeElement) {
+    return target && this.root.contains(target) ? this.ancestors(this.viewOf(target)).map((view) => view._id) : [];
+  }
+
   /** Convert viewport coordinates through the view's composed 2D transforms. */
   mousePoint(el, e) {
     let a = 1, b = 0, c = 0, d = 1;
@@ -4800,6 +5058,7 @@ class Player {
     // pinch here.
     const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
     const p = {
+      target,
       x, y, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       press: isField ? null : chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
@@ -4990,7 +5249,11 @@ class Player {
           v._released = performance.now();
           this.scrollEvent(v, "onScrollDragEnd");
           // Without a glide no scroll follows (nor, sometimes, `scrollend`).
-          setTimeout(() => v._released && !v._momentum && this.scrollEnded(v), 200);
+          clearTimeout(v._touchEndTimer);
+          v._touchEndTimer = setTimeout(() => {
+            v._touchEndTimer = null;
+            if (v._released && !v._momentum) this.scrollEnded(v);
+          }, 200);
         }
         this.touchDrags.clear();
       };
@@ -5002,11 +5265,17 @@ class Player {
   /** Momentum after a touch panned a zoomable view (other touch scrolling
    * is the browser's), at `(vx, vy)` points per second. */
   glide(s, vx, vy) {
+    if (s._momentumFrame) {
+      cancelAnimationFrame(s._momentumFrame);
+      s._momentumFrame = 0;
+      this.drive(s, -1);
+    }
     let w = Math.abs(vx) > 80 ? vx / 1000 : 0;
     let v = Math.abs(vy) > 80 ? vy / 1000 : 0;
     let last = performance.now();
     const momentum = v !== 0 || w !== 0;
     const end = () => {
+      s._momentumFrame = 0;
       this.drive(s, -1);
       this.snapMarkers(s);
       if (momentum) this.scrollEvent(s, "onMomentumEnd");
@@ -5024,10 +5293,10 @@ class Player {
       s.scrollLeft += w * dt;
       v *= Math.pow(0.995, dt);
       w *= Math.pow(0.995, dt);
-      if (Math.abs(v) > 0.02 || Math.abs(w) > 0.02) requestAnimationFrame(step);
+      if (Math.abs(v) > 0.02 || Math.abs(w) > 0.02) s._momentumFrame = requestAnimationFrame(step);
       else end();
     };
-    requestAnimationFrame(step);
+    s._momentumFrame = requestAnimationFrame(step);
   }
 
   startTwoFinger() {

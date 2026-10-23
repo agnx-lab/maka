@@ -955,6 +955,24 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             out.end();
         }
         MountItem::Remove { id } => out.item("r").num(*id).end(),
+        MountItem::ProjectRoot {
+            parent,
+            id,
+            following,
+        } => {
+            out.item("pr")
+                .num(*parent)
+                .num(*id)
+                .raw(&serde_json::to_string(following).expect("node ids serialize as JSON"))
+                .end();
+        }
+        MountItem::RetireListCell { id, request, roots } => {
+            out.item("rc")
+                .num(*id)
+                .str(&request.to_string())
+                .raw(&serde_json::to_string(roots).expect("node ids serialize as JSON"))
+                .end();
+        }
         MountItem::Delete { id } => {
             forget_view(*id);
             out.item("d").num(*id).end();
@@ -1261,6 +1279,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         // Browsers hit-test what overflows a box themselves; the keymap
         // stays in Rust (`nsh_key`).
         MountItem::ComponentProps { .. }
+        | MountItem::ListCellRetired { .. }
         | MountItem::Keymap(_)
         | MountItem::Overflow { .. }
         | MountItem::AnimationBindings { .. }

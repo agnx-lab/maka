@@ -17,10 +17,9 @@
  * under the License.
  */
 
-import { Canvas, computed, effect, inputAction, signal, Text, View, Overlay } from 'nsh';
+import { Canvas, computed, effect, inputAction, signal, Text, View, Overlay, List } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
-import { List } from 'nsh/list';
 import { platform, windowSize } from 'nsh/device';
 import type { Position } from './history';
 import { C, controlStyle, captionTextStyle } from './ui';

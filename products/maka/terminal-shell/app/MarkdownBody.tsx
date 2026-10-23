@@ -21,6 +21,7 @@ import { errorText, renderText, type UiText } from './text';
 import { tr } from './locale';
 import { SourceText } from './SourceText';
 import { cleanup, computed, effect, signal, Text, View } from 'nsh';
+import { SelectionArea } from 'nsh/base';
 import { markdown } from 'maka/markdown';
 import type { MarkdownBlock } from 'maka/markdown';
 import { hasCompletePrefix, type Row } from './history';
@@ -112,41 +113,46 @@ export function MarkdownBody(props: {
     return parsed && compatible(parsed.input, input()) ? parsed.blocks : null;
   });
   return (
-    <If
-      when={blocks()}
-      else={
-        <View style={{ gap: 0 }}>
-          <Text
-            selectable
-            style={{
-              ...(props.compact ? secondaryTextStyle : bodyTextStyle),
-              color: props.compact ? C.muted : C.text,
-            }}
-          >
-            <SourceText row={props.row} sourceId={props.sourceId} />
-          </Text>
-          <If when={failure()}>
-            <Text style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.danger }}>
-              {tr('Formatting unavailable: {reason}', { reason: renderText(failure()!.message) })}
+    <SelectionArea>
+      <If
+        when={blocks()}
+        else={
+          <View style={{ gap: 0 }}>
+            <Text
+              selectable
+              style={{
+                ...(props.compact ? secondaryTextStyle : bodyTextStyle),
+                color: props.compact ? C.muted : C.text,
+              }}
+            >
+              <SourceText row={props.row} sourceId={props.sourceId} />
             </Text>
-          </If>
+            <If when={failure()}>
+              <Text
+                selectable={false}
+                style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.danger }}
+              >
+                {tr('Formatting unavailable: {reason}', { reason: renderText(failure()!.message) })}
+              </Text>
+            </If>
+          </View>
+        }
+      >
+        <View style={{ gap: props.compact ? 6 : 16 }}>
+          <Each of={blocks() ?? []} key={(block: MarkdownBlock) => block.key}>
+            {(block) => (
+              <MarkdownBlockView
+                block={block}
+                sessionId={props.sessionId}
+                sourceId={props.sourceId}
+                compact={props.compact}
+                openLink={props.openLink}
+                userScroll={props.userScroll}
+              />
+            )}
+          </Each>
         </View>
-      }
-    >
-      <View style={{ gap: props.compact ? 6 : 16 }}>
-        <Each of={blocks() ?? []} key={(block: MarkdownBlock) => block.key}>
-          {(block) => (
-            <MarkdownBlockView
-              block={block}
-              sessionId={props.sessionId}
-              sourceId={props.sourceId}
-              compact={props.compact}
-              openLink={props.openLink}
-              userScroll={props.userScroll}
-            />
-          )}
-        </Each>
-      </View>
-    </If>
+      </If>
+    </SelectionArea>
   );
 }

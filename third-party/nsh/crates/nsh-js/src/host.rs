@@ -603,10 +603,27 @@ impl Host {
         }
     }
 
+    /// Collects existing contacts whose owner no longer accepts native input,
+    /// without entering application code or running jobs.
+    pub fn invalid_touch_contacts(
+        &self,
+        accepts: impl FnMut(NodeId) -> bool,
+        contacts: &mut Vec<u32>,
+    ) {
+        if !self.cx.is_live() {
+            return;
+        }
+        self.cx
+            .with(|cx| crate::touch::invalid_contacts(cx.as_raw().as_ptr(), accepts, contacts));
+    }
+
     /// Forgets a physically cancelled native contact without handlers or jobs.
     /// The last known contact releases the JS responder and native scroll block;
     /// cancelling an unknown contact is inert, including repeated cancellation.
     pub fn cancel_touch(&self, contact: u32) {
+        if !self.cx.is_live() {
+            return;
+        }
         if self
             .cx
             .with(|cx| crate::touch::cancel_touch(cx.as_raw().as_ptr(), contact))

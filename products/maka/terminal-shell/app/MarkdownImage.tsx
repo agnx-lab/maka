@@ -17,10 +17,9 @@
  * under the License.
  */
 
-import { cleanup, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, inputAction, signal, Text, View, Image } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
-import { Image } from 'nsh/image';
 import type { MarkdownImage } from 'maka/markdown';
 import { host } from './host';
 import { ImageViewer } from './ImageViewer';

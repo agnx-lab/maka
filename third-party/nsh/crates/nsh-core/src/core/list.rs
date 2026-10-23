@@ -61,6 +61,8 @@
 //! their ranges are in its offsets, and the last one stops at the end of
 //! the list's content, as CSS `position: sticky` stops at its container's.
 
+use std::{cell::Cell, rc::Rc};
+
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -86,6 +88,19 @@ pub(super) struct Edges {
     pub(super) start: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeCell {
+    Detached,
+    Mounted,
+    Retiring(u64),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum NativeCellOp {
+    Retire { cell: u32, request: u64 },
+    Attach { cell: u32 },
+}
+
 /// A recycling slot: one cell node, bound to at most one item.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Slot {
@@ -98,6 +113,7 @@ pub(super) struct Slot {
     /// Item the runtime was last asked to show in this slot (its cell's
     /// index); `None` before the first request or when that item is gone.
     pub(super) requested: Option<u32>,
+    native: NativeCell,
 }
 
 impl Slot {
@@ -285,6 +301,11 @@ pub(super) struct ListState {
     pub(super) slots: Vec<Slot>,
     by_index: FxHashMap<u32, u32>,
     free: Vec<u32>,
+    /// The native focus path's cell, not another focus authority. Its logical
+    /// assignment survives scrolls and moves with ordinary source splices.
+    focused: Option<u32>,
+    retirement_requests: Rc<Cell<u64>>,
+    pub(super) native_ops: Vec<NativeCellOp>,
     pub(super) extras: [Extra; 3],
     /// Padding and gaps: `contentStyle`, else `contentClass`'s.
     pub(super) content: ListContentStyle,
@@ -388,7 +409,7 @@ pub(super) struct ListState {
 }
 
 impl ListState {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(retirement_requests: Rc<Cell<u64>>) -> Self {
         Self {
             count: 0,
             estimated: 50.0,
@@ -398,6 +419,9 @@ impl ListState {
             slots: Vec::new(),
             by_index: FxHashMap::default(),
             free: Vec::new(),
+            focused: None,
+            retirement_requests,
+            native_ops: Vec::new(),
             extras: [Extra::NONE; 3],
             content: ListContentStyle::default(),
             content_style: ListContentStyle::default(),
@@ -528,11 +552,11 @@ impl ListState {
     /// `inserted` new ones. Measurements and cells follow the items that
     /// stay, and when the change is above the first visible item the
     /// visible content keeps its place.
-    pub(super) fn splice(&mut self, at: u32, removed: u32, inserted: u32) {
+    pub(super) fn splice(&mut self, at: u32, removed: u32, inserted: u32) -> Vec<u32> {
         let at = at.min(self.count);
         let removed = removed.min(self.count - at);
         if removed == 0 && inserted == 0 {
-            return;
+            return Vec::new();
         }
         // The visible content keeps its place instead.
         if !matches!(self.pin, Some(Pin::Reading { .. })) {
@@ -571,19 +595,30 @@ impl ListState {
                 None
             }
         };
+        let deleted: Vec<_> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, state)| {
+                state
+                    .index
+                    .filter(|&index| index >= at && index < at + removed)
+                    .map(|_| slot as u32)
+            })
+            .collect();
+        let mut revoked = Vec::new();
+        for slot in deleted {
+            self.revoke_source(slot, &mut revoked);
+        }
         self.by_index.clear();
         for (slot, s) in self.slots.iter_mut().enumerate() {
-            let index = s.index.and_then(shift);
-            let Some(new) = index else {
-                if s.index.take().is_some() {
-                    self.free.push(slot as u32);
-                }
-                // The cell's content follows the new data at its old index:
-                // it is bound again before it shows.
-                s.rendered = None;
-                s.requested = None;
+            let Some(new) = s.index.and_then(shift) else {
                 continue;
             };
+            if matches!(s.native, NativeCell::Retiring(_)) {
+                s.native = NativeCell::Mounted;
+                self.native_ops.push(NativeCellOp::Attach { cell: s.cell });
+            }
             s.index = Some(new);
             s.rendered = s.rendered.and_then(shift);
             // The runtime's index for the cell follows its item at once, or
@@ -625,6 +660,7 @@ impl ListState {
                 self.splice_anchor += delta;
             }
         }
+        revoked
     }
 
     /// Whether changes before the viewport keep the visible rows in place:
@@ -1102,17 +1138,64 @@ impl ListState {
 
     // --- Updates -----------------------------------------------------------
 
-    pub(super) fn set_count(&mut self, count: u32) {
+    pub(super) fn set_count(&mut self, count: u32) -> Vec<u32> {
         if count == self.count {
-            return;
+            return Vec::new();
+        }
+        let deleted: Vec<_> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, state)| {
+                state
+                    .index
+                    .filter(|&index| index >= count)
+                    .map(|_| slot as u32)
+            })
+            .collect();
+        let mut revoked = Vec::new();
+        for slot in deleted {
+            self.revoke_source(slot, &mut revoked);
         }
         self.count = count;
+        for slot in &mut self.slots {
+            if slot.index.is_some() && matches!(slot.native, NativeCell::Retiring(_)) {
+                slot.native = NativeCell::Mounted;
+                self.native_ops
+                    .push(NativeCellOp::Attach { cell: slot.cell });
+            }
+        }
         self.source_dirty |= !self.source_geometry.is_empty();
         self.sizes.resize(count as usize, f32::NAN);
         self.rebuild_offsets();
         if self.load_more_at.is_some_and(|c| c != count) {
             self.load_more_at = None;
         }
+        revoked
+    }
+
+    /// The source deleted this assignment. Its old native owner cannot be
+    /// rebound until removal has crossed the existing native acknowledgement.
+    fn revoke_source(&mut self, slot: u32, revoked: &mut Vec<u32>) {
+        let state = &mut self.slots[slot as usize];
+        if let Some(index) = state.index.take() {
+            self.by_index.remove(&index);
+        }
+        state.requested = None;
+        state.rendered = None;
+        if self.focused == Some(slot) {
+            self.focused = None;
+        }
+        if state.cell == u32::MAX {
+            state.native = NativeCell::Detached;
+            self.free.push(slot);
+        } else {
+            let request = self.retirement_requests.get() + 1;
+            self.retirement_requests.set(request);
+            state.native = NativeCell::Retiring(request);
+            revoked.push(state.cell);
+        }
+        self.dirty = true;
     }
 
     pub(super) fn set_estimated(&mut self, estimated: f32) {
@@ -1392,6 +1475,7 @@ impl ListState {
                     index: None,
                     rendered: None,
                     requested: None,
+                    native: NativeCell::Detached,
                 },
             );
         }
@@ -1411,8 +1495,15 @@ impl ListState {
                 slot.cell = u32::MAX;
                 slot.rendered = None;
                 slot.requested = None;
+                slot.native = NativeCell::Detached;
                 self.dirty = true;
             }
+        }
+        if self
+            .focused
+            .is_some_and(|slot| self.slots[slot as usize].cell == u32::MAX)
+        {
+            self.focused = None;
         }
         for extra in &mut self.extras {
             if extra.cell == cell {
@@ -1429,6 +1520,116 @@ impl ListState {
             slot.rendered = Some(index);
             self.dirty = true;
         }
+    }
+
+    pub(super) fn focus_cell(&mut self, cell: Option<u32>) {
+        let focused = cell
+            .and_then(|cell| {
+                self.slots.iter().position(|slot| {
+                    slot.cell == cell && slot.index.is_some_and(|index| index < self.count)
+                })
+            })
+            .map(|slot| slot as u32);
+        if self.focused != focused {
+            self.focused = focused;
+            self.dirty = true;
+        }
+        if let Some(slot) = focused {
+            self.cancel_retirement(self.slots[slot as usize].cell);
+        }
+    }
+
+    pub(super) fn cancel_retirement(&mut self, cell: u32) {
+        if let Some(slot) = self.slots.iter_mut().find(|slot| slot.cell == cell)
+            && slot.index.is_some()
+            && matches!(slot.native, NativeCell::Retiring(_))
+        {
+            slot.native = NativeCell::Mounted;
+            self.native_ops.push(NativeCellOp::Attach { cell });
+            self.dirty = true;
+        }
+    }
+
+    pub(super) fn projected(&mut self, cell: u32) {
+        if let Some(slot) = self.slots.iter_mut().find(|slot| slot.cell == cell)
+            && slot.index.is_some()
+        {
+            // Every native Insert supersedes an earlier detach request,
+            // including an Insert that only changed the cell's z-order.
+            self.dirty |= matches!(slot.native, NativeCell::Retiring(_));
+            slot.native = NativeCell::Mounted;
+        }
+    }
+
+    pub(super) fn current_retirement(&self, cell: u32, request: u64) -> bool {
+        self.slots
+            .iter()
+            .any(|slot| slot.cell == cell && slot.native == NativeCell::Retiring(request))
+    }
+
+    pub(super) fn current_attachment(&self, cell: u32) -> bool {
+        self.slots.iter().any(|slot| {
+            slot.cell == cell && slot.native == NativeCell::Mounted && slot.ready().is_some()
+        })
+    }
+
+    pub(super) fn native_visible(&self, cell: u32) -> Option<bool> {
+        self.slots
+            .iter()
+            .find(|slot| slot.cell == cell)
+            .map(|slot| slot.index.is_some() && slot.native != NativeCell::Detached)
+    }
+
+    pub(super) fn source_live(&self, cell: u32) -> Option<bool> {
+        self.slots
+            .iter()
+            .find(|slot| slot.cell == cell)
+            .map(|slot| slot.index.is_some())
+    }
+
+    pub(super) fn retirement_request(&self, cell: u32) -> Option<u64> {
+        self.slots.iter().find_map(|slot| match slot.native {
+            NativeCell::Retiring(request) if slot.cell == cell => Some(request),
+            _ => None,
+        })
+    }
+
+    /// Only a matching native detach releases the slot for reuse. Refused,
+    /// cancelled and source-invalidated requests cannot retire a new owner.
+    pub(super) fn retire_cell(&mut self, cell: u32, request: u64, retired: bool) -> bool {
+        let Some(at) = self
+            .slots
+            .iter()
+            .position(|slot| slot.cell == cell && slot.native == NativeCell::Retiring(request))
+        else {
+            return false;
+        };
+        if !retired && self.slots[at].index.is_none() {
+            return false;
+        }
+        self.slots[at].native = if retired {
+            NativeCell::Detached
+        } else {
+            NativeCell::Mounted
+        };
+        if retired {
+            if self.slots[at].index.is_some() {
+                self.unbind(at as u32);
+            } else {
+                self.free.push(at as u32);
+            }
+        }
+        self.dirty = true;
+        retired
+    }
+
+    pub(super) fn current_bind(&self, slot: u32, index: u32) -> bool {
+        self.slots.get(slot as usize).is_some_and(|slot| {
+            // A surviving source item may move while its cell awaits native
+            // retirement. Its existing owner still needs the updated index;
+            // quarantine prevents this from assigning a different item.
+            slot.index == Some(index) && slot.requested == Some(index)
+        })
     }
 
     // --- Window ------------------------------------------------------------
@@ -1526,9 +1727,17 @@ impl ListState {
         // Cells whose item moved learn their final index before anything
         // else binds, including when their viewport just became empty.
         binds.append(&mut self.moved);
+        let focused = self
+            .focused
+            .and_then(|slot| self.slots[slot as usize].index)
+            .filter(|&index| index < self.count);
         if self.count == 0 || self.viewport <= 0.0 {
             for slot in 0..self.slots.len() {
-                self.unbind(slot as u32);
+                // A temporarily collapsed viewport does not revoke native
+                // input focus. Its one live owner still needs to survive.
+                if focused.is_none() || self.slots[slot].index != focused {
+                    self.release_slot(slot as u32);
+                }
             }
             return Edges::default();
         }
@@ -1543,13 +1752,20 @@ impl ListState {
             range.is_some_and(|(f, l)| (f..=l).contains(&i))
                 || sticky == Some(i)
                 || before == Some(i)
+                || focused == Some(i)
         };
 
         for slot in 0..self.slots.len() as u32 {
             if let Some(i) = self.slots[slot as usize].index
                 && !wanted(i)
             {
-                self.unbind(slot);
+                self.release_slot(slot);
+            } else if self.slots[slot as usize].index.is_some()
+                && matches!(self.slots[slot as usize].native, NativeCell::Retiring(_))
+            {
+                let cell = self.slots[slot as usize].cell;
+                self.slots[slot as usize].native = NativeCell::Mounted;
+                self.native_ops.push(NativeCellOp::Attach { cell });
             }
         }
         let bind = |this: &mut Self, i: u32| {
@@ -1564,6 +1780,7 @@ impl ListState {
                         index: None,
                         rendered: None,
                         requested: None,
+                        native: NativeCell::Detached,
                     });
                     this.slots.len() as u32 - 1
                 }
@@ -1576,7 +1793,7 @@ impl ListState {
                 bind(self, i);
             }
         }
-        for s in [before, sticky].into_iter().flatten() {
+        for s in [before, sticky, focused].into_iter().flatten() {
             bind(self, s);
         }
         let (start, end) = self.urgent_span(at);
@@ -1587,9 +1804,13 @@ impl ListState {
             if s.requested == Some(i) {
                 continue;
             }
+            if matches!(s.native, NativeCell::Retiring(_)) {
+                continue;
+            }
             if !self.paced
                 || sticky == Some(i)
                 || before == Some(i)
+                || focused == Some(i)
                 || self.item_overlaps(i, start, end)
             {
                 self.slots[slot].requested = Some(i);
@@ -1645,9 +1866,11 @@ impl ListState {
 
     /// Whether cells wait for [`Self::take_paced`].
     pub(super) fn has_paced(&self) -> bool {
-        self.slots
-            .iter()
-            .any(|s| s.index.is_some() && s.index != s.requested)
+        self.slots.iter().any(|s| {
+            s.index.is_some()
+                && s.index != s.requested
+                && !matches!(s.native, NativeCell::Retiring(_))
+        })
     }
 
     /// Up to `max` of the cells waiting to bind, nearest the viewport first
@@ -1676,7 +1899,7 @@ impl ListState {
         let mut best: Option<((bool, f32), u32, u32)> = None;
         for (slot, s) in self.slots.iter().enumerate() {
             let Some(i) = s.index else { continue };
-            if s.requested == Some(i) {
+            if s.requested == Some(i) || matches!(s.native, NativeCell::Retiring(_)) {
                 continue;
             }
             let start = self.item_at(i);
@@ -1699,6 +1922,29 @@ impl ListState {
         if let Some(i) = self.slots[slot as usize].index.take() {
             self.by_index.remove(&i);
             self.free.push(slot);
+        }
+    }
+
+    fn release_slot(&mut self, slot: u32) {
+        let at = slot as usize;
+        if self.slots[at]
+            .index
+            .is_some_and(|index| index >= self.count)
+        {
+            self.slots[at].native = NativeCell::Detached;
+        }
+        match self.slots[at].native {
+            NativeCell::Detached => self.unbind(slot),
+            NativeCell::Mounted => {
+                let request = self.retirement_requests.get() + 1;
+                self.retirement_requests.set(request);
+                self.slots[at].native = NativeCell::Retiring(request);
+                self.native_ops.push(NativeCellOp::Retire {
+                    cell: self.slots[at].cell,
+                    request,
+                });
+            }
+            NativeCell::Retiring(_) => {}
         }
     }
 
@@ -1758,7 +2004,7 @@ mod tests {
     use crate::{geometry::px, props::EdgeInsets};
 
     fn list(count: u32, estimated: f32, viewport: f32) -> ListState {
-        let mut l = ListState::new();
+        let mut l = ListState::new(Rc::default());
         l.set_estimated(estimated);
         l.set_count(count);
         l.viewport = viewport;
@@ -1783,6 +2029,117 @@ mod tests {
         assert_eq!(indices.last(), Some(&56));
         // Slots were reused, not grown without bound.
         assert!(l.slots.len() <= 25 + 17, "{}", l.slots.len());
+    }
+
+    #[test]
+    fn native_owner_retires_only_after_confirmation_and_focus_cancels_the_request() {
+        let mut l = list(1000, 50.0, 100.0);
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        l.add_slot_cell(CellSlot::Item(0), 42);
+        l.rendered(42, 0);
+        l.projected(42);
+        l.offset = 5000.0;
+        binds.clear();
+        l.update_window(&mut binds);
+        let first = match l.native_ops[0] {
+            NativeCellOp::Retire { cell: 42, request } => request,
+            other => panic!("expected native retirement, got {other:?}"),
+        };
+        assert_eq!(l.slots[0].index, Some(0));
+        assert_eq!(
+            binds.iter().map(|&(_, index)| index).collect::<Vec<_>>(),
+            [98, 99, 100, 101, 102, 103, 104]
+        );
+
+        // Native can still Tab to this original owner before consuming the
+        // retirement. It is one sparse retained row, not the intervening span.
+        l.focus_cell(Some(42));
+        assert!(!l.retire_cell(42, first, true));
+        l.update_window(&mut Vec::new());
+        assert_eq!(l.slots[0].ready(), Some(0));
+        let mut retained: Vec<_> = l.slots.iter().filter_map(|slot| slot.index).collect();
+        retained.sort_unstable();
+        assert_eq!(retained, [0, 98, 99, 100, 101, 102, 103, 104]);
+
+        l.viewport = 0.0;
+        l.native_ops.clear();
+        l.update_window(&mut Vec::new());
+        assert_eq!(l.slots[0].ready(), Some(0));
+        assert!(l.native_ops.is_empty());
+        l.viewport = 100.0;
+
+        l.focus_cell(None);
+        l.native_ops.clear();
+        l.update_window(&mut Vec::new());
+        let second = match l.native_ops[0] {
+            NativeCellOp::Retire { cell: 42, request } => request,
+            other => panic!("expected another retirement, got {other:?}"),
+        };
+        assert_ne!(second, first);
+        assert!(!l.retire_cell(42, first, true));
+        assert_eq!(l.slots[0].ready(), Some(0));
+        // A projection reorder is another native attach. Its old detach
+        // reply cannot release the now-attached owner.
+        l.projected(42);
+        assert!(!l.retire_cell(42, second, true));
+        l.native_ops.clear();
+        l.update_window(&mut Vec::new());
+        let third = match l.native_ops[0] {
+            NativeCellOp::Retire { cell: 42, request } => request,
+            other => panic!("expected retirement after reordering, got {other:?}"),
+        };
+        assert_ne!(third, second);
+        assert!(l.retire_cell(42, third, true));
+        assert_eq!(l.slots[0].index, None);
+    }
+
+    #[test]
+    fn source_splices_move_retained_focus_but_revoke_deleted_owners_and_old_replies() {
+        let mut l = list(1000, 50.0, 100.0);
+        l.update_window(&mut Vec::new());
+        l.add_slot_cell(CellSlot::Item(0), 42);
+        l.rendered(42, 0);
+        l.projected(42);
+        l.offset = 5000.0;
+        l.update_window(&mut Vec::new());
+        let request = match l.native_ops[0] {
+            NativeCellOp::Retire { cell: 42, request } => request,
+            other => panic!("expected native retirement, got {other:?}"),
+        };
+        l.splice(0, 0, 1);
+        assert!(!l.retire_cell(42, request, true));
+        let mut moved = Vec::new();
+        l.update_window(&mut moved);
+        assert!(moved.contains(&(0, 1)));
+        assert!(matches!(l.slots[0].native, NativeCell::Retiring(_)));
+        let moved_request = l.retirement_request(42).unwrap();
+        assert!(l.current_bind(0, 1));
+        assert!(!l.current_bind(0, 0));
+        l.focus_cell(Some(42));
+        assert_eq!(l.slots[0].ready(), Some(1));
+        assert_eq!(l.focused, Some(0));
+
+        assert_eq!(l.splice(1, 1, 1), [42]);
+        let source_request = l.retirement_request(42).unwrap();
+        assert_ne!(source_request, moved_request);
+        assert_eq!(l.focused, None);
+        assert_eq!(l.slots[0].index, None);
+        assert!(!l.retire_cell(42, request, true));
+        assert!(!l.retire_cell(42, moved_request, true));
+        l.offset = 0.0;
+        l.update_window(&mut Vec::new());
+        assert_eq!(l.focused, None);
+        assert!(!l.retire_cell(42, request, true));
+        assert_eq!(l.slots[0].native, NativeCell::Retiring(source_request));
+        assert!(!l.free.contains(&0));
+        assert!(!l.retire_cell(42, source_request, false));
+        l.focus_cell(Some(42));
+        l.projected(42);
+        assert_eq!(l.focused, None);
+        assert_eq!(l.slots[0].native, NativeCell::Retiring(source_request));
+        assert!(l.retire_cell(42, source_request, true));
+        assert_eq!(l.slots[0].native, NativeCell::Detached);
     }
 
     #[test]

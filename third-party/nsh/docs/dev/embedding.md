@@ -1,5 +1,21 @@
 # Packaging and embedding
 
+Custom mount consumers must handle `MountItem::RetireListCell { id, request, roots }`: `roots` is the
+core's authoritative snapshot of the cell and the promoted native roots in its logical subtree. Keep its
+current owner alive until native input and Tab navigation can no longer target any root, park them immediately,
+then reply with `EngineControl::retire_list_cell(id, request, true)` on the same FIFO as native input.
+Check the whole group before parking any root. If a descendant currently holds native focus, keep the group attached, publish the actual native
+`set_focus_path` first, and reply `false`. This request is not an ordinary animated removal and must
+never be silently ignored. Parking preserves native presentation order for cancellation without triggering focus return.
+Core reprojects the current group when cancelling; consumers restore each independent root on its own
+`ProjectRoot { parent, id, following }`. For sortable native view hosts, select the first `following`
+candidate actually attached to that same host. SDK-owned modal windows and route hosts keep their existing
+canonical presentation order and dormant slot; logical row siblings do not define a global SDK window order.
+Source-driven `Remove`/`Delete` revoke the owner unconditionally. Cancelled or superseded replies do nothing.
+After a matching positive reply, core publishes `ListCellRetired { roots }`: native input is already excluded.
+A platform may collect the old native presentation resources by their actual instance identity, without affecting
+cancelled or later projections; otherwise it explicitly does nothing. Scene mirrors consume the confirmation to detach them.
+
 - `nsh package <entry> --target ios|ios-simulator|android|linux|macos|windows|tui` builds an installable app from the prebuilt runtime: metadata from
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
   and a dark window theme, so the launch screen is in it) or flags. iOS: `.app`, `.ipa` with `--sign <identity>

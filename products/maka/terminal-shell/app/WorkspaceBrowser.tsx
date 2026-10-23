@@ -30,13 +30,13 @@ import {
   Text,
   untracked,
   View,
+  Image,
+  List,
 } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
-import { Image } from 'nsh/image';
 import logo from './assets/maka.png';
 import { keymap } from 'nsh/keymap';
-import { List } from 'nsh/list';
 import {
   C,
   compact,
@@ -233,6 +233,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
   };
   const focusSearch = () => {
     if (!props.focusRequest() || !search) return;
+    choosingWorkspace.set(false);
     search.focus();
     search.setSelection(0, browser.titleQuery().length);
     props.focusHandled();
@@ -302,21 +303,6 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600', flex: 1 }}>
           Maka
         </Text>
-        <Button
-          onPress={inputAction(props.close, null)}
-          accessibilityLabel={tr('Close session browser')}
-          style={{
-            width: 32,
-            height: 32,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 8,
-          }}
-          hoverStyle={controlHoverStyle}
-          focusStyle={controlFocusStyle}
-        >
-          <Icon name="sidebar" color={C.secondary} />
-        </Button>
       </View>
       <Button
         accessibilityLabel={tr('New conversation')}

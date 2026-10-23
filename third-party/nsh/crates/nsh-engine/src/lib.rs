@@ -870,6 +870,7 @@ enum Message {
     Wake,
     Environment(Environment),
     FocusPath(Vec<NodeId>),
+    ListCellRetired(NodeId, u64, bool),
     RootSize(NodeId, Size<Points>, EdgeInsets),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
@@ -1002,6 +1003,13 @@ impl EngineControl {
     /// related input or environment messages. This snapshot runs no JS.
     pub fn set_focus_path(&self, path: Vec<NodeId>) {
         let _ = self.tx.send(Message::FocusPath(path));
+    }
+
+    /// Answers `MountItem::RetireListCell` only after native input has stopped
+    /// targeting that cell, or refuses it while a descendant holds native
+    /// focus. Publish that native focus path before a refusal, on this FIFO.
+    pub fn retire_list_cell(&self, id: NodeId, request: u64, retired: bool) {
+        let _ = self.tx.send(Message::ListCellRetired(id, request, retired));
     }
 
     /// The platform presents root `id` (a modal) at `size`, with `insets`
@@ -2050,8 +2058,96 @@ impl<M: TextEngine> State<M> {
         }
     }
 
+    fn cancel_touch(&mut self, script: Option<&Script>, contact: u32) {
+        if let Some((_, pending)) = &mut self.touch_move {
+            if pending
+                .points
+                .iter()
+                .any(|point| point.id == contact && point.changed)
+            {
+                pending.activated = None;
+            }
+            pending.points.retain(|point| point.id != contact);
+            if !pending.points.iter().any(|point| point.changed) {
+                self.touch_move = None;
+            }
+        }
+        self.core.cancel_touch(contact);
+        if let Some(script) = script {
+            script.cancel_touch(contact);
+        }
+    }
+
+    fn filter_touch(&mut self, script: Option<&Script>, touch: &mut nsh_core::TouchEvent) {
+        let rejected_activation = touch
+            .activated
+            .is_some_and(|id| !self.core.accepts_native_input(id));
+        let invalid: Vec<_> = touch
+            .points
+            .iter()
+            .filter(|point| {
+                rejected_activation
+                    || point
+                        .path
+                        .iter()
+                        .any(|&id| !self.core.accepts_native_input(id))
+            })
+            .map(|point| point.id)
+            .collect();
+        for &contact in &invalid {
+            self.cancel_touch(script, contact);
+        }
+        touch.points.retain(|point| !invalid.contains(&point.id));
+        if rejected_activation {
+            touch.activated = None;
+        }
+    }
+
+    /// Source revocation happens before the old native frame disappears.
+    /// Forget its queued input and responders before an ACK can permit reuse.
+    fn discard_revoked_input(&mut self, script: Option<&Script>) -> bool {
+        let core = &self.core;
+        self.hover_moves
+            .retain(|(id, _, _)| core.accepts_native_input(*id));
+        self.scroll_events
+            .retain(|&id, _| core.accepts_native_input(id));
+        self.events.retain(|event| {
+            !matches!(event,
+            JsEvent::Event(id, _, _) if !core.accepts_native_input(*id))
+        });
+        let mut contacts = Vec::new();
+        core.invalid_touch_contacts(&mut contacts);
+        if let Some(script) = script {
+            script.invalid_touch_contacts(|id| core.accepts_native_input(id), &mut contacts);
+        }
+        if let Some((id, touch)) = &self.touch_move {
+            let activation_invalid = !core.accepts_native_input(*id)
+                || touch
+                    .activated
+                    .is_some_and(|id| !core.accepts_native_input(id));
+            contacts.extend(
+                touch
+                    .points
+                    .iter()
+                    .filter(|point| {
+                        activation_invalid
+                            || point.path.iter().any(|&id| !core.accepts_native_input(id))
+                    })
+                    .map(|point| point.id),
+            );
+        }
+        contacts.sort_unstable();
+        contacts.dedup();
+        let cancelled = !contacts.is_empty();
+        for contact in contacts {
+            self.cancel_touch(script, contact);
+        }
+        cancelled
+    }
+
     /// Sends the pending touch move.
     fn dispatch_touch_move(&mut self, script: Option<&Script>) {
+        self.discard_revoked_input(script);
         if let Some((id, touch)) = self.touch_move.take()
             && let Some(script) = script
         {
@@ -2078,6 +2174,9 @@ impl<M: TextEngine> State<M> {
         }
         self.hover_moved = Some(nsh_core::time::now());
         for (id, kind, payload) in std::mem::take(&mut self.hover_moves) {
+            if !self.core.accepts_native_input(id) {
+                continue;
+            }
             if deliver_component_event(script, &mut self.core, &mut self.events, id, kind, &payload)
             {
                 continue;
@@ -2106,7 +2205,7 @@ impl<M: TextEngine> State<M> {
         // Views that stopped listening (or are gone).
         let core = &self.core;
         self.scroll_events
-            .retain(|&id, _| core.scroll_listener(id).is_some());
+            .retain(|&id, _| core.accepts_native_input(id) && core.scroll_listener(id).is_some());
         for (&id, e) in &mut self.scroll_events {
             if !e.pending || e.last.is_some_and(|t| now < t + e.throttle) {
                 continue;
@@ -2224,8 +2323,13 @@ impl<M: TextEngine> State<M> {
             // the core).
             let binds = self.binds.drain(..);
             if let Some(script) = script {
-                for bind in binds {
-                    script.bind_list(bind.list, &bind.binds);
+                for mut bind in binds {
+                    bind.binds.retain(|&(slot, index)| {
+                        self.core.current_list_bind(bind.list, slot, index)
+                    });
+                    if !bind.binds.is_empty() {
+                        script.bind_list(bind.list, &bind.binds);
+                    }
                 }
                 script.take_ops(&mut self.ops);
                 // Taking ops publishes JS list sources. Their count/splice
@@ -2247,9 +2351,14 @@ impl<M: TextEngine> State<M> {
                     let start = Instant::now();
                     let ops = self.ops.len();
                     self.core.take_paced_list_binds(1, &mut binds);
-                    for bind in binds.drain(..) {
+                    for mut bind in binds.drain(..) {
+                        bind.binds.retain(|&(slot, index)| {
+                            self.core.current_list_bind(bind.list, slot, index)
+                        });
                         paced.cells += bind.binds.len();
-                        script.bind_list(bind.list, &bind.binds);
+                        if !bind.binds.is_empty() {
+                            script.bind_list(bind.list, &bind.binds);
+                        }
                     }
                     script.take_ops(&mut self.ops);
                     source_pending = source_changed(&self.ops[ops..]);
@@ -2270,6 +2379,9 @@ impl<M: TextEngine> State<M> {
             for event in self.events.drain(..) {
                 match event {
                     JsEvent::Event(id, event, payload) => {
+                        if !self.core.accepts_native_input(id) {
+                            continue;
+                        }
                         if !self.core.component_event(id, event, &payload)
                             && let Some(script) = script
                         {
@@ -2312,6 +2424,7 @@ impl<M: TextEngine> State<M> {
                 }
             }
             drop(ops);
+            let mut cancelled_input = self.discard_revoked_input(script);
             if let Some(batch) = self.core.commit() {
                 commits += 1;
                 match &mut merged {
@@ -2319,6 +2432,9 @@ impl<M: TextEngine> State<M> {
                     None => merged = Some(batch),
                 }
             }
+            // Rust list sources can change during commit as well. Finish
+            // their responder cleanup before a native ACK permits reuse.
+            cancelled_input |= self.discard_revoked_input(script);
             self.core.take_list_binds(&mut self.binds);
             self.core.take_events(&mut self.events);
             // URLs the platform opens go out in another round.
@@ -2342,6 +2458,7 @@ impl<M: TextEngine> State<M> {
                 && !retheme
                 && !more_paced
                 && !urls
+                && !cancelled_input
             {
                 break;
             }
@@ -2427,6 +2544,9 @@ fn deliver_component_event<M: TextEngine>(
     kind: EventKind,
     payload: &EventPayload,
 ) -> bool {
+    if !core.accepts_native_input(id) {
+        return true;
+    }
     core.take_events(pending);
     let handled = core.component_event(id, kind, payload);
     let mut events = Vec::new();
@@ -2454,26 +2574,18 @@ fn deliver_component_event<M: TextEngine>(
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
         Message::HintObservation(observation) => state.core.observe_hint(observation),
-        Message::CancelTouch(contact) => {
-            if let Some((_, pending)) = &mut state.touch_move {
-                if pending
-                    .points
-                    .iter()
-                    .any(|point| point.id == contact && point.changed)
-                {
-                    pending.activated = None;
-                }
-                pending.points.retain(|point| point.id != contact);
-                if !pending.points.iter().any(|point| point.changed) {
-                    state.touch_move = None;
+        Message::CancelTouch(contact) => state.cancel_touch(script, contact),
+        Message::Event(id, event, mut payload) => {
+            state.discard_revoked_input(script);
+            if !state.core.accepts_native_input(id) {
+                return true;
+            }
+            if let EventPayload::Touch(touch) = &mut payload {
+                state.filter_touch(script, touch);
+                if !touch.points.iter().any(|point| point.changed) {
+                    return true;
                 }
             }
-            state.core.cancel_touch(contact);
-            if let Some(script) = script {
-                script.cancel_touch(contact);
-            }
-        }
-        Message::Event(id, event, payload) => {
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }
@@ -2535,6 +2647,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Scroll(id, offset, applied) => {
+            if !state.core.accepts_native_input(id) {
+                return true;
+            }
             state.core.set_scroll_offset(id, offset, applied);
             let (x, y) = (offset.x.0, offset.y.0);
             if let Some((throttle_ms, content, viewport, zoom)) = state.core.scroll_listener(id) {
@@ -2554,8 +2669,16 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 event.pending = true;
             }
         }
-        Message::Zoom(id, scale) => state.core.set_zoom(id, scale),
-        Message::ComponentSize(id, size) => state.core.set_component_size(id, size),
+        Message::Zoom(id, scale) => {
+            if state.core.accepts_native_input(id) {
+                state.core.set_zoom(id, scale);
+            }
+        }
+        Message::ComponentSize(id, size) => {
+            if state.core.accepts_native_input(id) {
+                state.core.set_component_size(id, size);
+            }
+        }
         Message::AnimationsFinished(mut finished) => {
             // The components' animations end in the core, JS's in JS.
             state.core.animations_finished(&mut finished);
@@ -2579,10 +2702,16 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 script.set_environment(&env);
             }
         }
-        Message::FocusPath(path) => {
+        Message::FocusPath(mut path) => {
+            path.retain(|&id| state.core.accepts_native_input(id));
+            state.core.set_focus_path(&path);
             if let Some(script) = script {
                 script.set_focus_path(&path);
             }
+        }
+        Message::ListCellRetired(id, request, retired) => {
+            state.discard_revoked_input(script);
+            state.core.retire_list_cell(id, request, retired);
         }
         Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
         Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
@@ -2593,7 +2722,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 script.run_frame();
             }
         }
-        Message::States(id, states) => state.core.set_states(id, states),
+        Message::States(id, states) => {
+            if state.core.accepts_native_input(id) {
+                state.core.set_states(id, states);
+            }
+        }
         Message::FontsChanged => state.core.fonts_changed(),
         Message::Fetch(who, hop, event) => {
             if let Some(event) = state.net.event(who, hop, event) {

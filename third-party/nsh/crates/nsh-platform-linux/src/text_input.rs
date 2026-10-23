@@ -185,6 +185,10 @@ pub(crate) struct InputState {
     /// A user edit's `onChangeText` (and the selection after it) waits for
     /// the main loop to be idle.
     pending: Cell<bool>,
+    /// The idle task that reports that edit, cancelled by an earlier flush.
+    change_idle: RefCell<Option<glib::SourceId>>,
+    /// The pending composition-end report, after its committed edit.
+    composition_idle: RefCell<Option<glib::SourceId>>,
     /// A paste was asked for: its insertion (and the deletion of the
     /// selection it replaces) types no key.
     pasting: Cell<bool>,
@@ -290,7 +294,13 @@ impl Ctx {
         input.count.set(input.count.get() + 1);
         if !input.pending.replace(true) {
             let c = self.clone();
-            glib::idle_add_local_once(move || c.flush_change());
+            let source = glib::idle_add_local_once(move || {
+                if let Some(input) = c.input.upgrade() {
+                    input.change_idle.borrow_mut().take();
+                }
+                c.flush_change();
+            });
+            *input.change_idle.borrow_mut() = Some(source);
         }
     }
 
@@ -300,6 +310,9 @@ impl Ctx {
         let Some((surface, view, input)) = self.get() else {
             return;
         };
+        if let Some(source) = input.change_idle.borrow_mut().take() {
+            source.remove();
+        }
         if !input.pending.replace(false) {
             return;
         }
@@ -402,22 +415,37 @@ impl Ctx {
         if input.composition.borrow_mut().take().is_none() {
             return;
         }
+        if input.composition_idle.borrow().is_some() {
+            return;
+        }
         let c = self.clone();
-        glib::idle_add_local_once(move || {
-            let Some((_, view, input)) = c.get() else {
-                return;
-            };
-            if input.composition.borrow().is_some() {
-                // Another composition started: this one's value waits for it.
-                return;
+        let source = glib::idle_add_local_once(move || {
+            if let Some(input) = c.input.upgrade() {
+                input.composition_idle.borrow_mut().take();
             }
-            c.flush_change();
-            c.send_composition(false, "");
-            let held = input.held.borrow_mut().take();
-            if let Some((text, count)) = held {
-                value(&view, &text, count);
-            }
+            c.flush_composition();
         });
+        *input.composition_idle.borrow_mut() = Some(source);
+    }
+
+    /// Reports the composition's end after its admitted text edits.
+    fn flush_composition(&self) {
+        let Some((_, view, input)) = self.get() else {
+            return;
+        };
+        if let Some(source) = input.composition_idle.borrow_mut().take() {
+            source.remove();
+        }
+        if input.composition.borrow().is_some() {
+            // Another composition started: this one's value waits for it.
+            return;
+        }
+        self.flush_change();
+        self.send_composition(false, "");
+        let held = input.held.borrow_mut().take();
+        if let Some((text, count)) = held {
+            value(&view, &text, count);
+        }
     }
 
     fn send_composition(&self, composing: bool, text: &str) {
@@ -560,6 +588,8 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         key: Cell::new(None),
         pasting: Cell::new(false),
         pending: Cell::new(false),
+        change_idle: RefCell::new(None),
+        composition_idle: RefCell::new(None),
         focused: Cell::new(false),
         selection: Cell::new((0, 0)),
         composition: RefCell::new(None),
@@ -877,6 +907,26 @@ fn auto_focus(input: &Rc<InputState>, editor: &Editor) {
         input.editor.borrow().focus();
     });
     *input.auto_focus.borrow_mut() = Some((widget, handler));
+}
+
+/// Flushes admitted edits and cancels delayed work when a subtree leaves.
+pub(crate) fn retire_cell(view: &NshView) {
+    let input = view.state().input.clone();
+    if let Some(input) = input {
+        if let Some((widget, handler)) = input.auto_focus.borrow_mut().take() {
+            widget.disconnect(handler);
+        }
+        if let Some(cx) = input.cx.get() {
+            cx.focus_changed();
+            cx.flush_change();
+            if input.composition_idle.borrow().is_some() {
+                cx.flush_composition();
+            }
+        }
+    }
+    for child in view.child_views() {
+        retire_cell(&child);
+    }
 }
 
 /// Places the editor and the placeholder at the content box.

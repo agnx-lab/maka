@@ -402,11 +402,20 @@ impl Fixture {
             plan["instances"]["management"] = node(&manager, 8, json!({}), json!({}));
             plan["instances"]["gateway"]["bindings"]["management"] =
                 json!([{"kind":"instance","path":["management"],"export":"Management"}]);
+            let optional_roots: Vec<_> = (0..40)
+                .map(|index| {
+                    let path = directory
+                        .path()
+                        .join(format!("optional-workspace-{index:02}"));
+                    std::fs::create_dir(&path).unwrap();
+                    json!({"label":format!("Optional workspace {index:02}"),"path":path})
+                })
+                .collect();
             for index in 0..3 {
                 let mut optional = node(
                     &agent,
                     9 + index,
-                    json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":[],"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}),
+                    json!({"locale":"en","workspaceRoots":if index == 2 { json!(optional_roots) } else { json!([{"label":"Workspace","path":workspace}]) },"tools":[],"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}),
                     json!({}),
                 );
                 optional["disabled"] = json!(true);

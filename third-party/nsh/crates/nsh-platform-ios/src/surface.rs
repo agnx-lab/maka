@@ -420,6 +420,37 @@ impl RootView {
                 )
             });
         }
+        let weak = Weak::from_retained(this);
+        let focus = RcBlock::new(move |_: NonNull<NSNotification>| {
+            let Some(view) = weak.load() else { return };
+            let Some(shared) = view
+                .ivars()
+                .running
+                .borrow()
+                .as_ref()
+                .map(|r| r.mounter.clone())
+            else {
+                return;
+            };
+            // UIKit can change focus while applying a mount. Read its final
+            // native authority on the main queue without reentering mounter.
+            DispatchQueue::main().exec_async(move || {
+                let mtm = MainThreadMarker::new().expect("main queue");
+                if let Some(mounter) = shared.get(mtm).borrow().as_ref() {
+                    mounter.publish_focus_path();
+                }
+            });
+        });
+        // SAFETY: UIKit's hardware-keyboard focus notification; registration
+        // follows the existing observer lifecycle and runs on the main queue.
+        observers.push(unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(objc2_ui_kit::UIFocusDidUpdateNotification),
+                None,
+                Some(&NSOperationQueue::mainQueue()),
+                &focus,
+            )
+        });
     }
 
     fn keyboard_changed(&self, note: &NSNotification) {

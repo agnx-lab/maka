@@ -66,6 +66,8 @@ const COMPONENT_PROPS: i32 = 30;
 const OVERFLOW: i32 = 31;
 const ACCESSIBILITY_LABEL: i32 = 32;
 const APPEARANCE: i32 = 33;
+const RETIRE_LIST_CELL: i32 = 34;
+const PROJECT_ROOT: i32 = 35;
 
 /// An entry of the object table.
 pub(crate) enum Obj {
@@ -155,10 +157,33 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(child as i32);
                 e.int(before.map_or(-1, |b| b as i32));
             }
+            MountItem::ProjectRoot {
+                parent,
+                id,
+                following,
+            } => {
+                e.int(PROJECT_ROOT);
+                e.int(parent as i32);
+                e.int(id as i32);
+                e.int(following.len() as i32);
+                for sibling in following {
+                    e.int(sibling as i32);
+                }
+            }
             MountItem::Remove { id } => {
                 e.int(REMOVE);
                 e.int(id as i32);
             }
+            MountItem::RetireListCell { id, request, roots } => {
+                e.int(RETIRE_LIST_CELL);
+                e.int(id as i32);
+                e.bytes.extend_from_slice(&request.to_le_bytes());
+                e.int(roots.len() as i32);
+                for root in roots {
+                    e.int(root as i32);
+                }
+            }
+            MountItem::ListCellRetired { .. } => {}
             MountItem::Delete { id } => {
                 e.int(DELETE);
                 e.int(id as i32);

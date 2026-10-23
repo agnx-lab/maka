@@ -750,8 +750,28 @@ fn ensure_ticking(surface: &Rc<Surface>, view: &NshView) {
     });
 }
 
+/// A recycling row must have no deferred scroll events after its owner is
+/// released. Its native offset is kept for a cancelled retirement/reinsert.
+pub(crate) fn detached(view: &NshView) {
+    if let Some(scroll) = view.state_mut().scroll.as_mut() {
+        scroll.live.phase = Phase::Idle;
+        scroll.live.report = false;
+        scroll.live.resampled = None;
+        scroll.live.commit_armed = false;
+        scroll.live.rested_at = None;
+    }
+    for child in view.child_views() {
+        detached(&child);
+    }
+}
+
 /// One frame of `view`'s motion; false when there is nothing left to do.
 fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
+    // A retired native subtree may still have its already-scheduled frame
+    // callback. It must stop before emitting events into a reused node id.
+    if !mapped(view) {
+        return false;
+    }
     let sampled = {
         let mut state = view.state_mut();
         let Some(s) = state.scroll.as_mut() else {

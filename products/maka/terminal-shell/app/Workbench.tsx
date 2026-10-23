@@ -34,7 +34,9 @@ const BROWSER_MIN = 24 * CELL;
 const BROWSER_MAX = 40 * CELL;
 const PREVIEW_MIN = 40 * CELL;
 
-export const canDockBrowser = () => windowSize().width >= CENTER_MIN + BROWSER_MIN + CELL;
+export const canDockBrowser = (withPreview = false) =>
+  windowSize().width >=
+  CENTER_MIN + BROWSER_MIN + CELL + (withPreview && canDockPreview() ? PREVIEW_MIN + CELL : 0);
 // Current layout policy, not a claim that narrower terminal columns are impossible.
 const canDockPreview = () => windowSize().width >= CENTER_MIN + PREVIEW_MIN + CELL;
 
@@ -47,10 +49,7 @@ export function Workbench(props: {
   const preferredWidth = signal(32 * CELL);
   const preferredPreviewWidth = signal(48 * CELL);
   const preview = () => props.resources.shown() && canDockPreview();
-  const browser = () =>
-    canDockBrowser() &&
-    props.expanded() &&
-    (!preview() || windowSize().width >= CENTER_MIN + BROWSER_MIN + PREVIEW_MIN + 2 * CELL);
+  const browser = () => props.expanded() && canDockBrowser(props.resources.shown());
   const width = () =>
     Math.min(
       preferredWidth(),
@@ -62,11 +61,7 @@ export function Workbench(props: {
   const clamp = (value: number) =>
     Math.max(
       BROWSER_MIN,
-      Math.min(
-        BROWSER_MAX,
-        windowSize().width - CENTER_MIN - CELL,
-        Math.round(value / CELL) * CELL,
-      ),
+      Math.min(BROWSER_MAX, windowSize().width - CENTER_MIN - CELL, Math.round(value)),
     );
   let drag: {
     side: 'browser' | 'preview';

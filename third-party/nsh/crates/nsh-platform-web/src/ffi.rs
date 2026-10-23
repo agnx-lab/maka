@@ -31,7 +31,9 @@ unsafe extern "C" {
         italic: u32,
     );
     #[link_name = "submit"]
-    fn js_submit(json: *const u8, len: usize);
+    fn js_submit(json: *const u8, len: usize) -> usize;
+    #[link_name = "submit_result"]
+    fn js_submit_result(bytes: *mut u8, len: usize);
     #[link_name = "image_bytes"]
     fn js_image_bytes(uri: *const u8, uri_len: usize, data: *const u8, data_len: usize);
     #[link_name = "release_image"]
@@ -167,10 +169,30 @@ pub(crate) fn register_font(family: &str, data: &[u8], weight: u16, italic: bool
     }
 }
 
-/// Hands one batch (JSON) to the DOM mounter.
-pub(crate) fn submit(json: &str) {
+/// A native cell retirement, checked against the browser's actual focus.
+#[derive(serde::Deserialize)]
+pub(crate) struct Retirement {
+    pub id: u32,
+    // A decimal string keeps the engine's u64 request exact in JavaScript.
+    pub request: String,
+    pub retired: bool,
+    pub focus: Vec<u32>,
+    pub cancelled: Vec<u32>,
+    pub states: Vec<(u32, u8)>,
+}
+
+/// Hands one batch to the DOM mounter without re-entering WebAssembly to
+/// return its results. The caller publishes them after releasing the app.
+pub(crate) fn submit(json: &str) -> Vec<Retirement> {
     // SAFETY: the slice is valid for the call; JS copies it.
-    unsafe { js_submit(json.as_ptr(), json.len()) }
+    let len = unsafe { js_submit(json.as_ptr(), json.len()) };
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut bytes = vec![0; len];
+    // SAFETY: JS only fills this result's exactly sized writable buffer.
+    unsafe { js_submit_result(bytes.as_mut_ptr(), bytes.len()) };
+    serde_json::from_slice(&bytes).expect("the DOM mounter returned invalid retirement results")
 }
 
 /// Gives the page the bytes of the in-memory image `uri` (a `data:` URI's,

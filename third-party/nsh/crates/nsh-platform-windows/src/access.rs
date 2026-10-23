@@ -573,7 +573,9 @@ pub(crate) fn prepare(batch: &MountBatch) {
                 item,
                 MountItem::Create { .. }
                     | MountItem::Insert { .. }
+                    | MountItem::ProjectRoot { .. }
                     | MountItem::Remove { .. }
+                    | MountItem::RetireListCell { .. }
                     | MountItem::Delete { .. }
             )
         });

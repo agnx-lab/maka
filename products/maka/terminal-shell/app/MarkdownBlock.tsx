@@ -110,7 +110,7 @@ function StyledRuns(props: {
             fontWeight: run().strong ? '700' : undefined,
             fontStyle: run().emphasis ? 'italic' : undefined,
             textDecorationLine: run().strike ? 'line-through' : undefined,
-            fontFamily: props.compact && run().code ? 'monospace' : undefined,
+            fontFamily: run().code ? 'monospace' : undefined,
             color: run().code ? (props.compact ? C.muted : C.accentHover) : undefined,
             backgroundColor: run().code ? C.surface : undefined,
           }}
@@ -252,7 +252,10 @@ function MarkdownBlockContent(props: {
                     when={platform.isTerminal}
                     else={<View style={{ height: 1, backgroundColor: C.line }} />}
                   >
-                    <Text style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.muted }}>
+                    <Text
+                      selectable={false}
+                      style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.muted }}
+                    >
                       ───
                     </Text>
                   </If>
@@ -452,10 +455,12 @@ function CodeBlock(props: {
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 32, gap: 8 }}>
-        <Text style={{ ...captionTextStyle, color: C.muted, flex: 1 }}>
+        <Text selectable={false} style={{ ...captionTextStyle, color: C.muted, flex: 1 }}>
           {block().language || 'code'}
         </Text>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>{copied() ? tr('Copied') : ''}</Text>
+        <Text selectable={false} style={{ ...captionTextStyle, color: C.muted }}>
+          {copied() ? tr('Copied') : ''}
+        </Text>
         <Button
           accessibilityLabel={tr('Wrap code')}
           selected={wrapped()}

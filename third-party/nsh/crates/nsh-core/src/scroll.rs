@@ -779,11 +779,18 @@ pub fn frame(host: &impl ScrollHost, now: f64) -> bool {
     busy
 }
 
+/// Ends an owner's pending input or animated command without end callbacks.
+/// Preserve the existing frame registration: the platform may still have
+/// that callback queued, and a new motion before its next frame reuses it.
+pub fn stop_motion(host: &impl ScrollHost) {
+    set_phase(host, Phase::Idle);
+    report(host);
+}
+
 /// The view left the window during its frames: it stops (a later move
 /// starts again) and reports where it is.
 pub fn detached(host: &impl ScrollHost) {
-    set_phase(host, Phase::Idle);
-    report(host);
+    stop_motion(host);
     host.scroll_mut(|s, _| s.live.ticking = false);
 }
 

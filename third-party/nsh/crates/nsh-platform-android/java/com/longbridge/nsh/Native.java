@@ -243,6 +243,12 @@ final class Native {
     /** Applies the animation items of batches up to {@code seq}; returns bound values. */
     static native float[] afterBatch(long handle, long seq);
 
+    /** Actual native focus, innermost node first. */
+    static native void focusPath(long handle, int[] path);
+
+    /** The UI consumed this batch's retirement request, preserving any focused cell. */
+    static native void retireListCell(long handle, long seq, int id, long request, boolean retired, int[] path);
+
     static native float[] tick(long handle, long frameNanos);
 
     /**

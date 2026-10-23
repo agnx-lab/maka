@@ -14,7 +14,7 @@ mod tests;
 mod touch;
 mod views;
 
-use std::{rc::Rc, sync::Arc};
+use std::{cell::Cell, rc::Rc, sync::Arc};
 
 use slab::Slab;
 use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position};
@@ -273,6 +273,7 @@ impl Kind {
         matches!(
             self,
             Kind::Text
+                | Kind::Input
                 | Kind::Scroll
                 | Kind::List
                 | Kind::Cell
@@ -488,6 +489,9 @@ struct Node {
     gestures: GestureValues,
     /// The native view exists.
     created: bool,
+    /// A promoted layout root has a native projection. This is separate
+    /// from creation: parking keeps its native object and logical intent.
+    native_root_projected: bool,
     /// Last frame sent to the platform.
     frame: Bounds<Points>,
     /// The area descendants cover outside the bounds, as last mounted
@@ -585,7 +589,7 @@ impl Node {
         style
     }
 
-    fn new(id: NodeId, kind: Kind) -> Self {
+    fn new(id: NodeId, kind: Kind, retirement_requests: Rc<Cell<u64>>) -> Self {
         Self {
             id,
             kind,
@@ -632,7 +636,7 @@ impl Node {
             paragraph: Paragraph::default(),
             image: matches!(kind, Kind::Image).then(Box::default),
             scroll: matches!(kind, Kind::Scroll | Kind::List).then(Box::default),
-            list: matches!(kind, Kind::List).then(|| Box::new(ListState::new())),
+            list: matches!(kind, Kind::List).then(|| Box::new(ListState::new(retirement_requests))),
             input: matches!(kind, Kind::Input).then(Box::default),
             root: kind.is_root().then(Box::default),
             control: match kind {
@@ -645,6 +649,7 @@ impl Node {
             slot: None,
             gestures: GestureValues::default(),
             created: false,
+            native_root_projected: false,
             frame: Bounds::UNSET,
             overflow: None,
             attached: Vec::new(),
@@ -765,6 +770,9 @@ pub struct Core<M: TextEngine> {
     attachment_blocks: Vec<Key>,
     /// Live list nodes.
     lists: Vec<Key>,
+    /// Request correlation stays unique across list rebuilds and reparented
+    /// cells for this core. Native focus remains the only focus authority.
+    retirement_requests: Rc<Cell<u64>>,
     /// The lists in their parent's viewport (`viewport="parent"`), outer
     /// ones first ([`Core::resolve_outer`]).
     parent_lists: Vec<Key>,
@@ -898,7 +906,8 @@ impl<M: TextEngine> Core<M> {
         let mut layout = LayoutTree::with_capacity(256);
         let root_layout = layout.new_leaf(root_style(viewport));
         let mut nodes = Slab::with_capacity(256);
-        let mut root = Node::new(ROOT_ID, Kind::View);
+        let retirement_requests = Rc::default();
+        let mut root = Node::new(ROOT_ID, Kind::View, Rc::clone(&retirement_requests));
         root.layout = Some(root_layout);
         // The platform owns the root view.
         root.created = true;
@@ -922,6 +931,7 @@ impl<M: TextEngine> Core<M> {
             picker: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
+            retirement_requests,
             parent_lists: Vec::new(),
             outer_moved: false,
             extent_changed: false,
@@ -1133,6 +1143,298 @@ impl<M: TextEngine> Core<M> {
             self.needs_layout = true;
             self.restyle_where(crate::tailwind::deps::WIDTH | crate::tailwind::deps::HEIGHT);
             self.components_viewport(viewport);
+        }
+    }
+
+    /// The native platform's current focus ancestry. Lists consume it only
+    /// to keep that existing logical cell alive; the core never chooses focus.
+    pub fn set_focus_path(&mut self, path: &[NodeId]) {
+        for &list in &self.lists {
+            let cell = path.iter().find_map(|&id| {
+                let mut cell = self.key(id).ok()?;
+                loop {
+                    let node = &self.nodes[cell as usize];
+                    if node.parent == list && matches!(node.slot, Some(CellSlot::Item(_))) {
+                        return Some(cell);
+                    }
+                    if node.parent == NO_KEY {
+                        return None;
+                    }
+                    cell = node.parent;
+                }
+            });
+            if let Some(state) = self.nodes[list as usize].list.as_mut() {
+                state.focus_cell(cell);
+            }
+        }
+    }
+
+    /// Confirms a native list-cell retirement in the input FIFO. Replies to
+    /// cancelled requests and to cells removed by their source are inert.
+    pub fn retire_list_cell(&mut self, id: NodeId, request: u64, retired: bool) {
+        let Ok(cell) = self.key(id) else { return };
+        let roots = retired.then(|| self.owned_native_roots(cell));
+        let parent = self.nodes[cell as usize].parent;
+        let Some(list) = self
+            .nodes
+            .get_mut(parent as usize)
+            .and_then(|node| node.list.as_mut())
+        else {
+            return;
+        };
+        if list.retire_cell(cell, request, retired) {
+            list.mounted_cells.retain(|&mounted| mounted != id);
+            let roots = roots.expect("accepted retirement");
+            for &id in &roots {
+                if let Ok(key) = self.key(id) {
+                    self.nodes[key as usize].native_root_projected = false;
+                }
+            }
+            self.mount.push(MountItem::ListCellRetired { roots });
+        }
+    }
+
+    /// Core owns logical ancestry even when native presents a descendant
+    /// in a modal window, a header or an overlay host outside the cell.
+    fn owned_native_roots(&self, cell: Key) -> Vec<NodeId> {
+        let mut roots = vec![self.nodes[cell as usize].id];
+        // Ordinary row content can be large; only promoted layout roots
+        // need independent native parking, not every node below the cell.
+        let mut promoted: Vec<_> = self
+            .roots
+            .iter()
+            .filter_map(|&key| {
+                let node = &self.nodes[key as usize];
+                (key != cell
+                    && node.created
+                    && self.is_ancestor(cell, key)
+                    && (!node.is_overlay()
+                        || self.overlay(key).is_some_and(|state| state.host.is_some())))
+                .then(|| (self.root_depth(key), key))
+            })
+            .collect();
+        promoted.sort_unstable_by_key(|&(depth, _)| depth);
+        for (_, key) in promoted {
+            roots.push(self.nodes[key as usize].id);
+        }
+        roots
+    }
+
+    fn has_promoted_roots(&self, owner: Key) -> bool {
+        self.roots
+            .iter()
+            .any(|&key| self.nodes[key as usize].created && self.is_ancestor(owner, key))
+    }
+
+    /// Logical ownership changes invalidate the native snapshot on both
+    /// sides of a move, before a root can leave or join a retiring cell.
+    fn cancel_retiring_ancestors(&mut self, mut key: Key) {
+        loop {
+            let parent = self.nodes[key as usize].parent;
+            if parent == NO_KEY {
+                break;
+            }
+            if let Some(list) = self.nodes[parent as usize].list.as_mut() {
+                list.cancel_retirement(key);
+            }
+            key = parent;
+        }
+    }
+
+    fn promoted_root_visible(&self, mut key: Key) -> bool {
+        loop {
+            let node = &self.nodes[key as usize];
+            if !node.created
+                || node
+                    .layout
+                    .is_some_and(|layout| self.layout.style(layout).display == taffy::Display::None)
+                || (node.is_overlay() && self.overlay(key).is_none_or(|state| state.host.is_none()))
+            {
+                return false;
+            }
+            let parent = node.parent;
+            if parent == NO_KEY {
+                return key == self.root;
+            }
+            if self.nodes[parent as usize]
+                .list
+                .as_ref()
+                .is_some_and(|list| list.native_visible(key) == Some(false))
+            {
+                return false;
+            }
+            key = parent;
+        }
+    }
+
+    fn native_following(&self, parent: Key, child: Key) -> Vec<NodeId> {
+        let parent_id = self.nodes[parent as usize].id;
+        if self.nodes[child as usize].is_overlay() {
+            return self
+                .overlays
+                .iter()
+                .skip_while(|&&key| key != child)
+                .skip(1)
+                .filter_map(|&key| {
+                    (self.overlay(key)?.host == Some(parent_id))
+                        .then_some(self.nodes[key as usize].id)
+                })
+                .collect();
+        }
+        let children = &self.nodes[parent as usize].children;
+        let Some(position) = children.iter().position(|&key| key == child) else {
+            return Vec::new();
+        };
+        let rank = self.nodes[child as usize].stack_rank();
+        let mut following: Vec<_> = children
+            .iter()
+            .enumerate()
+            .filter_map(|(at, &key)| {
+                let node = &self.nodes[key as usize];
+                (node.created
+                    && node.layout.is_some()
+                    && !node.is_overlay()
+                    && (node.stack_rank(), at) > (rank, position))
+                    .then_some((node.stack_rank(), at, node.id))
+            })
+            .collect();
+        following.sort_unstable_by_key(|&(rank, at, _)| (rank, at));
+        let mut ids: Vec<_> = following.into_iter().map(|(_, _, id)| id).collect();
+        ids.extend(self.overlays.iter().filter_map(|&key| {
+            (self.overlay(key)?.host == Some(parent_id)).then_some(self.nodes[key as usize].id)
+        }));
+        ids
+    }
+
+    /// The sole native insertion boundary for promoted roots. The native
+    /// consumer selects an actually attached anchor from the core order.
+    fn project_root(&mut self, parent: NodeId, key: Key, following: Vec<NodeId>, force: bool) {
+        self.cancel_retiring_ancestors(key);
+        if self.nodes[key as usize].is_layout_root() {
+            if !self.promoted_root_visible(key) {
+                if self.nodes[key as usize].native_root_projected {
+                    self.remove_owned_roots(key);
+                }
+                return;
+            }
+            if !force && self.nodes[key as usize].native_root_projected {
+                return;
+            }
+            self.nodes[key as usize].native_root_projected = true;
+        }
+        self.mount.push(MountItem::ProjectRoot {
+            parent,
+            id: self.nodes[key as usize].id,
+            following,
+        });
+    }
+
+    fn emit_insert(&mut self, parent: NodeId, child: NodeId, before: Option<NodeId>) {
+        let Ok(key) = self.key(child) else { return };
+        if self.nodes[key as usize].is_layout_root() {
+            let Ok(host) = self.key(parent) else { return };
+            self.project_root(parent, key, self.native_following(host, key), true);
+            self.reproject_roots(key, false);
+        } else {
+            let carries_roots = self.has_promoted_roots(key);
+            if carries_roots {
+                self.cancel_retiring_ancestors(key);
+            }
+            self.mount.push(MountItem::Insert {
+                parent,
+                child,
+                before,
+            });
+            if carries_roots {
+                self.reproject_roots(key, false);
+            }
+        }
+    }
+
+    fn reproject_roots(&mut self, owner: Key, force: bool) {
+        let skip_owner = usize::from(!self.nodes[owner as usize].is_layout_root());
+        for id in self.owned_native_roots(owner).into_iter().skip(skip_owner) {
+            let Ok(key) = self.key(id) else { continue };
+            let node = &self.nodes[key as usize];
+            let parent = if node.is_overlay() {
+                self.overlay(key).and_then(|state| state.host)
+            } else {
+                let parent = node.parent;
+                (parent != NO_KEY && self.nodes[parent as usize].created)
+                    .then(|| self.nodes[parent as usize].id)
+            };
+            if let Some(parent) = parent {
+                let host = self.key(parent).expect("native host");
+                self.project_root(parent, key, self.native_following(host, key), force);
+            } else if self.nodes[key as usize].native_root_projected {
+                self.remove_owned_roots(key);
+            }
+        }
+    }
+
+    fn emit_remove(&mut self, id: NodeId) {
+        if let Ok(key) = self.key(id) {
+            self.nodes[key as usize].native_root_projected = false;
+        }
+        self.mount.push(MountItem::Remove { id });
+    }
+
+    fn remove_owned_roots(&mut self, cell: Key) {
+        for id in self.owned_native_roots(cell).into_iter().rev() {
+            self.emit_remove(id);
+        }
+    }
+
+    /// A bind may have waited across a source change or native input. Never
+    /// let a queued request replace a different or still-native cell owner.
+    pub fn current_list_bind(&self, id: NodeId, slot: u32, index: u32) -> bool {
+        self.key(id)
+            .ok()
+            .and_then(|key| self.nodes[key as usize].list.as_ref())
+            .is_some_and(|list| list.current_bind(slot, index))
+    }
+
+    /// Whether native input still addresses an item in the current source.
+    /// A deleted assignment stays quarantined until native has removed its
+    /// old projection; input arriving before that removal cannot run it.
+    pub fn accepts_native_input(&self, id: NodeId) -> bool {
+        let Ok(mut key) = self.key(id) else {
+            return true;
+        };
+        loop {
+            let node = &self.nodes[key as usize];
+            let parent = node.parent;
+            if parent == NO_KEY {
+                return true;
+            }
+            if matches!(node.slot, Some(CellSlot::Item(_)))
+                && self.nodes[parent as usize]
+                    .list
+                    .as_ref()
+                    .is_some_and(|list| list.source_live(key) != Some(true))
+            {
+                return false;
+            }
+            key = parent;
+        }
+    }
+
+    fn revoke_list_source(&mut self, list: Key, cells: Vec<Key>) {
+        for cell in cells {
+            let id = self.nodes[cell as usize].id;
+            // Source deletion is unconditional, including native focus.
+            // The existing retirement acknowledgement then releases reuse.
+            self.remove_owned_roots(cell);
+            let state = self.nodes[list as usize].list.as_mut().expect("list");
+            state.mounted_cells.retain(|&mounted| mounted != id);
+            let Some(request) = state.retirement_request(cell) else {
+                continue;
+            };
+            self.mount.push(MountItem::RetireListCell {
+                id,
+                request,
+                roots: self.owned_native_roots(cell),
+            });
         }
     }
 
@@ -1806,7 +2108,10 @@ impl<M: TextEngine> Core<M> {
         } else if self.slots[idx] != 0 {
             return Err(ApplyError::DuplicateNode(id));
         }
-        let key = self.nodes.insert(Node::new(id, kind)) as Key;
+        let key = self
+            .nodes
+            .insert(Node::new(id, kind, Rc::clone(&self.retirement_requests)))
+            as Key;
         self.slots[idx] = key + 1;
         Ok(key)
     }
@@ -1925,7 +2230,7 @@ impl<M: TextEngine> Core<M> {
             !matches!(m, MountItem::Create { id: c, .. } | MountItem::Insert { child: c, .. } if *c == id)
         });
         // The kind's own state and layout.
-        let fresh = Node::new(id, kind);
+        let fresh = Node::new(id, kind, Rc::clone(&self.retirement_requests));
         let node = &mut self.nodes[key as usize];
         node.created = false;
         node.kind = kind;
@@ -2040,6 +2345,14 @@ impl<M: TextEngine> Core<M> {
                 style.overflow = taffy::Point {
                     x: Overflow::Hidden,
                     y: Overflow::Hidden,
+                }
+            }
+            Kind::Input => {
+                // The native editor scrolls and clips its own text. Its
+                // measured content must not extend an enclosing scroll view.
+                style.overflow = taffy::Point {
+                    x: Overflow::Clip,
+                    y: Overflow::Clip,
                 }
             }
             Kind::Cell => {
@@ -2285,6 +2598,9 @@ impl<M: TextEngine> Core<M> {
             if self.reads_direction(key) {
                 self.restyle(key);
             }
+        }
+        if display_changed && self.has_promoted_roots(key) {
+            self.reproject_roots(key, false);
         }
         Ok(())
     }
@@ -2650,9 +2966,12 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Count(count) => {
-                if let Some(list) = node.list.as_mut() {
-                    list.set_count(count);
-                }
+                let revoked = node
+                    .list
+                    .as_mut()
+                    .map(|list| list.set_count(count))
+                    .unwrap_or_default();
+                self.revoke_list_source(key, revoked);
             }
             Prop::EstimatedItemSize(size) => {
                 if let Some(list) = node.list.as_mut() {
@@ -2672,10 +2991,13 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::Splice(at, removed, inserted) => {
                 let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
-                if let Some(list) = node.list.as_mut() {
+                let revoked = if let Some(list) = node.list.as_mut() {
                     list.loads_at_start = loads_at_start;
-                    list.splice(at, removed, inserted);
-                }
+                    list.splice(at, removed, inserted)
+                } else {
+                    Vec::new()
+                };
+                self.revoke_list_source(key, revoked);
             }
             Prop::Columns(columns) => {
                 if let Some(list) = node.list.as_mut() {
@@ -3340,6 +3662,9 @@ impl<M: TextEngine> Core<M> {
             return Err(ApplyError::BadAnchor(self.nodes[b as usize].id));
         }
 
+        let previous_parent = self.nodes[child as usize].parent;
+        let carries_roots = self.has_promoted_roots(child);
+
         // Detach from the current position. A native view that stays visible
         // is moved by the insert below, so only emit a remove when the new
         // parent has no native view.
@@ -3438,13 +3763,16 @@ impl<M: TextEngine> Core<M> {
                 if self.nodes[parent as usize].list.is_none() {
                     let before = self.native_before(parent, child);
                     // By the nodes' own ids (the ops may name an alias).
-                    self.mount.push(MountItem::Insert {
-                        parent: self.nodes[parent as usize].id,
-                        child: self.nodes[child as usize].id,
+                    self.emit_insert(
+                        self.nodes[parent as usize].id,
+                        self.nodes[child as usize].id,
                         before,
-                    });
+                    );
                 }
             }
+        }
+        if carries_roots && previous_parent != NO_KEY && previous_parent != parent {
+            self.reproject_roots(child, true);
         }
         Ok(())
     }
@@ -3457,6 +3785,9 @@ impl<M: TextEngine> Core<M> {
     /// Unlinks `key` from its parent's children, layout and (optionally)
     /// native hierarchy.
     fn unlink(&mut self, key: Key, emit_remove: bool) {
+        if self.has_promoted_roots(key) {
+            self.cancel_retiring_ancestors(key);
+        }
         let parent = self.nodes[key as usize].parent;
         let siblings = &mut self.nodes[parent as usize].children;
         let pos = siblings
@@ -3486,7 +3817,7 @@ impl<M: TextEngine> Core<M> {
         self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(key);
         self.sticky_changed |= !self.sticky_nodes.is_empty();
         let node = &self.nodes[key as usize];
-        let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
+        let (inline, layout, created) = (node.inline, node.layout, node.created);
         if inline {
             self.mark_text_block(parent);
             return;
@@ -3513,7 +3844,7 @@ impl<M: TextEngine> Core<M> {
                 && self.nodes[parent as usize].created
                 && !self.nodes[key as usize].is_overlay()
             {
-                self.mount.push(MountItem::Remove { id });
+                self.remove_owned_roots(key);
             }
         }
     }
@@ -3715,11 +4046,7 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let before = self.native_before(parent, key);
-        self.mount.push(MountItem::Insert {
-            parent: p.id,
-            child: id,
-            before,
-        });
+        self.emit_insert(p.id, id, before);
     }
 
     /// `allowFontScaling` / `maxFontSizeMultiplier` changed on `key`.
@@ -3904,11 +4231,7 @@ impl<M: TextEngine> Core<M> {
                 self.ensure_created(child);
                 if self.nodes[key as usize].list.is_none() {
                     let child_id = self.nodes[child as usize].id;
-                    self.mount.push(MountItem::Insert {
-                        parent: id,
-                        child: child_id,
-                        before: None,
-                    });
+                    self.emit_insert(id, child_id, None);
                 }
             }
         }
@@ -4547,11 +4870,7 @@ impl<M: TextEngine> Core<M> {
             let new = !old.contains(&id);
             if created && new {
                 self.ensure_created(a);
-                self.mount.push(MountItem::Insert {
-                    parent: block_id,
-                    child: id,
-                    before: None,
-                });
+                self.emit_insert(block_id, id, None);
                 inserted = true;
             }
             let layout = self.nodes[a as usize].layout.expect("attachment layout");
@@ -4580,7 +4899,7 @@ impl<M: TextEngine> Core<M> {
             let n = &self.nodes[k as usize];
             let moved = n.parent != NO_KEY && !n.inline && self.nodes[n.parent as usize].created;
             if n.created && !moved && self.attachment_block(k).is_none() {
-                self.mount.push(MountItem::Remove { id });
+                self.remove_owned_roots(k);
             }
         }
         let ids: Vec<NodeId> = keys.iter().map(|&a| self.nodes[a as usize].id).collect();
@@ -5529,20 +5848,22 @@ impl<M: TextEngine> Core<M> {
             if cells.contains(&id) {
                 true
             } else {
-                self.mount.push(MountItem::Remove { id });
+                let cell = self.key(id).expect("live cell");
+                self.remove_owned_roots(cell);
                 false
             }
         });
         let parent = self.nodes[key as usize].id;
         let mut before = None;
-        for &id in cells.iter().rev() {
+        for (index, &id) in cells.iter().enumerate().rev() {
             let at = current.iter().position(|&cell| cell == id);
             let in_place = at.is_some_and(|at| current.get(at + 1).copied() == before);
             if !in_place {
-                self.mount.push(MountItem::Insert {
+                let cell = self.key(id).expect("live cell");
+                self.mount.push(MountItem::ProjectRoot {
                     parent,
-                    child: id,
-                    before,
+                    id,
+                    following: cells[index + 1..].to_vec(),
                 });
                 if let Some(at) = at {
                     current.remove(at);
@@ -5551,6 +5872,12 @@ impl<M: TextEngine> Core<M> {
                     .and_then(|before| current.iter().position(|&cell| cell == before))
                     .unwrap_or(current.len());
                 current.insert(at, id);
+                self.nodes[key as usize]
+                    .list
+                    .as_mut()
+                    .expect("list")
+                    .projected(cell);
+                self.reproject_roots(cell, true);
             }
             before = Some(id);
         }
@@ -5885,6 +6212,41 @@ impl<M: TextEngine> Core<M> {
         if list.paced && list.has_paced() && !self.paced_lists.contains(&id) {
             self.paced_lists.push(id);
         }
+        let native_ops = std::mem::take(&mut list.native_ops);
+        for op in native_ops {
+            match op {
+                list::NativeCellOp::Retire { cell, request } => {
+                    let list = self.nodes[key as usize].list.as_ref().expect("list");
+                    if list.current_retirement(cell, request) {
+                        self.mount.push(MountItem::RetireListCell {
+                            id: self.nodes[cell as usize].id,
+                            request,
+                            roots: self.owned_native_roots(cell),
+                        });
+                    }
+                }
+                list::NativeCellOp::Attach { cell } => {
+                    if !self.nodes[key as usize]
+                        .list
+                        .as_ref()
+                        .expect("list")
+                        .current_attachment(cell)
+                    {
+                        continue;
+                    }
+                    let id = self.nodes[cell as usize].id;
+                    // Native may have consumed the earlier retirement already.
+                    // Emit an Insert even if our last projection still lists it.
+                    self.nodes[key as usize]
+                        .list
+                        .as_mut()
+                        .expect("list")
+                        .mounted_cells
+                        .retain(|&mounted| mounted != id);
+                }
+            }
+        }
+        let list = self.nodes[key as usize].list.as_mut().expect("list");
         if events.contains(EventKind::ViewableItemsChange) {
             let viewable = list.viewable_items();
             if viewable != list.viewable {

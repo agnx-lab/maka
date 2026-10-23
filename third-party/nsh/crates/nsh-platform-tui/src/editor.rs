@@ -401,6 +401,15 @@ impl Editor {
         result
     }
 
+    pub(crate) fn cell_extent(&self, columns: usize, secure: bool) -> (usize, usize) {
+        let mut extent = (0, 0);
+        self.walk_cells(columns, secure, |_, row, column| {
+            extent.0 = extent.0.max(row);
+            extent.1 = extent.1.max(column);
+        });
+        extent
+    }
+
     /// Finds the nearest caret boundary on a visual line, including tabs,
     /// wide glyphs, masked passwords and wrapped continuation lines.
     pub(crate) fn offset_at(&self, row: usize, column: usize, columns: usize, secure: bool) -> u32 {

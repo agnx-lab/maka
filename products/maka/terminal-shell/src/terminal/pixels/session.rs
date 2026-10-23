@@ -97,6 +97,9 @@ fn run(
         }
         state.trace.is_some()
     };
+    config.context = config
+        .context
+        .with(super::super::UiScaleControl(presentation.clone()));
     if ready.send(Ok(())).is_err() {
         return Ok(());
     }
@@ -513,6 +516,18 @@ fn run(
                 started.set(allow_draw.then(Instant::now));
             }
             worked |= platform.pump_with_draw(allow_draw);
+            let caret = platform.input_caret_bounds();
+            {
+                let mut state = presentation.state.lock().unwrap();
+                let inbox = state.pixels.as_mut().unwrap();
+                if geometry.get() == inbox.geometry && inbox.resize.is_none() {
+                    let cursor = super::cursor::Cursor::from_native(caret, inbox.capabilities);
+                    if inbox.cursor != cursor {
+                        inbox.cursor = cursor;
+                        presentation.wake_driver();
+                    }
+                }
+            }
             presentation
                 .state
                 .lock()

@@ -19,12 +19,11 @@
 
 import { createText, errorText } from './text';
 import { displayText, tr } from './locale';
-import { cleanup, computed, effect, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, computed, effect, inputAction, signal, Text, View, List } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import type { AnimatedValue } from 'nsh/animated';
-import { List } from 'nsh/list';
-import { platform } from 'nsh/device';
+import { platform, windowSize } from 'nsh/device';
 import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import type { ProcessGroup, TurnPresentation } from './processGroups';
@@ -212,7 +211,8 @@ function ActivityLog(props: {
       groupHeaderHeight +
       panelStyle.gap +
       2 * (panelStyle.marginVertical + panelStyle.padding + panelStyle.borderWidth);
-    const available = Math.max(16, props.viewport().height - chrome);
+    const viewportHeight = props.viewport().height;
+    const available = Math.max(16, Math.min(400, windowSize().height / 2, viewportHeight - chrome));
     return platform.isTerminal ? Math.floor(available / 16) * 16 : available;
   };
   const bodyHeight = () => {

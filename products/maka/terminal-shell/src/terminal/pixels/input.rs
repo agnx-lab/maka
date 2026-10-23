@@ -117,6 +117,7 @@ pub(crate) struct Inbox {
     pub cancel_pointer: bool,
     pub wake: Option<std::thread::Thread>,
     pub effects: Option<Vec<u8>>,
+    pub(super) cursor: super::cursor::Cursor,
     pub restore_sixel_mode: bool,
 }
 
@@ -146,6 +147,7 @@ impl Inbox {
             cancel_pointer: false,
             wake: None,
             effects: None,
+            cursor: super::cursor::Cursor::default(),
             restore_sixel_mode: false,
         }
     }
@@ -341,6 +343,33 @@ impl Inbox {
         })
     }
 
+    pub(in crate::terminal) fn set_ui_scale(&mut self, scale: f32) -> Result<(), String> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err("interface scale must be a finite positive number".into());
+        }
+        let capabilities = Capabilities {
+            ui_scale: scale,
+            ..self.capabilities
+        };
+        let density = capabilities.scale_factor();
+        if !density.is_finite()
+            || density <= 0.0
+            || capabilities.logical_viewport().is_some_and(|viewport| {
+                !f32::from(viewport.width).is_finite()
+                    || f32::from(viewport.width) <= 0.0
+                    || !f32::from(viewport.height).is_finite()
+                    || f32::from(viewport.height) <= 0.0
+            })
+        {
+            return Err("interface scale exceeds the renderer's numeric range".into());
+        }
+        if self.capabilities.ui_scale != scale {
+            self.capabilities = capabilities;
+            self.invalidate_geometry()?;
+        }
+        Ok(())
+    }
+
     pub fn push(&mut self, event: Event) -> Result<bool, String> {
         if let Event::Key(key) = &event
             && key.kind != KeyEventKind::Release
@@ -434,6 +463,7 @@ impl Inbox {
             .ok_or("terminal geometry generation exhausted")?;
         self.resize = Some(self.capabilities.size);
         self.published = None;
+        self.cursor = super::cursor::Cursor::default();
         // A submitted readback or codec still consumes its original slot.
         // Completed stale wire is safe to retire immediately.
         self.frames
@@ -542,6 +572,7 @@ mod tests {
             protocol: Some(super::super::probe::Protocol::Sixel),
             synchronized: false,
             sixel_geometry: SixelGeometry::Unknown,
+            ui_scale: 1.0,
         }
     }
 
@@ -921,6 +952,22 @@ mod tests {
             inbox.capabilities.logical_viewport().unwrap(),
             original.logical_viewport().unwrap() / 2.0
         );
+
+        // A saved 125% UI zoom composes with the terminal's own font density.
+        // The same physical target now has a 384 by 256 logical viewport.
+        inbox.published = Some(FrameToken::default());
+        inbox.set_ui_scale(1.25).unwrap();
+        assert_eq!(inbox.geometry, 3);
+        assert!(inbox.published.is_none());
+        assert_eq!(inbox.capabilities.viewport(), original.viewport());
+        assert_eq!(inbox.capabilities.scale_factor(), 3.125);
+        assert_eq!(
+            inbox.capabilities.logical_viewport().unwrap(),
+            gpui::size(gpui::px(384.0), gpui::px(256.0))
+        );
+        inbox.set_ui_scale(1.0).unwrap();
+        assert_eq!(inbox.geometry, 4);
+        assert_eq!(inbox.capabilities.scale_factor(), 2.5);
     }
 
     #[test]
@@ -1282,6 +1329,7 @@ mod tests {
                 protocol: None,
                 synchronized: false,
                 sixel_geometry: Default::default(),
+                ui_scale: 1.0,
             },
             false,
         );

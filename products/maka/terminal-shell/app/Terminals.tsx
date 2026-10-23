@@ -18,9 +18,8 @@
  */
 
 import { tr } from './locale';
-import { inputAction, Text, View } from 'nsh';
+import { inputAction, Text, View, List } from 'nsh';
 import { Button } from 'nsh/base';
-import { List } from 'nsh/list';
 import { terminalStatus, type TerminalsModel } from './terminalState';
 import { Icon } from './Icon';
 import {

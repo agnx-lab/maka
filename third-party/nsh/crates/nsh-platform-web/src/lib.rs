@@ -950,9 +950,9 @@ fn flush() {
         request_frames();
         return;
     }
-    APP.with(|a| {
+    let retirements = APP.with(|a| {
         let mut app = a.borrow_mut();
-        let Some(app) = app.as_mut() else { return };
+        let Some(app) = app.as_mut() else { return None };
         let mut out = Out::new();
         for batch in &batches {
             for item in &batch.items {
@@ -987,11 +987,37 @@ fn flush() {
         }
         // Bound properties follow the styles just applied.
         app.animation.outputs(&mut out);
-        if !out.is_empty() {
-            ffi::submit(&out.finish());
-        }
+        let retired = if out.is_empty() {
+            Vec::new()
+        } else {
+            ffi::submit(&out.finish())
+        };
         finish_animations(app);
+        Some((app.control.clone(), retired))
     });
+    if let Some((control, retirements)) = retirements {
+        let changed = !retirements.is_empty();
+        for retired in retirements {
+            control.set_focus_path(retired.focus);
+            for contact in retired.cancelled {
+                control.cancel_touch(contact);
+            }
+            for (id, states) in retired.states {
+                control.set_states(id, states);
+            }
+            control.retire_list_cell(
+                retired.id,
+                retired
+                    .request
+                    .parse()
+                    .expect("invalid DOM retirement request"),
+                retired.retired,
+            );
+        }
+        if changed {
+            ffi::request_pump();
+        }
+    }
     request_frames();
 }
 
@@ -1063,7 +1089,7 @@ pub extern "C" fn nsh_frame(now: f64) -> f64 {
             let mut out = Out::new();
             app.animation.outputs(&mut out);
             if !out.is_empty() {
-                ffi::submit(&out.finish());
+                let _ = ffi::submit(&out.finish());
             }
             finish_animations(app);
         }
@@ -1423,7 +1449,7 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
             let mut out = Out::new();
             app.animation.outputs(&mut out);
             if !out.is_empty() {
-                ffi::submit(&out.finish());
+                let _ = ffi::submit(&out.finish());
             }
         }
         app.control.scroll(id, point(px(x), px(y)), applied);
@@ -1450,7 +1476,7 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
         let mut out = Out::new();
         app.animation.outputs(&mut out);
         if !out.is_empty() {
-            ffi::submit(&out.finish());
+            let _ = ffi::submit(&out.finish());
         }
         let (value_x, value_y) = app.animation.pan_values(id);
         let payload = EventPayload::Pan {
@@ -1482,7 +1508,7 @@ pub extern "C" fn nsh_transform_gesture(id: u32, rotation: u32, phase: u32, amou
         let mut out = Out::new();
         app.animation.outputs(&mut out);
         if !out.is_empty() {
-            ffi::submit(&out.finish());
+            let _ = ffi::submit(&out.finish());
         }
         let key = if rotation { "rotation" } else { "scale" };
         let payload = EventPayload::Map(vec![

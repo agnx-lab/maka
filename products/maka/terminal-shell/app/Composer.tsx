@@ -20,9 +20,8 @@
 import { ProjectMcp } from './ProjectMcpConsent';
 import type { ProjectMcp as ProjectMcpOwner } from './projectMcp';
 import { tr } from './locale';
-import { cleanup, effect, Input, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, effect, Input, inputAction, signal, Text, View, Image } from 'nsh';
 import type { JSX, YNode } from 'nsh';
-import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
 import { platform, windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
@@ -379,7 +378,7 @@ export function Composer(props: {
               focusStyle={{ backgroundColor: C.line }}
               activeStyle={{ backgroundColor: C.surface }}
             >
-              <Icon name="plus" color={C.secondary} />
+              <Icon name="terminal" color={C.secondary} />
             </Button>
             <If when={props.session() !== null}>
               <Button

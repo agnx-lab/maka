@@ -60,6 +60,8 @@ final class Mounter {
     private static final int OVERFLOW = 31;
     private static final int ACCESSIBILITY_LABEL = 32;
     private static final int APPEARANCE = 33;
+    private static final int RETIRE_LIST_CELL = 34;
+    private static final int PROJECT_ROOT = 35;
     /** The surface lays out right to left: native widgets mirror. */
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
@@ -211,6 +213,7 @@ final class Mounter {
         };
         root = new Box(context, this, 1);
         views.put(1, root);
+        observeFocus(root);
     }
 
     /** Whether the running app's web views may navigate to {@code url} (its capabilities). */
@@ -238,9 +241,24 @@ final class Mounter {
             switch (op) {
                 case CREATE: create(b.getInt(), b.getInt()); break;
                 case INSERT: insert(b.getInt(), b.getInt(), b.getInt()); break;
+                case PROJECT_ROOT: {
+                    int parent = b.getInt(), id = b.getInt();
+                    int[] following = new int[b.getInt()];
+                    for (int i = 0; i < following.length; i++) following[i] = b.getInt();
+                    projectRoot(parent, id, following);
+                    break;
+                }
                 case REMOVE: {
                     int id = b.getInt();
                     if (!removeHosted(id)) remove(id);
+                    break;
+                }
+                case RETIRE_LIST_CELL: {
+                    int id = b.getInt();
+                    long request = b.getLong();
+                    int[] roots = new int[b.getInt()];
+                    for (int i = 0; i < roots.length; i++) roots[i] = b.getInt();
+                    retireListCell(id, request, seq, roots);
                     break;
                 }
                 case DELETE: delete(b.getInt()); break;
@@ -661,10 +679,132 @@ final class Mounter {
         if (parent instanceof ScrollBox && ((ScrollBox) parent).hasSticky()) ((ScrollBox) parent).frontSticky();
     }
 
+    private void projectRoot(int parentId, int id, int[] following) {
+        View parent = views.get(parentId), child = views.get(id);
+        ModalHost modal = modals.get(id);
+        if (modal != null) {
+            if (hosts.get(id, -1) == parentId && modal.root.isShown() && modal.shown()) return;
+            insert(parentId, id, -1);
+            return;
+        }
+        ViewGroup group;
+        if (child instanceof StackBox.ScreenBox && parent instanceof StackBox) group = (StackBox) parent;
+        else if (headerItem(id) && parent instanceof StackBox.ScreenBox) group = ((StackBox.ScreenBox) parent).toolbar;
+        else group = container(parent);
+        int before = -1;
+        if (group != null) {
+            for (int candidate : following) {
+                View view = views.get(candidate);
+                if (child instanceof StackBox.ScreenBox && !(view instanceof StackBox.ScreenBox)) continue;
+                if (view != null && view.getParent() == group && group.indexOfChild(view) >= 0) {
+                    before = candidate;
+                    break;
+                }
+            }
+            int index = group.indexOfChild(child);
+            int at = before >= 0 ? group.indexOfChild(views.get(before)) : group.getChildCount();
+            boolean hosted = child instanceof StackBox.ScreenBox || headerItem(id);
+            if (index >= 0 && index + 1 == at && layoutAnimators.get(id) == null
+                    && (!hosted || hosts.get(id, -1) == parentId)) return;
+        }
+        insert(parentId, id, before);
+    }
+
     private static void detach(View v) {
         if (v == null) return;
         ViewParent p = v.getParent();
         if (p instanceof ViewGroup) ((ViewGroup) p).removeView(v);
+    }
+
+    void observeFocus(View view) {
+        view.getViewTreeObserver().addOnGlobalFocusChangeListener((old, focused) -> publishFocusPath());
+    }
+
+    void publishFocusPath() {
+        if (handle() != 0) Native.focusPath(handle(), focusPath());
+    }
+
+    private int[] focusPath(View focused) {
+        java.util.ArrayList<Integer> path = new java.util.ArrayList<>();
+        for (View view = focused; view != null; ) {
+            if (view instanceof Node) {
+                int id = ((Node) view).nodeId();
+                if (views.get(id) == view) path.add(id);
+            }
+            ViewParent parent = view.getParent();
+            view = parent instanceof View ? (View) parent : null;
+        }
+        int[] result = new int[path.size()];
+        for (int i = 0; i < result.length; i++) result[i] = path.get(i);
+        return result;
+    }
+
+    private int[] focusPath() {
+        for (int i = modals.size() - 1; i >= 0; i--) {
+            ModalHost modal = modals.valueAt(i);
+            if (modal.root.isShown() && modal.root.hasWindowFocus()) {
+                View focused = modal.root.findFocus();
+                return focusPath(focused != null ? focused : modal.root);
+            }
+        }
+        return focusPath(host.hasWindowFocus() ? host.findFocus() : null);
+    }
+
+    private void retireListCell(int id, long request, long seq, int[] roots) {
+        int[] path = focusPath();
+        for (int node : path) {
+            for (int root : roots) {
+                if (node == root) {
+                    Native.retireListCell(handle(), seq, id, request, false, path);
+                    return;
+                }
+            }
+        }
+        for (int root : roots) {
+            View view = views.get(root);
+            if (view == null) continue;
+            for (TouchTracker tracker : touchTrackers) tracker.cancelWithin(view);
+            android.view.MotionEvent cancel = android.view.MotionEvent.obtain(
+                    0, android.os.SystemClock.uptimeMillis(), android.view.MotionEvent.ACTION_CANCEL, 0, 0, 0);
+            view.dispatchTouchEvent(cancel);
+            cancel.recycle();
+            cancelRetiredInput(view);
+            ModalHost modal = modals.get(root);
+            if (modal != null) {
+                dirtyModals.remove(root);
+                modal.park();
+            } else if (view instanceof StackBox.ScreenBox) {
+                View parent = views.get(hosts.get(root, -1));
+                if (parent instanceof StackBox) ((StackBox) parent).park((StackBox.ScreenBox) view);
+                else detach(view);
+            } else {
+                if (headerItem(root)) {
+                    int parent = hosts.get(root, -1);
+                    hosts.delete(root);
+                    if (parent >= 0) dirtyScreens.add(parent);
+                }
+                detach(view);
+            }
+        }
+        Native.retireListCell(handle(), seq, id, request, true, focusPath());
+    }
+
+    private void cancelRetiredInput(View view) {
+        if (view instanceof InputBox) ((InputBox) view).cancelAutoFocus();
+        if (view instanceof ScrollBox) ((ScrollBox) view).cancelPendingScroll();
+        view.cancelPendingInputEvents();
+        if (view instanceof Node) {
+            int id = ((Node) view).nodeId();
+            Animator animation = views.get(id) == view ? layoutAnimators.get(id) : null;
+            if (animation != null) {
+                layoutAnimators.remove(id);
+                animation.cancel();
+            }
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) cancelRetiredInput(group.getChildAt(i));
+        }
     }
 
     /** Removes a view from its parent, fading it out under a layout animation. */
@@ -1494,6 +1634,7 @@ final class Mounter {
         View parent = views.get(parentId), child = views.get(childId);
         if (child instanceof StackBox.ScreenBox && parent instanceof StackBox) {
             StackBox stack = (StackBox) parent;
+            ((StackBox.ScreenBox) child).parked = false;
             stack.screens.remove((Integer) childId);
             int pos = beforeId >= 0 ? stack.screens.indexOf(beforeId) : -1;
             stack.screens.add(pos >= 0 ? pos : stack.screens.size(), childId);
@@ -1517,6 +1658,10 @@ final class Mounter {
 
     private boolean headerItem(int id) {
         return headerItems.contains(id);
+    }
+
+    boolean headerMounted(int id, int screen) {
+        return hosts.get(id, -1) == screen;
     }
 
     private boolean removeHosted(int id) {

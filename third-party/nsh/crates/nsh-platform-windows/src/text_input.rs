@@ -135,6 +135,8 @@ pub(crate) struct InputState {
     config: RefCell<InputConfig>,
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
+    /// The first configuration's scheduled auto-focus task is still live.
+    auto_focus_pending: Cell<bool>,
     /// Content box; the whole view until the core sends one.
     content: Cell<Option<Bounds<Points>>>,
     /// The size the editor was hosted (and last drawn) at.
@@ -180,6 +182,7 @@ impl InputState {
             model: RefCell::default(),
             config: RefCell::default(),
             configured: Cell::new(false),
+            auto_focus_pending: Cell::new(false),
             content: Cell::new(None),
             size: Cell::new((0.0, 0.0)),
             count: Cell::new(0),
@@ -841,6 +844,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
         crate::access::focus_changed(surface, view);
         view.changed();
     }
+    surface.sync_focus();
     update_ime(surface);
     blink::update();
     place_ime(surface);
@@ -1286,16 +1290,40 @@ fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
     if view.attached() {
         return set_focus(surface, Some(view));
     }
+    let Some(input) = input_of(view) else { return };
+    input.auto_focus_pending.set(true);
+    let pending = Rc::downgrade(&input);
     let view = view.clone();
     let mut frames = 0;
     surface.on_frame(move |surface, _| {
+        let Some(input) = pending.upgrade() else {
+            return false;
+        };
+        if !input.auto_focus_pending.get() {
+            return false;
+        }
         frames += 1;
         if view.attached() {
+            input.auto_focus_pending.set(false);
             set_focus(surface, Some(&view));
             return false;
         }
-        frames < 30 && view.state().input.is_some()
+        let waiting = frames < 30 && view.state().input.is_some();
+        if !waiting {
+            input.auto_focus_pending.set(false);
+        }
+        waiting
     });
+}
+
+/// Cancels scheduled focus when a subtree leaves the native input tree.
+pub(crate) fn retire_cell(view: &NshView) {
+    if let Some(input) = input_of(view) {
+        input.auto_focus_pending.set(false);
+    }
+    for child in view.child_views() {
+        retire_cell(&child);
+    }
 }
 
 /// The content box in the view.
@@ -1488,6 +1516,7 @@ pub(crate) fn window_focus(surface: &Rc<Surface>, focused_window: bool) {
         place_ime(surface);
     }
     blink::update();
+    surface.sync_focus();
 }
 
 /// A pointer event on input `view` (its coordinates); true when handled.

@@ -19,12 +19,21 @@
 
 import { createText, UiError, errorText, message as uiMessage } from './text';
 import { applyLanguagePreference, tr } from './locale';
+import { initializeUiScale, uiScale } from './uiScale';
 import { cleanup, effect, inputAction, mount, signal, Scroll, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { host } from './host';
 import { keymap } from 'nsh/keymap';
-import { bodyTextStyle, C, Header, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
+import {
+  bodyTextStyle,
+  C,
+  Header,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  type BrowserHeader,
+} from './ui';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
 import type { Control, ConversationHandle } from './Conversation';
@@ -35,7 +44,10 @@ import { ModelSelect } from './ModelSelect';
 import { ModelSettings } from './ModelSettings';
 import type { ModelBackend } from './modelSelection';
 import { InteractionComposer, interactionOutcomeSummary } from './InteractionComposer';
-import type { AgentInteractionResult } from '../../../../packages/plugin-sdk/src/generated/runtime';
+import type {
+  AgentInteractionResult,
+  ModelSelection,
+} from '../../../../packages/plugin-sdk/src/generated/runtime';
 import type { ImagePreview } from './ImageThumbnail';
 import { createResources } from './resources';
 import { createBrowsing } from './browsing';
@@ -44,13 +56,16 @@ import { Workbench, canDockBrowser } from './Workbench';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 import { performSessionAction, type SessionAction } from './sessionLifecycle';
 
-type Overlay = {
-  instance: number;
-  kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings';
+type OverlayTarget = {
   sessionId: string | null;
-};
+} & (
+  | { kind: 'commands' | 'workspaces' | 'models' | 'sessions' }
+  | { kind: 'settings'; model?: ModelSelection }
+);
+type Overlay = OverlayTarget & { instance: number };
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
+  initializeUiScale();
   const browsing = createBrowsing();
   const selected = signal<string | null>(host.initialSession);
   const overlay = signal<Overlay | null>(null);
@@ -176,28 +191,30 @@ function App() {
     overlay.set(null);
     return true;
   };
-  const open = ({
-    kind,
-    sessionId,
-  }: {
-    kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings';
-    sessionId: string | null;
-  }) => {
+  const open = (request: OverlayTarget) => {
+    const { sessionId } = request;
     if (!alive || selected() !== sessionId) return;
-    if (kind === 'sessions' && canDockBrowser()) {
+    if (request.kind === 'sessions') {
       resources.hide();
       status.set('');
-      overlay.set(null);
-      sidebarExpanded.set(true);
-      browserFocus.set(true);
-      return;
+      if (overlay()?.kind === 'sessions') {
+        browserFocus.set(true);
+        return;
+      }
+      if (canDockBrowser()) {
+        overlay.set(null);
+        sidebarExpanded.set(true);
+        browserFocus.set(true);
+        return;
+      }
     }
-    if (kind === 'models' && sessionId === null) {
-      kind = 'settings';
-    }
+    const target =
+      request.kind === 'models' && sessionId === null
+        ? { kind: 'settings' as const, sessionId }
+        : request;
     status.set('');
-    browserFocus.set(kind === 'sessions');
-    overlay.set({ kind, sessionId, instance: ++overlayInstance });
+    browserFocus.set(target.kind === 'sessions');
+    overlay.set({ ...target, instance: ++overlayInstance });
   };
   const toggleModels = ({
     sessionId,
@@ -212,14 +229,22 @@ function App() {
       if (current?.kind === 'models' && current.sessionId === sessionId) closeOverlay(instance);
     } else if (current?.kind !== 'models') open({ kind: 'models', sessionId });
   };
-  const manageModels = ({ sessionId, instance }: { sessionId: string; instance: number }) => {
+  const manageModels = ({
+    sessionId,
+    instance,
+    model,
+  }: {
+    sessionId: string;
+    instance: number;
+    model?: ModelSelection;
+  }) => {
     if (
       alive &&
       selected() === sessionId &&
       handle()?.sessionId === sessionId &&
       closeOverlay(instance)
     )
-      open({ kind: 'settings', sessionId });
+      open({ kind: 'settings', sessionId, model });
   };
   const chooseModel = async (
     owner: ConversationHandle,
@@ -378,7 +403,21 @@ function App() {
   const commandStop = (context: CommandContext & { invocationId: string | null }) => {
     if (closeCommand(context)) void handle()?.stop(context.invocationId).catch(report);
   };
+  const commandResetScale = (context: CommandContext) => {
+    if (closeCommand(context)) void uiScale.resetAndSave();
+  };
   const commands = (context: CommandContext): PaletteEntry[] => [
+    ...(uiScale.supported
+      ? [
+          {
+            id: 'interface-scale-reset',
+            title: tr('Reset interface scale to 100%'),
+            detail: tr('Interface scale'),
+            hint: 'Ctrl+Alt+0',
+            run: inputAction(commandResetScale, context),
+          },
+        ]
+      : []),
     {
       id: 'sessions',
       title: tr('Sessions'),
@@ -462,6 +501,10 @@ function App() {
       }),
     },
   ];
+  if (uiScale.supported) {
+    keymap.bind('mod+0', () => void uiScale.resetAndSave(), { when: 'always' });
+    keymap.bind('mod+alt+0', () => void uiScale.resetAndSave(), { when: 'always' });
+  }
   keymap.bind('mod+p', () => open({ kind: 'commands', sessionId: selected() }), { when: 'always' });
   keymap.bind('mod+o', () => open({ kind: 'sessions', sessionId: selected() }), { when: 'always' });
   keymap.bind('mod+g', () => open({ kind: 'models', sessionId: selected() }), { when: 'always' });
@@ -559,6 +602,26 @@ function App() {
     browserFocus.set(false);
     handle()?.focus();
   };
+  const sidebarShown = () =>
+    overlay()?.kind === 'sessions' || (sidebarExpanded() && canDockBrowser(resources.shown()));
+  const toggleSidebar = (request: { sessionId: string | null; expanded: boolean }) => {
+    if (!alive || selected() !== request.sessionId || sidebarShown() !== request.expanded) return;
+    const current = overlay();
+    if (current && current.kind !== 'sessions') return;
+    if (!request.expanded) {
+      open({ kind: 'sessions', sessionId: request.sessionId });
+      return;
+    }
+    if (current) closeOverlay(current.instance);
+    if (current?.kind === 'sessions') handle()?.focus();
+    else closeSidebar();
+  };
+  const browserHeader = (sessionId: string | null, foreground = false): BrowserHeader => ({
+    expanded: sidebarShown(),
+    hidden: overlay()?.kind === 'sessions' && !foreground,
+    toggle: inputAction(toggleSidebar, { sessionId, expanded: sidebarShown() }),
+    search: inputAction(open, { kind: 'sessions', sessionId }),
+  });
   const selectBrowsed = async (id: string, origin: string | null) => {
     const current = overlay();
     const instance = current?.kind === 'sessions' ? current.instance : null;
@@ -624,7 +687,7 @@ function App() {
             <Header
               title=""
               commands={inputAction(open, { kind: 'commands', sessionId: null })}
-              browse={inputAction(open, { kind: 'sessions', sessionId: null })}
+              browser={browserHeader(null)}
             />
           </View>
         </If>
@@ -635,7 +698,7 @@ function App() {
               control={control}
               fork={(action) => changeBrowsedSession(action, id())}
               commands={inputAction(open, { kind: 'commands', sessionId: id() })}
-              browse={inputAction(open, { kind: 'sessions', sessionId: id() })}
+              browser={() => browserHeader(id())}
               files={inputAction(resources.openFiles, { sessionId: id() })}
               filesOpener={(node) => resources.attachOpener(id(), node)}
               previewImage={previewImage}
@@ -815,23 +878,23 @@ function App() {
                 onOpenChange={() => closeOverlay(current.instance)}
                 style={{
                   flex: 1,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  padding: 16,
                   backgroundColor: '#00000099',
                 }}
               >
+                <View style={{ backgroundColor: C.background }}>
+                  <Header
+                    title={current.sessionId === null ? '' : tr('Sessions')}
+                    commands={inputAction(open, { kind: 'commands', sessionId: current.sessionId })}
+                    browser={browserHeader(current.sessionId, true)}
+                  />
+                </View>
                 <View
                   style={{
                     width: '100%',
                     maxWidth: 640,
-                    height: '100%',
-                    maxHeight: 640,
+                    flex: 1,
+                    minHeight: 0,
                     backgroundColor: C.surface,
-                    padding: 8,
-                    borderWidth: 1,
-                    borderColor: C.line,
-                    borderRadius: 16,
                   }}
                 >
                   <WorkspaceBrowser
@@ -845,6 +908,7 @@ function App() {
           if (current.kind === 'settings')
             return (
               <ModelSettings
+                model={current.model}
                 close={() => closeOverlay(current.instance)}
                 changed={() => {
                   const owner = handle();

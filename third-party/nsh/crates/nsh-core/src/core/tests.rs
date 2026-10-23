@@ -1533,6 +1533,30 @@ fn scroll_content_is_sent_once_per_batch() {
     ));
 }
 
+/// A native consumer with no focused view: apply each batch's immediate
+/// detach requests before answering them, then collect the resulting tree
+/// changes. Focused-native interleavings belong to the platform tests.
+fn commit_with_native_retirement(c: &mut Core<FakeEngine>) -> Option<MountBatch> {
+    let mut batch = c.commit()?;
+    let mut consumed = 0;
+    loop {
+        let mut retired = false;
+        for item in &batch.items[consumed..] {
+            if let MountItem::RetireListCell { id, request, .. } = *item {
+                c.retire_list_cell(id, request, true);
+                retired = true;
+            }
+        }
+        if !retired {
+            break;
+        }
+        consumed = batch.items.len();
+        let Some(mut next) = c.commit() else { break };
+        batch.items.append(&mut next.items);
+    }
+    Some(batch)
+}
+
 /// Plays JS: creates a cell per new slot, renders a fixed-height
 /// row for each bind and confirms the index; the overscan too, as an
 /// engine with time to spare does.
@@ -1548,6 +1572,9 @@ fn render_binds(
     let mut count = 0;
     for bind in binds {
         for (slot, index) in bind.binds {
+            if !c.current_list_bind(bind.list, slot, index) {
+                continue;
+            }
             count += 1;
             while cells.len() <= slot as usize {
                 let id = *next_id;
@@ -1613,11 +1640,11 @@ fn list_renders_window_and_recycles_cells() {
             },
         ],
     );
-    c.commit();
+    commit_with_native_retirement(&mut c);
     let (mut next_id, mut cells) = (100, Vec::new());
     // Estimated 50 pt rows: viewport + one screen of overscan = 17 rows.
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 100.0), 17);
-    let batch = c.commit().unwrap();
+    let batch = commit_with_native_retirement(&mut c).unwrap();
     // Rows are really 100 pt: positioned by measured sizes.
     assert_eq!(
         frame_of(&batch, cells[3]),
@@ -1629,19 +1656,28 @@ fn list_renders_window_and_recycles_cells() {
     });
     assert_eq!(content, Some(17.0 * 100.0 + 983.0 * 50.0));
 
-    // Scroll far down into unmeasured (50 pt estimated) rows: the window
-    // needs 25 rows; all 17 existing cells are reused and 8 are added.
+    // The new window needs 25 rows while native may still target the old
+    // nine measured rows. The eight detached overscan cells can be reused;
+    // the nine native owners wait for their detach confirmations.
     c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
-    c.commit();
+    commit_with_native_retirement(&mut c);
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
-    assert_eq!(cells.len(), 25);
-    c.commit();
-    // Scrolling on reuses cells only.
+    assert_eq!(cells.len(), 34);
+    commit_with_native_retirement(&mut c);
+    // Two disjoint 25-row windows fill the overlap working set. Once
+    // native consumes each batch, later jumps reuse those same owners.
     c.set_scroll_offset(2, point(px(0.0), px(20_000.0)), u32::MAX);
-    c.commit();
+    commit_with_native_retirement(&mut c);
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
-    assert_eq!(cells.len(), 25);
-    c.commit();
+    assert_eq!(cells.len(), 50);
+    commit_with_native_retirement(&mut c);
+    for y in [30_000.0, 40_000.0, 20_000.0, 10_000.0, 30_000.0] {
+        c.set_scroll_offset(2, point(px(0.0), px(y)), u32::MAX);
+        commit_with_native_retirement(&mut c);
+        assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
+        assert_eq!(cells.len(), 50);
+        commit_with_native_retirement(&mut c);
+    }
     assert_eq!(c.node_count(), 2 + cells.len());
 }
 
@@ -5151,6 +5187,111 @@ fn inputs_report_their_content_size() {
     c.input_changed(2, &"x".repeat(80), 2);
     c.commit();
     assert_eq!(sizes(&mut c), 0);
+}
+
+#[test]
+fn input_text_does_not_extend_its_ancestor_scroll_view() {
+    for dimension in ["height", "maxHeight"] {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Scroll,
+                },
+                style_op(
+                    2,
+                    &[
+                        ("width", StyleValue::Number(200.0)),
+                        ("height", StyleValue::Number(128.0)),
+                    ],
+                ),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Input,
+                },
+                Op::SetProp {
+                    id: 3,
+                    prop: Prop::Multiline(true),
+                },
+                Op::SetProp {
+                    id: 3,
+                    prop: Prop::Value("x".repeat(280)),
+                },
+                Op::Listen {
+                    id: 3,
+                    event: EventKind::ContentSizeChange,
+                    enabled: true,
+                },
+                style_op(
+                    3,
+                    &[
+                        ("width", StyleValue::Number(160.0)),
+                        (dimension, StyleValue::Number(64.0)),
+                        ("padding", StyleValue::Number(8.0)),
+                        ("borderWidth", StyleValue::Number(2.0)),
+                    ],
+                ),
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                style_op(4, &[("height", StyleValue::Number(96.0))]),
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        );
+        let content = |batch: &MountBatch| {
+            batch.items.iter().find_map(|item| match item {
+                MountItem::ScrollContent { id: 2, size } => Some(*size),
+                _ => None,
+            })
+        };
+        let text_sizes = |c: &mut Core<FakeEngine>| {
+            js_events(c)
+                .into_iter()
+                .filter(|(id, kind, _)| *id == 3 && *kind == EventKind::ContentSizeChange)
+                .map(|(_, _, payload)| payload)
+                .collect::<Vec<_>>()
+        };
+        let text_size = |height| {
+            vec![EventPayload::Map(vec![
+                ("width", PayloadValue::Number(140.0)),
+                ("height", PayloadValue::Number(height)),
+            ])]
+        };
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 160.0, 64.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 64.0, 200.0, 96.0)));
+        assert_eq!(content(&batch), Some(size_pt(200.0, 160.0)), "{dimension}");
+        assert_eq!(text_sizes(&mut c), text_size(256.0));
+
+        // Typing retains the complete editor content, while only the real
+        // footer growth extends the ancestor's scrollable area.
+        c.input_changed(3, &"x".repeat(560), 1);
+        apply(
+            &mut c,
+            vec![style_op(4, &[("height", StyleValue::Number(112.0))])],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(c.measure(3).unwrap().frame, rect(0.0, 0.0, 160.0, 64.0));
+        assert_eq!(content(&batch), Some(size_pt(200.0, 176.0)), "{dimension}");
+        assert_eq!(text_sizes(&mut c), text_size(512.0));
+    }
 }
 
 #[test]
@@ -10689,18 +10830,180 @@ mod views {
 
     #[test]
     fn a_views_list_splices_and_its_cells_keep_their_rows() {
+        use rustc_hash::FxHashMap;
+
+        // This fixture consumes native ancestry and text, including the
+        // source Remove before the retirement ACK. Text updates to a parked
+        // cell are not visible rows; ProjectRoot reattaches its actual owner.
+        fn consume(
+            batch: &MountBatch,
+            parents: &mut FxHashMap<NodeId, NodeId>,
+            values: &mut FxHashMap<NodeId, String>,
+        ) {
+            for item in &batch.items {
+                match item {
+                    MountItem::Insert { parent, child, .. } => {
+                        parents.insert(*child, *parent);
+                    }
+                    MountItem::ProjectRoot { parent, id, .. } => {
+                        parents.insert(*id, *parent);
+                    }
+                    MountItem::Remove { id } | MountItem::Delete { id } => {
+                        parents.remove(id);
+                    }
+                    MountItem::RetireListCell { roots, .. } => {
+                        for root in roots {
+                            parents.remove(root);
+                        }
+                    }
+                    // The native tree was detached before this confirmation.
+                    MountItem::ListCellRetired { .. } => {}
+                    MountItem::Text { id, text, .. } => {
+                        values.insert(*id, text.text.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        fn attached(mut id: NodeId, parents: &FxHashMap<NodeId, NodeId>) -> bool {
+            while id != ROOT_ID {
+                let Some(&parent) = parents.get(&id) else {
+                    return false;
+                };
+                id = parent;
+            }
+            true
+        }
+        fn visible(
+            parents: &FxHashMap<NodeId, NodeId>,
+            values: &FxHashMap<NodeId, String>,
+        ) -> Vec<(NodeId, String)> {
+            let mut shown: Vec<_> = values
+                .iter()
+                .filter(|(id, _)| attached(**id, parents))
+                .map(|(&id, value)| (id, value.clone()))
+                .collect();
+            shown.sort_unstable();
+            shown
+        }
+
         let (mut c, batch) = mailbox(100);
-        let shown = texts(&batch);
-        assert!(shown.contains(&"mail 0".to_owned()), "{shown:?}");
+        let (mut parents, mut values) = (FxHashMap::default(), FxHashMap::default());
+        consume(&batch, &mut parents, &mut values);
+        let shown = visible(&parents, &values);
+        assert!(shown.iter().any(|(_, text)| text == "mail 0"), "{shown:?}");
         assert!(shown.len() < 100, "virtualized: {}", shown.len());
-        // A press on row 0 removes it: the list splices, the other cells
-        // keep their content (their rows did not change: nothing to send)
-        // and the freed cell shows the row coming into view.
-        let row0 = pressable(&batch)[1];
+        let initial: Vec<_> = shown
+            .iter()
+            .map(|(text, value)| {
+                let row = parents[text];
+                let cell = parents[&row];
+                (*text, value.clone(), row, cell)
+            })
+            .collect();
+        // Pick the actual row by its text, rather than relying on the
+        // traversal order in which native event masks were emitted.
+        let &(old_text, _, row0, old_cell) = initial
+            .iter()
+            .find(|(_, text, _, _)| text == "mail 0")
+            .unwrap();
         assert!(c.component_event(row0, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
-        assert_eq!(texts(&batch), [format!("mail {}", shown.len())]);
+        let request = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::RetireListCell { id, request, roots }
+                    if *id == old_cell && roots == &[old_cell] =>
+                {
+                    Some(*request)
+                }
+                _ => None,
+            })
+            .expect("the deleted source owner must await native retirement");
+        assert!(batch.items.iter().any(|item| matches!(
+            item, MountItem::Remove { id } if *id == old_cell
+        )));
+        assert!(!batch.items.iter().any(|item| matches!(
+            item, MountItem::ProjectRoot { id, .. } if *id == old_cell
+        )));
+        assert!(!c.accepts_native_input(row0));
+        consume(&batch, &mut parents, &mut values);
+        assert!(!attached(old_text, &parents));
+        let incoming = format!("mail {}", shown.len());
+        let new_text = visible(&parents, &values)
+            .into_iter()
+            .find_map(|(id, text)| (text == incoming).then_some(id))
+            .expect("the next source row is visible without waiting for the old owner ACK");
+        let new_row = parents[&new_text];
+        let new_cell = parents[&new_row];
+        assert_ne!(new_cell, old_cell);
+        let mut made: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Create { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        made.sort_unstable();
+        let mut new_subtree = vec![new_cell, new_row, new_text];
+        new_subtree.sort_unstable();
+        // Exactly one incoming Cell/View/Text subtree overlaps the deleted
+        // but not yet acknowledged owner; survivors are not reconstructed.
+        assert_eq!(made, new_subtree, "{:?}", batch.items);
+        for &(text, ref value, row, cell) in &initial {
+            if cell == old_cell {
+                continue;
+            }
+            assert_eq!(values[&text], *value);
+            assert_eq!(parents[&text], row);
+            assert_eq!(parents[&row], cell);
+            assert!(attached(text, &parents));
+            assert!(!batch.items.iter().any(|item| matches!(
+                item, MountItem::Text { id, .. } if *id == text
+            )));
+        }
+        assert_eq!(visible(&parents, &values).len(), shown.len());
+
+        // Native has excluded the old source owner before acknowledging it.
+        // Only now may the next splice reuse it, without any new native node.
+        c.retire_list_cell(old_cell, request, true);
+        let confirmed = c.commit().unwrap();
+        assert!(confirmed.items.iter().any(|item| matches!(
+            item, MountItem::ListCellRetired { roots } if roots == &[old_cell]
+        )));
+        consume(&confirmed, &mut parents, &mut values);
+        let &(next_text, _, next_row, next_cell) = initial
+            .iter()
+            .find(|(_, text, _, _)| text == "mail 1")
+            .unwrap();
+        assert!(c.component_event(next_row, EventKind::Press, &EventPayload::None));
+        let batch = commit_with_native_retirement(&mut c).unwrap();
         assert_eq!(creates(&batch), 0, "{:?}", batch.items);
+        assert!(batch.items.iter().any(|item| matches!(
+            item, MountItem::ProjectRoot { id, .. } if *id == old_cell
+        )));
+        consume(&batch, &mut parents, &mut values);
+        assert!(!attached(next_text, &parents));
+        assert_eq!(parents[&old_text], row0);
+        assert_eq!(parents[&row0], old_cell);
+        assert!(attached(old_text, &parents));
+        assert_eq!(values[&old_text], format!("mail {}", shown.len() + 1));
+        for &(text, ref value, row, cell) in &initial {
+            if cell == old_cell || cell == next_cell {
+                continue;
+            }
+            assert_eq!(values[&text], *value);
+            assert_eq!(parents[&text], row);
+            assert_eq!(parents[&row], cell);
+            assert!(attached(text, &parents));
+        }
+        assert_eq!(values[&new_text], incoming);
+        assert_eq!(parents[&new_text], new_row);
+        assert_eq!(parents[&new_row], new_cell);
+        assert!(attached(new_text, &parents));
+        assert_eq!(visible(&parents, &values).len(), shown.len());
     }
 
     #[test]
@@ -10732,12 +11035,16 @@ mod views {
                 _ => None,
             })
             .expect("a list");
-        c.set_scroll_offset(list, point(px(0.0), px(10_000.0)), u32::MAX);
-        c.commit().unwrap();
+        // The native retirement handshake overlaps two windows before a
+        // detached cell can be reused. Consume both warmup windows first.
+        for offset in [10_000.0, 15_000.0] {
+            c.set_scroll_offset(list, point(px(0.0), px(offset)), u32::MAX);
+            commit_with_native_retirement(&mut c).unwrap();
+        }
         // Scrolling on: the cells are reused and their content stays; only
         // the texts change.
         c.set_scroll_offset(list, point(px(0.0), px(20_000.0)), u32::MAX);
-        let batch = c.commit().unwrap();
+        let batch = commit_with_native_retirement(&mut c).unwrap();
         assert_eq!(creates(&batch), 0, "{:?}", batch.items);
         let shown = texts(&batch);
         assert!(shown.contains(&"mail 500".to_owned()), "{shown:?}");
@@ -11940,18 +12247,17 @@ mod views {
     fn FilledRows() -> impl IntoElement {
         view().flex_1().child(
             virtual_list(200, move |at| {
-                let i = at.index();
                 view()
                     .h(px(40.0))
                     .child(
                         Corner::element(CornerProps::default())
-                            .fill("corner", text(format!("r{i}"))),
+                            .fill("corner", text(move || format!("r{}", at.index()))),
                     )
                     .child(
                         Holder::element(HolderProps {
                             children: Children::default(),
                         })
-                        .child(text(format!("h{i}"))),
+                        .child(text(move || format!("h{}", at.index()))),
                     )
                     .child(Plaque::element(PlaqueProps {}))
             })
@@ -11964,7 +12270,7 @@ mod views {
     fn list_rows_with_filled_slots_follow_their_rows() {
         let mut c = core();
         c.mount_root(&Root::new::<FilledRows>(|| ()));
-        let batch = c.commit().unwrap();
+        let batch = commit_with_native_retirement(&mut c).unwrap();
         let list = batch
             .items
             .iter()
@@ -11986,44 +12292,128 @@ mod views {
             }
         };
         record(&batch, &mut shown);
-        let mut sizes = Vec::new();
-        for step in 1..=12u32 {
-            let y = (step as f32 * 900.0) % 7000.0;
-            c.set_scroll_offset(list, point(px(0.0), px(y)), u32::MAX);
-            for _ in 0..3 {
-                if let Some(b) = c.commit() {
-                    record(&b, &mut shown);
+        // Keep the original nodes as identity markers too: recycling updates
+        // their labels, while the filled corner and holder stay in one row.
+        let original_pairs: Vec<_> = shown
+            .iter()
+            .filter_map(|(text, &id)| {
+                let index = text.strip_prefix('r')?;
+                Some((id, *shown.get(&format!("h{index}"))?))
+            })
+            .collect();
+        assert_eq!(original_pairs.len(), 25);
+        // With a 480pt viewport and 40pt rows, each middle window has
+        // 37 rows including overscan. A 900pt forward step overlaps 14 or
+        // 15 of them; wrapping from 6300pt to 200pt overlaps none. Native
+        // still owns the previous window while the next one is built, so
+        // the first pass grows through 47, 60 and 67 row owners. Each row here
+        // has 15 nodes and five component instances, besides the three
+        // outer nodes and one outer instance.
+        let windows = [
+            ((10, 46), (708, 236)),
+            ((33, 69), (903, 301)),
+            ((55, 91), (903, 301)),
+            ((78, 114), (903, 301)),
+            ((100, 136), (903, 301)),
+            ((123, 159), (903, 301)),
+            ((145, 181), (903, 301)),
+            ((0, 29), (1008, 336)),
+            ((15, 51), (1008, 336)),
+            ((38, 74), (1008, 336)),
+            ((60, 96), (1008, 336)),
+            ((83, 119), (1008, 336)),
+        ];
+        // The last-to-first step also joins two disjoint middle windows:
+        // 83..119 to 10..46 needs 74 owners. Once that transition has been
+        // consumed, both complete passes must reuse exactly that pool.
+        for round in 0..3 {
+            for (at, &((first, last), size)) in windows.iter().enumerate() {
+                let step = at as u32 + 1;
+                let y = (step as f32 * 900.0) % 7000.0;
+                c.set_scroll_offset(list, point(px(0.0), px(y)), u32::MAX);
+                for _ in 0..3 {
+                    if let Some(b) = commit_with_native_retirement(&mut c) {
+                        record(&b, &mut shown);
+                    }
                 }
-            }
-            sizes.push((c.nodes.len(), c.components.instances.len()));
-            // Every r<i> shown is in the corner of the row showing h<i>.
-            for (t, &id) in &shown {
-                let Some(n) = t.strip_prefix('r') else {
-                    continue;
-                };
-                if c.key(id).is_err() {
-                    continue;
+                assert_eq!(
+                    bound_items(&c, list),
+                    (first..=last).collect::<Vec<_>>(),
+                    "{round}:{step}: complete window"
+                );
+                let expected_size = if round == 0 { size } else { (1113, 371) };
+                assert_eq!(
+                    (c.nodes.len(), c.components.instances.len()),
+                    expected_size,
+                    "{round}:{step}: native overlap working set"
+                );
+                for index in first..=last {
+                    for prefix in ['r', 'h'] {
+                        let expected = format!("{prefix}{index}");
+                        if shown.contains_key(&expected) {
+                            continue;
+                        }
+                        let state = c.nodes[c.key(list).unwrap() as usize]
+                            .list
+                            .as_ref()
+                            .unwrap();
+                        let slot = state
+                            .slots
+                            .iter()
+                            .find(|slot| slot.index == Some(index))
+                            .unwrap();
+                        let mut pending = vec![slot.cell];
+                        let mut texts = Vec::new();
+                        while let Some(key) = pending.pop() {
+                            let node = &c.nodes[key as usize];
+                            if !node.text.is_empty() {
+                                texts.push((node.id, node.text.clone(), node.frame));
+                            }
+                            pending.extend_from_slice(&node.children);
+                        }
+                        panic!(
+                            "{round}:{step}: missing {expected}; slot index/rendered/requested={:?}, cell={} frame={:?}; live cell text={texts:?}; tracked text={shown:?}",
+                            (slot.index, slot.rendered, slot.requested),
+                            c.nodes[slot.cell as usize].id,
+                            c.nodes[slot.cell as usize].frame,
+                        );
+                    }
                 }
-                let Some(corner) = native_parent(&c, id) else {
-                    continue;
-                };
-                let row = native_parent(&c, corner).expect("a corner in a row");
-                if let Some(&h) = shown.get(&format!("h{n}"))
-                    && c.key(h).is_ok()
-                {
-                    let holder = native_parent(&c, h).unwrap();
-                    assert_eq!(native_parent(&c, holder), Some(row), "{step}: {t} and h{n}");
+                // Every r<i> shown is in the corner of the row showing h<i>.
+                for (t, &id) in &shown {
+                    let Some(n) = t.strip_prefix('r') else {
+                        continue;
+                    };
+                    if c.key(id).is_err() {
+                        continue;
+                    }
+                    let Some(corner) = native_parent(&c, id) else {
+                        continue;
+                    };
+                    let row = native_parent(&c, corner).expect("a corner in a row");
+                    if let Some(&h) = shown.get(&format!("h{n}"))
+                        && c.key(h).is_ok()
+                    {
+                        let holder = native_parent(&c, h).unwrap();
+                        assert_eq!(
+                            native_parent(&c, holder),
+                            Some(row),
+                            "{round}:{step}: {t} and h{n}"
+                        );
+                    }
+                }
+                for &(r, h) in &original_pairs {
+                    let corner = native_parent(&c, r).expect("the original filled text");
+                    let holder = native_parent(&c, h).expect("the original held text");
+                    let row = native_parent(&c, corner).expect("the original corner's row");
+                    assert_eq!(
+                        native_parent(&c, holder),
+                        Some(row),
+                        "{round}:{step}: original slot nodes {r}/{h} stay in one row"
+                    );
                 }
             }
         }
-        assert!(
-            sizes
-                .windows(2)
-                .skip(2)
-                .all(|w| w[0].0.abs_diff(w[1].0) < 40),
-            "{sizes:?}"
-        );
-        assert_eq!(sizes[3].1, sizes[sizes.len() - 1].1, "{sizes:?}");
     }
 
     /// A text as its root.
@@ -14138,6 +14528,13 @@ fn inserts(batch: &MountBatch) -> Vec<(NodeId, NodeId, Option<NodeId>)> {
                 child,
                 before,
             } => Some((*parent, *child, *before)),
+            // This helper observes the core's first requested anchor. The
+            // native consumers separately test which candidate is present.
+            MountItem::ProjectRoot {
+                parent,
+                id,
+                following,
+            } => Some((*parent, *id, following.first().copied())),
             _ => None,
         })
         .collect()
@@ -14147,6 +14544,544 @@ fn overlay_prop(id: NodeId, prop: crate::OverlayProp) -> Op {
     Op::SetProp {
         id,
         prop: Prop::Overlay(prop),
+    }
+}
+
+fn list_with_promoted_popups() -> (Core<FakeEngine>, Vec<NodeId>) {
+    let mut c = core();
+    add(
+        &mut c,
+        2,
+        Tag::List,
+        ROOT_ID,
+        &[("height", StyleValue::Number(100.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(200),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(20.0)),
+            },
+        ],
+    );
+    c.commit();
+    let mut next = 100;
+    let mut cells = Vec::new();
+    assert!(render_binds(&mut c, &mut next, &mut cells, 20.0) > 0);
+    c.commit();
+    add(&mut c, 700, Tag::Modal, cells[0], &[]);
+    add(
+        &mut c,
+        701,
+        Tag::Input,
+        700,
+        &[("height", StyleValue::Number(32.0))],
+    );
+    add(&mut c, 702, Tag::Overlay, 700, &[]);
+    add(
+        &mut c,
+        703,
+        Tag::View,
+        702,
+        &[
+            ("width", StyleValue::Number(80.0)),
+            ("height", StyleValue::Number(40.0)),
+        ],
+    );
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            702,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                px(100.0),
+                px(100.0),
+            ))),
+        )],
+    );
+    let mounted = c.commit().unwrap();
+    assert!(
+        inserts(&mounted)
+            .iter()
+            .any(|&(parent, child, _)| parent == 700 && child == 702),
+        "the overlay must actually be hosted outside the cell: {:?}",
+        inserts(&mounted)
+    );
+    (c, cells)
+}
+
+fn popup_retirement(batch: &MountBatch, cell: NodeId) -> (u64, Vec<NodeId>) {
+    batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::RetireListCell {
+                id, request, roots, ..
+            } if *id == cell => Some((*request, roots.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no retirement for popup cell {cell}: {:?}", batch.items))
+}
+
+fn assert_popup_roots(mut actual: Vec<NodeId>, expected: &[NodeId]) {
+    actual.sort_unstable();
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn list_retirement_keeps_logical_popup_focus_and_revokes_all_owned_roots() {
+    let (mut c, cells) = list_with_promoted_popups();
+    let cell = cells[0];
+
+    // The native hierarchy starts at the promoted popup, so its focus
+    // path contains neither the logical cell nor its list.
+    for (path, offset) in [(&[701, 700][..], 800.0), (&[703, 702, 700][..], 1200.0)] {
+        c.set_focus_path(path);
+        c.set_scroll_offset(2, point(px(0.0), px(offset)), u32::MAX);
+        if let Some(batch) = c.commit() {
+            assert!(
+                !batch.items.iter().any(|item| matches!(item,
+                MountItem::RetireListCell { id, .. } if *id == cell)),
+                "native popup focus must keep its logical row alive"
+            );
+        }
+    }
+
+    c.set_focus_path(&[ROOT_ID]);
+    let pending = c.commit().unwrap();
+    let (request, roots) = popup_retirement(&pending, cell);
+    assert_popup_roots(roots, &[cell, 700, 702]);
+
+    // Native can acquire focus after this request was queued. Reporting
+    // the real popup path before its refusal cancels the whole request.
+    c.set_focus_path(&[701, 700]);
+    c.retire_list_cell(cell, request, false);
+    let restored = c.commit().unwrap();
+    for root in [cell, 700, 702] {
+        assert!(
+            inserts(&restored)
+                .iter()
+                .any(|&(_, child, _)| child == root),
+            "cancelling retirement must reproject popup root {root}"
+        );
+    }
+    c.retire_list_cell(cell, request, true);
+    if let Some(late) = c.commit() {
+        assert!(!late.items.iter().any(|item| matches!(item,
+            MountItem::ListCellRetired { roots, .. } if roots.contains(&cell))));
+    }
+
+    // Removing the source is stronger than focus retention. Every native
+    // root must lose the old row's lifetime, including the hosted overlay.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Count(0),
+    })
+    .unwrap();
+    let removed = c.commit().unwrap();
+    for root in [cell, 700, 702] {
+        assert!(
+            removed.items.iter().any(|item| matches!(item,
+            MountItem::Remove { id } if *id == root)),
+            "source removal left popup root {root} attached"
+        );
+    }
+}
+
+#[test]
+fn promoted_roots_cancel_queued_retirement_and_wait_for_the_cell_to_reappear() {
+    let (mut c, cells) = list_with_promoted_popups();
+    let cell = cells[0];
+    c.set_scroll_offset(2, point(px(0.0), px(800.0)), u32::MAX);
+    let (first, _) = popup_retirement(&c.commit().unwrap(), cell);
+
+    // A newly opened popup belongs to this existing row. An older snapshot
+    // must not authorize retiring the new root or its current owner.
+    add(&mut c, 704, Tag::Modal, cell, &[]);
+    add(
+        &mut c,
+        705,
+        Tag::Input,
+        704,
+        &[("height", StyleValue::Number(32.0))],
+    );
+    c.set_focus_path(&[705, 704]);
+    let inserted = c.commit().unwrap();
+    for root in [cell, 700, 702, 704] {
+        assert!(
+            inserts(&inserted)
+                .iter()
+                .any(|&(_, child, _)| child == root),
+            "new popup insertion must restore the whole current root group: {root}"
+        );
+    }
+    c.retire_list_cell(cell, first, true);
+    if let Some(late) = c.commit() {
+        assert!(!late.items.iter().any(|item| matches!(item,
+            MountItem::ListCellRetired { roots, .. } if roots.contains(&cell))));
+    }
+
+    c.set_focus_path(&[ROOT_ID]);
+    let (current, roots) = popup_retirement(&c.commit().unwrap(), cell);
+    assert_ne!(current, first);
+    assert_popup_roots(roots, &[cell, 700, 702, 704]);
+    c.retire_list_cell(cell, current, true);
+    let acknowledged = c.commit().unwrap();
+    let roots = acknowledged
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ListCellRetired { roots, .. } if roots.contains(&cell) => {
+                Some(roots.clone())
+            }
+            _ => None,
+        })
+        .expect("a confirmed retirement must detach the entire observed root group");
+    assert_popup_roots(roots, &[cell, 700, 702, 704]);
+    assert!(
+        !acknowledged.items.iter().any(|item| matches!(item,
+        MountItem::Remove { id } if [cell, 700, 702, 704].contains(id))),
+        "a retirement receipt must not masquerade as source removal"
+    );
+
+    add(&mut c, 706, Tag::Modal, cell, &[]);
+    if let Some(hidden) = c.commit() {
+        assert!(
+            !inserts(&hidden).iter().any(|&(_, child, _)| child == 706),
+            "a popup cannot become an independent input root while its cell is retired"
+        );
+    }
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+    // A free cell need not be chosen for the same row again. Grow the real
+    // viewport so the parked cell is reused without assuming pool order.
+    c.apply(style_op(2, &[("height", StyleValue::Number(400.0))]))
+        .unwrap();
+    let mut resumed = c.commit().unwrap();
+    let mut next = 100 + cells.len() as u32;
+    let mut cells = cells;
+    render_binds(&mut c, &mut next, &mut cells, 20.0);
+    if let Some(batch) = c.commit() {
+        resumed.items.extend(batch.items);
+    }
+    for root in [cell, 700, 702, 704, 706] {
+        assert!(
+            inserts(&resumed).iter().any(|&(_, child, _)| child == root),
+            "returning the row must reproject deferred popup root {root}"
+        );
+    }
+}
+
+#[test]
+fn restored_overlay_keeps_order_candidates_for_another_retiring_cell() {
+    let (mut c, cells) = list_with_promoted_popups();
+    for (overlay, input, parent) in [
+        (710, 711, cells[0]),
+        (712, 713, cells[1]),
+        (714, 715, ROOT_ID),
+    ] {
+        add(&mut c, overlay, Tag::Overlay, parent, &[]);
+        add(
+            &mut c,
+            input,
+            Tag::Input,
+            overlay,
+            &[
+                ("width", StyleValue::Number(80.0)),
+                ("height", StyleValue::Number(32.0)),
+            ],
+        );
+        c.apply(overlay_prop(
+            overlay,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                px(100.0),
+                px(100.0),
+            ))),
+        ))
+        .unwrap();
+    }
+    let mounted = c.commit().unwrap();
+    for overlay in [710, 712, 714] {
+        assert!(
+            inserts(&mounted)
+                .iter()
+                .any(|&(parent, child, _)| parent == ROOT_ID && child == overlay)
+        );
+    }
+    c.set_scroll_offset(2, point(px(0.0), px(800.0)), u32::MAX);
+    let pending = c.commit().unwrap();
+    let (request, _) = popup_retirement(&pending, cells[0]);
+    let (_, other_roots) = popup_retirement(&pending, cells[1]);
+    assert!(other_roots.contains(&712));
+
+    // The other cell has not replied. Its overlay can still be present or
+    // already parked. Core must preserve both possible anchors, not guess.
+    c.set_focus_path(&[701, 700]);
+    c.retire_list_cell(cells[0], request, false);
+    let restored = c.commit().unwrap();
+    let following = restored
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ProjectRoot {
+                parent: ROOT_ID,
+                id: 710,
+                following,
+            } => Some(following),
+            _ => None,
+        })
+        .expect("the restored overlay needs its actual ordered host candidates");
+    let other = following
+        .iter()
+        .position(|&id| id == 712)
+        .expect("an unacknowledged sibling must remain an anchor candidate");
+    let visible = following
+        .iter()
+        .position(|&id| id == 714)
+        .expect("the still-active following overlay is the next fallback");
+    assert!(other < visible, "anchor order changed: {following:?}");
+    assert!(!following.contains(&710));
+}
+
+#[test]
+fn container_reinsertion_and_display_changes_restore_only_eligible_popup_roots() {
+    let (mut c, cells) = list_with_promoted_popups();
+    let cell = cells[0];
+    add(&mut c, 720, Tag::View, cell, &[]);
+    c.apply(Op::Insert {
+        parent: 720,
+        child: 700,
+        before: None,
+    })
+    .unwrap();
+    c.commit();
+    c.apply(Op::Remove {
+        parent: cell,
+        child: 720,
+    })
+    .unwrap();
+    let removed = c.commit().unwrap();
+    for root in [700, 702] {
+        assert!(removed.items.iter().any(|item| matches!(item,
+            MountItem::Remove { id } if *id == root)));
+    }
+    c.apply(Op::Insert {
+        parent: cell,
+        child: 720,
+        before: None,
+    })
+    .unwrap();
+    let restored = c.commit().unwrap();
+    for root in [700, 702] {
+        assert!(inserts(&restored).iter().any(|&(_, id, _)| id == root));
+    }
+
+    c.apply(style_op(720, &[("display", StyleValue::Str("none"))]))
+        .unwrap();
+    c.commit();
+    c.apply(style_op(720, &[("display", StyleValue::Str("flex"))]))
+        .unwrap();
+    let visible = c.commit().unwrap();
+    for root in [700, 702] {
+        assert!(inserts(&visible).iter().any(|&(_, id, _)| id == root));
+        assert!(
+            !visible.items.iter().any(|item| matches!(item,
+            MountItem::Create { id, .. } if *id == root)),
+            "unhiding must restore the existing popup, not recreate it"
+        );
+    }
+    add(
+        &mut c,
+        723,
+        Tag::View,
+        cell,
+        &[("display", StyleValue::Str("none"))],
+    );
+    add(&mut c, 724, Tag::Modal, 723, &[]);
+    if let Some(hidden) = c.commit() {
+        assert!(!inserts(&hidden).iter().any(|&(_, id, _)| id == 724));
+    }
+    c.apply(style_op(723, &[("display", StyleValue::Str("flex"))]))
+        .unwrap();
+    assert!(
+        inserts(&c.commit().unwrap())
+            .iter()
+            .any(|&(_, id, _)| id == 724)
+    );
+
+    c.set_scroll_offset(2, point(px(0.0), px(800.0)), u32::MAX);
+    let (request, _) = popup_retirement(&c.commit().unwrap(), cell);
+    if let Some(quiet) = c.commit() {
+        assert!(
+            !inserts(&quiet)
+                .iter()
+                .any(|&(_, id, _)| [cell, 700, 702, 724].contains(&id)),
+            "an unchanged commit must not cancel retirement by reprojecting popup roots"
+        );
+    }
+    c.retire_list_cell(cell, request, true);
+    let confirmed = c.commit().unwrap();
+    assert!(
+        confirmed.items.iter().any(|item| matches!(item,
+        MountItem::ListCellRetired { roots, .. } if roots.contains(&cell))),
+        "the same retirement request must remain valid across a quiet commit"
+    );
+}
+
+#[test]
+fn moving_containers_and_overlays_revoke_stale_retirement_snapshots() {
+    for overlay in [false, true] {
+        for detached in [false, true] {
+            let (mut c, cells) = list_with_promoted_popups();
+            add(
+                &mut c,
+                720,
+                if overlay { Tag::Overlay } else { Tag::View },
+                cells[0],
+                &[],
+            );
+            if overlay {
+                add(
+                    &mut c,
+                    722,
+                    Tag::View,
+                    720,
+                    &[
+                        ("width", StyleValue::Number(80.0)),
+                        ("height", StyleValue::Number(40.0)),
+                    ],
+                );
+                c.apply(overlay_prop(
+                    720,
+                    crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                        px(100.0),
+                        px(100.0),
+                    ))),
+                ))
+                .unwrap();
+            }
+            c.apply(Op::Insert {
+                parent: 720,
+                child: 700,
+                before: None,
+            })
+            .unwrap();
+            let mounted = c.commit().unwrap();
+            assert!(inserts(&mounted).iter().any(|&(_, id, _)| id == 700));
+            c.set_scroll_offset(2, point(px(0.0), px(800.0)), u32::MAX);
+            let pending = c.commit().unwrap();
+            let (old_source, _) = popup_retirement(&pending, cells[0]);
+            let (old_target, _) = popup_retirement(&pending, cells[1]);
+            if detached {
+                c.retire_list_cell(cells[1], old_target, true);
+                c.commit();
+            }
+            c.apply(Op::Insert {
+                parent: cells[1],
+                child: 720,
+                before: None,
+            })
+            .unwrap();
+            if !detached {
+                c.set_focus_path(&[701, 700]);
+            }
+            let moved = c.commit().unwrap();
+            for root in if overlay {
+                vec![720, 700, 702]
+            } else {
+                vec![700, 702]
+            } {
+                if detached {
+                    assert!(
+                        moved.items.iter().any(|item| matches!(item,
+                        MountItem::Remove { id } if *id == root)),
+                        "active popup {root} moved into a detached cell must lose its old projection"
+                    );
+                    assert!(!inserts(&moved).iter().any(|&(_, id, _)| id == root));
+                } else {
+                    assert!(
+                        inserts(&moved).iter().any(|&(_, id, _)| id == root),
+                        "moving into a retiring cell must cancel and restore popup {root}"
+                    );
+                }
+            }
+            c.retire_list_cell(cells[0], old_source, true);
+            c.retire_list_cell(cells[1], old_target, true);
+            if let Some(late) = c.commit() {
+                assert!(
+                    !late.items.iter().any(|item| matches!(item,
+                    MountItem::ListCellRetired { roots, .. }
+                        if roots.contains(&cells[0]) || roots.contains(&cells[1]))),
+                    "moving a popup must invalidate snapshots from its old and new ancestors"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_closed_hint_does_not_revive_its_modal_when_the_cell_returns() {
+    let (mut c, cells) = list_with_promoted_popups();
+    let cell = cells[0];
+    add(&mut c, 720, Tag::Modal, 702, &[]);
+    let mounted = c.commit().unwrap();
+    assert!(inserts(&mounted).iter().any(|&(_, id, _)| id == 720));
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                702,
+                crate::OverlayProp::Hint(Some(std::time::Duration::ZERO)),
+            ),
+            overlay_prop(702, crate::OverlayProp::Open(Some(false))),
+        ],
+    );
+    let closed = c.commit().unwrap();
+    assert!(
+        closed
+            .items
+            .iter()
+            .any(|item| matches!(item, MountItem::Remove { id: 702 })),
+        "the hint must actually lose its native host before checking its descendant"
+    );
+    assert!(
+        closed
+            .items
+            .iter()
+            .any(|item| matches!(item, MountItem::Remove { id: 720 })),
+        "losing the overlay's host must also revoke its independent modal"
+    );
+    c.set_scroll_offset(2, point(px(0.0), px(800.0)), u32::MAX);
+    let (request, roots) = popup_retirement(&c.commit().unwrap(), cell);
+    // The dormant modal still has an allocated SDK resource lifetime.
+    // Retire it too; restoring it separately requires a visible ancestor.
+    assert_popup_roots(roots, &[cell, 700, 720]);
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+    let returned = c.commit().unwrap();
+    assert!(
+        !inserts(&returned)
+            .iter()
+            .any(|&(_, id, _)| [702, 720].contains(&id)),
+        "returning the cell cannot make an unhosted popup independently interactive"
+    );
+    c.retire_list_cell(cell, request, true);
+    if let Some(late) = c.commit() {
+        assert!(!late.items.iter().any(|item| matches!(item,
+            MountItem::ListCellRetired { roots, .. } if roots.contains(&cell))));
+    }
+    c.apply(overlay_prop(702, crate::OverlayProp::Open(Some(true))))
+        .unwrap();
+    let opened = c.commit().unwrap();
+    for root in [702, 720] {
+        assert!(
+            inserts(&opened).iter().any(|&(_, id, _)| id == root),
+            "a genuinely hosted overlay must restore its existing descendant root {root}"
+        );
     }
 }
 
@@ -16289,7 +17224,7 @@ fn a_list_below_a_header_renders_the_rows_in_the_pages_viewport() {
 
     // The page scrolls: the list's rows follow, 1900 into it.
     c.set_scroll_offset(2, point(px(0.0), px(2000.0)), 0);
-    c.commit();
+    commit_with_native_retirement(&mut c);
     assert_eq!(bound_items(&c, 4), (30..=54).collect::<Vec<_>>());
     render_binds(&mut c, &mut next_id, &mut cells, 50.0);
     let batch = c.commit().unwrap();
@@ -16979,10 +17914,10 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         })
         .unwrap();
     }
-    c.commit();
+    commit_with_native_retirement(&mut c);
     let (mut next_id, mut cells) = (100, rustc_hash::FxHashMap::default());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
-    let batch = c.commit().unwrap();
+    let batch = commit_with_native_retirement(&mut c).unwrap();
     // The page's scroll view pins them, in its offsets: the first list's
     // row 0 from 100 until row 10 pushes it out, row 10 from 600 until its
     // bottom meets the list's end (1100).
@@ -17000,9 +17935,9 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     // The second list's rows are not bound yet (it starts at 1100, past
     // the window); scrolled there, its row 0 joins, from 1100.
     c.set_scroll_offset(2, point(px(0.0), px(1200.0)), 0);
-    c.commit();
+    commit_with_native_retirement(&mut c);
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
-    let batch = c.commit().unwrap();
+    let batch = commit_with_native_retirement(&mut c).unwrap();
     let pinned = sticky_of(&batch, 2).expect("the page's sticky cells");
     assert!(
         pinned.contains(&(cells[&5][bound_slot(&c, 5, 0) as usize], 1100.0, 1550.0)),
@@ -17015,7 +17950,7 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
     // A sticky cell goes on top of its list's other cells.
     assert!(batch.items.iter().any(|i| matches!(
         i,
-        MountItem::Insert { parent: 5, child, .. } if *child == cells[&5][bound_slot(&c, 5, 0) as usize]
+        MountItem::ProjectRoot { parent: 5, id, .. } if *id == cells[&5][bound_slot(&c, 5, 0) as usize]
     )));
     // The first list leaves the page: its cells leave the page's set, and
     // the second list's move up with it (it now starts at 100).
@@ -17024,7 +17959,7 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
         child: 4,
     })
     .unwrap();
-    let batch = c.commit().unwrap();
+    let batch = commit_with_native_retirement(&mut c).unwrap();
     let pinned = sticky_of(&batch, 2).expect("the page's sticky cells");
     assert!(
         pinned.iter().all(|p| cells[&5].contains(&p.0)),
@@ -17038,24 +17973,62 @@ fn page_lists_sticky_rows_stick_to_the_pages_viewport() {
 
 #[test]
 fn page_list_native_order_keeps_sticky_rows_above_recycled_cells() {
-    fn note_order(order: &mut Vec<NodeId>, batch: Option<MountBatch>) {
-        for item in batch.into_iter().flat_map(|batch| batch.items) {
-            match item {
-                MountItem::Insert {
-                    parent: 4,
-                    child,
-                    before,
-                } => {
-                    order.retain(|&id| id != child);
-                    let at = before
-                        .map(|before| order.iter().position(|&id| id == before).unwrap())
-                        .unwrap_or(order.len());
-                    order.insert(at, child);
+    fn note_order(c: &mut Core<FakeEngine>, order: &mut Vec<NodeId>) -> Vec<MountItem> {
+        let mut consumed = Vec::new();
+        while let Some(batch) = c.commit() {
+            let mut retired = Vec::new();
+            for item in &batch.items {
+                match item {
+                    MountItem::Insert {
+                        parent,
+                        child,
+                        before,
+                    } => {
+                        order.retain(|id| id != child);
+                        if *parent == 4 {
+                            let at = before
+                                .map(|before| order.iter().position(|&id| id == before).unwrap())
+                                .unwrap_or(order.len());
+                            order.insert(at, *child);
+                        }
+                    }
+                    MountItem::ProjectRoot {
+                        parent,
+                        id,
+                        following,
+                    } => {
+                        order.retain(|child| child != id);
+                        if *parent == 4 {
+                            // `order` contains only roots actually attached
+                            // to this host; parked candidates are skipped.
+                            let at = following
+                                .iter()
+                                .find_map(|following| order.iter().position(|id| id == following))
+                                .unwrap_or(order.len());
+                            order.insert(at, *id);
+                        }
+                    }
+                    MountItem::Remove { id } | MountItem::Delete { id } => {
+                        order.retain(|child| child != id);
+                    }
+                    MountItem::RetireListCell { id, request, roots } => {
+                        order.retain(|child| !roots.contains(child));
+                        retired.push((*id, *request));
+                    }
+                    // This native consumer already detached before its ACK.
+                    MountItem::ListCellRetired { .. } => {}
+                    _ => {}
                 }
-                MountItem::Remove { id } => order.retain(|&child| child != id),
-                _ => {}
+            }
+            consumed.extend(batch.items);
+            if retired.is_empty() {
+                break;
+            }
+            for (id, request) in retired {
+                c.retire_list_cell(id, request, true);
             }
         }
+        consumed
     }
     fn check_order(c: &Core<FakeEngine>, order: &[NodeId]) {
         let list = c.nodes[c.key(4).unwrap() as usize].list.as_ref().unwrap();
@@ -17076,11 +18049,11 @@ fn page_list_native_order_keeps_sticky_rows_above_recycled_cells() {
 
     let mut c = core();
     page(&mut c, 0.0, &[100]);
-    c.commit();
-    let (mut next_id, mut cells) = (100, rustc_hash::FxHashMap::default());
     let mut order = Vec::new();
+    note_order(&mut c, &mut order);
+    let (mut next_id, mut cells) = (100, rustc_hash::FxHashMap::default());
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
-    note_order(&mut order, c.commit());
+    note_order(&mut c, &mut order);
     check_order(&c, &order);
     // Changing only the sticky set must reorder already-mounted cells.
     c.apply(Op::SetProp {
@@ -17088,19 +18061,17 @@ fn page_list_native_order_keeps_sticky_rows_above_recycled_cells() {
         prop: Prop::StickyIndices(vec![0, 2]),
     })
     .unwrap();
-    note_order(&mut order, c.commit());
+    note_order(&mut c, &mut order);
     check_order(&c, &order);
-    assert!(c.commit().is_none_or(|batch| {
-        !batch
-            .items
-            .iter()
-            .any(|item| matches!(item, MountItem::Insert { parent: 4, .. }))
-    }));
+    assert!(!note_order(&mut c, &mut order).iter().any(|item| matches!(
+        item,
+        MountItem::Insert { parent: 4, .. } | MountItem::ProjectRoot { parent: 4, .. }
+    )));
     // Recycled and newly bound cells stay below the existing sticky rows.
     c.set_scroll_offset(2, point(px(0.0), px(600.0)), 0);
-    note_order(&mut order, c.commit());
+    note_order(&mut c, &mut order);
     render_lists_binds(&mut c, &mut next_id, &mut cells, 50.0);
-    note_order(&mut order, c.commit());
+    note_order(&mut c, &mut order);
     check_order(&c, &order);
     for sticky in [vec![4], vec![]] {
         c.apply(Op::SetProp {
@@ -17108,7 +18079,7 @@ fn page_list_native_order_keeps_sticky_rows_above_recycled_cells() {
             prop: Prop::StickyIndices(sticky),
         })
         .unwrap();
-        note_order(&mut order, c.commit());
+        note_order(&mut c, &mut order);
         check_order(&c, &order);
     }
 }

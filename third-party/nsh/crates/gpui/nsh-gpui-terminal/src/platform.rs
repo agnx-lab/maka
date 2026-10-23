@@ -247,6 +247,13 @@ impl TerminalPlatform {
         Ok(())
     }
 
+    /// The live focused editor's caret in logical window pixels. A terminal
+    /// host maps this to its VT cursor so its own input method can follow it,
+    /// independently of whether the host draws that cursor.
+    pub fn input_caret_bounds(&self) -> Option<gpui::Bounds<gpui::Pixels>> {
+        WindowState::input_caret_bounds(&self.window().ok()?)
+    }
+
     /// Records a receipt from the host's trusted sole writer. This confirms
     /// transport completion for output diagnostics, without authorizing input.
     pub fn mark_presented(&self, token: FrameToken) -> Result<()> {

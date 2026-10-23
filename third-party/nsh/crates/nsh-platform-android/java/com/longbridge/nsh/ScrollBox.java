@@ -475,6 +475,11 @@ final class ScrollBox extends FrameLayout implements Node {
         }
     }
 
+    /** A retirement must cancel this view's deferred input completion. */
+    void cancelPendingScroll() {
+        removeCallbacks(settled);
+    }
+
     /** Scrolling came to rest (no API for it: no change for a moment). */
     private void settled() {
         if (touching) {

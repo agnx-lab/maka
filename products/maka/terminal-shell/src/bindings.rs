@@ -224,6 +224,19 @@ impl ApplicationHost {
         path.validate().map_err(|_| "Invalid workspace path")?;
         files::path_label(&path)
     }
+    /// Full interface scaling is available only on the pixel renderer.
+    #[getter]
+    pub fn ui_scale_supported(&self) -> bool {
+        engine_context::<crate::terminal::UiScaleControl>().is_some()
+    }
+
+    /// Re-layout and rasterize at the requested density, using the same input geometry.
+    pub fn preview_ui_scale(&self, scale: f32) -> Result<(), String> {
+        engine_context::<crate::terminal::UiScaleControl>()
+            .ok_or("interface scale is controlled by this terminal's font size")?
+            .preview(scale)
+    }
+
     /// The native startup language, using the same resolver as the desktop.
     #[getter]
     pub fn system_locale(&self) -> String {

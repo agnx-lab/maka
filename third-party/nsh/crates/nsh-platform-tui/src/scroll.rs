@@ -143,6 +143,12 @@ impl Default for Physics {
 }
 
 impl Physics {
+    pub(crate) fn retire_input(&mut self) {
+        self.motion = None;
+        self.drag = None;
+        self.pull = 0.0;
+    }
+
     pub(crate) fn refresh_progress(&self) -> f32 {
         self.pull.clamp(0.0, 1.0)
     }
@@ -176,6 +182,14 @@ fn limits(node: &Node, zoom: f32, refreshing: bool) -> ((f32, f32), (f32, f32)) 
             (node.scroll.content.height.0 * zoom - node.frame.size.height.0 + inset.bottom.0)
                 .max(min_y),
         ),
+    )
+}
+
+pub(crate) fn selection_limits(node: &Node) -> ((f32, f32), (f32, f32)) {
+    limits(
+        node,
+        node.scroll.physics.zoom,
+        node.scroll.physics.refreshing,
     )
 }
 
@@ -1085,6 +1099,87 @@ mod tests {
         assert_eq!(surface.node(2).unwrap().scroll.count, 2);
         surface.tick_scroll(0.3);
         assert_eq!(surface.node(2).unwrap().scroll.y.0, 332.0);
+    }
+
+    #[test]
+    fn source_removal_stops_owned_scroll_motion_but_insert_only_moves_continue() {
+        use nsh_core::{Bounds, MountBatch, MountItem, ROOT_ID, Size};
+
+        for removed in [false, true] {
+            let mut surface = scroll();
+            surface.apply(MountBatch {
+                items: vec![
+                    MountItem::Create {
+                        id: 4,
+                        kind: ViewKind::View,
+                    },
+                    MountItem::Frame {
+                        id: 4,
+                        frame: Bounds::new(
+                            Point::default(),
+                            Size::new(Points(160.0), Points(160.0)),
+                        ),
+                    },
+                    MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: 4,
+                        before: None,
+                    },
+                    MountItem::Insert {
+                        parent: 4,
+                        child: 2,
+                        before: None,
+                    },
+                ],
+            });
+            surface
+                .node_mut(2)
+                .unwrap()
+                .events
+                .set(EventKind::ScrollEnd, true);
+            surface.scroll_command(2, Points(0.0), Points(300.0), true);
+            surface.events.clear();
+            let mut items = Vec::new();
+            if removed {
+                items.push(MountItem::Remove { id: 4 });
+            }
+            items.push(MountItem::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            });
+            surface.apply(MountBatch { items });
+            surface.tick_scroll(1.0);
+            assert_eq!(
+                surface.node(2).unwrap().scroll.y.0,
+                if removed { 0.0 } else { 300.0 }
+            );
+            assert_eq!(
+                surface
+                    .drain_events()
+                    .filter(|event| matches!(
+                        event,
+                        SurfaceEvent::Event(2, EventKind::ScrollEnd, _)
+                    ))
+                    .count(),
+                usize::from(!removed)
+            );
+
+            surface.now = 1.0;
+            surface.scroll_command(2, Points(0.0), Points(400.0), true);
+            surface.tick_scroll(2.0);
+            assert_eq!(surface.node(2).unwrap().scroll.y.0, 400.0);
+            assert_eq!(
+                surface
+                    .drain_events()
+                    .filter(|event| matches!(
+                        event,
+                        SurfaceEvent::Event(2, EventKind::ScrollEnd, _)
+                    ))
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]

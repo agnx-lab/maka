@@ -19,10 +19,20 @@
 
 import { createText, UiError, errorText, type UiText, message as uiMessage } from './text';
 import { tr } from './locale';
-import { batch, cleanup, computed, effect, inputAction, signal, Text, untracked, View } from 'nsh';
+import {
+  batch,
+  cleanup,
+  computed,
+  effect,
+  inputAction,
+  signal,
+  Text,
+  untracked,
+  View,
+  List,
+} from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
-import { List } from 'nsh/list';
 import { keymap } from 'nsh/keymap';
 import { AnimatedValue } from 'nsh/animated';
 import {
@@ -35,7 +45,7 @@ import {
   abandonSend,
   type ScopedHost,
 } from './host';
-import { C, Header, captionTextStyle, controlStyle } from './ui';
+import { C, Header, captionTextStyle, controlStyle, type BrowserHeader } from './ui';
 import { acceptedSend, mergeChunks, replayStartCursor, updateHistoryMetadata } from './history';
 import type { Row, Position, Subscription } from './history';
 import { thinkingSummary } from './thinkingSummary';
@@ -102,7 +112,7 @@ type ConversationProps = {
   control: Control;
   fork(action: Extract<SessionAction, { kind: 'fork' }>): Promise<void>;
   commands(): void;
-  browse(): void;
+  browser(): BrowserHeader;
   files(): void;
   filesOpener(node: YNode): void;
   previewImage(image: ImagePreview): void;
@@ -1670,7 +1680,7 @@ export function Conversation(props: ConversationProps) {
                 : undefined
         }
         commands={props.commands}
-        browse={props.browse}
+        browser={props.browser()}
         files={props.files}
         filesOpener={props.filesOpener}
       />

@@ -3,9 +3,9 @@
 //! exported here.
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
     time::Instant,
@@ -49,6 +49,8 @@ pub(crate) struct Host {
     /// Animation items of submitted batches, by batch number, applied on the
     /// UI thread once Java has applied that batch.
     animation_queue: Mutex<VecDeque<(u64, Vec<MountItem>)>>,
+    /// Retirement replies retain the engine that submitted their batch.
+    retirements: Mutex<BTreeMap<(u64, NodeId, u64), EngineControl>>,
     seq: AtomicU64,
     ui: Mutex<UiAnimation>,
     epoch: Instant,
@@ -159,6 +161,7 @@ impl Host {
             self.app_stopped();
         }
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
+        self.retirements.lock().expect("retirements").clear();
         self.keymap
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -199,7 +202,8 @@ impl Host {
             picker: None,
         };
         let density = self.density;
-        let sink = Sink(self.clone());
+        let control_slot = Arc::new(OnceLock::new());
+        let sink = Sink(self.clone(), control_slot.clone());
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
@@ -208,6 +212,7 @@ impl Host {
         // The embedding app's theme overrides are in the first frame.
         let tokens = self.host_tokens.lock().expect("tokens").clone();
         let setup = |control: &EngineControl| {
+            let _ = control_slot.set(control.clone());
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
@@ -379,7 +384,7 @@ fn register_inline_images(host: &Host, batch: &MountBatch) {
 
 /// Hands commits to the UI thread: one `NshView.submit(bytes, objects, seq)`
 /// call per batch.
-struct Sink(Arc<Host>);
+struct Sink(Arc<Host>, Arc<OnceLock<EngineControl>>);
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
@@ -390,6 +395,14 @@ impl MountSink for Sink {
         }
         answer_clipboard_reads(host, &batch);
         register_inline_images(host, &batch);
+        let retirements: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::RetireListCell { id, request, .. } => Some((*id, *request)),
+                _ => None,
+            })
+            .collect();
         let mut encoded = encode::encode(batch);
         if let Some(keymap) = encoded.keymap.take() {
             host.keymap
@@ -398,6 +411,13 @@ impl MountSink for Sink {
                 .set(keymap);
         }
         let seq = host.seq.fetch_add(1, Ordering::Relaxed) + 1;
+        if !retirements.is_empty() {
+            let control = self.1.get().expect("engine control before its first batch");
+            let mut pending = host.retirements.lock().expect("retirements");
+            for (id, request) in retirements {
+                pending.insert((seq, id, request), control.clone());
+            }
+        }
         if !encoded.animation.is_empty() {
             host.animation_queue
                 .lock()
@@ -543,6 +563,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         viewport: Mutex::new(Size::new(px(0.0), px(0.0))),
         environment: Mutex::new(Environment::default()),
         animation_queue: Mutex::new(VecDeque::new()),
+        retirements: Mutex::new(BTreeMap::new()),
         seq: AtomicU64::new(0),
         ui: Mutex::new(UiAnimation::default()),
         epoch: Instant::now(),
@@ -1357,6 +1378,56 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
     };
     if let Some(control) = host.control() {
         control.dispatch_event(id as NodeId, kind, payload);
+    }
+}
+
+fn native_focus_path(env: &JNIEnv<'_>, path: &jni::objects::JIntArray<'_>) -> Option<Vec<NodeId>> {
+    let mut nodes = vec![0; env.get_array_length(path).ok()? as usize];
+    env.get_int_array_region(path, 0, &mut nodes).ok()?;
+    Some(nodes.into_iter().map(|id| id as NodeId).collect())
+}
+
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_focusPath(
+    env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    path: jni::objects::JIntArray<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    if let Some(path) = native_focus_path(&env, &path)
+        && let Some(control) = host.control()
+    {
+        control.set_focus_path(path);
+    }
+}
+
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+extern "system" fn Java_com_longbridge_nsh_Native_retireListCell(
+    env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    seq: jlong,
+    id: jint,
+    request: jlong,
+    retired: jboolean,
+    path: jni::objects::JIntArray<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Some(path) = native_focus_path(&env, &path) else {
+        return;
+    };
+    let control = host.retirements.lock().expect("retirements").remove(&(
+        seq as u64,
+        id as NodeId,
+        request as u64,
+    ));
+    if let Some(control) = control {
+        control.set_focus_path(path);
+        control.retire_list_cell(id as NodeId, request as u64, retired != 0);
     }
 }
 
