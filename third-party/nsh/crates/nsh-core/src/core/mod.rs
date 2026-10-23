@@ -1244,7 +1244,9 @@ impl<M: TextEngine> Core<M> {
     fn promoted_root_visible(&self, mut key: Key) -> bool {
         loop {
             let node = &self.nodes[key as usize];
-            if !node.created
+            // A nested Text span has no native view; its surrounding text
+            // block and every actual native ancestor still own visibility.
+            if (!node.created && !(node.inline && node.kind == Kind::Text))
                 || node
                     .layout
                     .is_some_and(|layout| self.layout.style(layout).display == taffy::Display::None)

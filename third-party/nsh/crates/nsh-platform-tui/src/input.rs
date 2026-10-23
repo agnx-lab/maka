@@ -2285,13 +2285,27 @@ impl Surface {
                                 .is_some_and(|(text, _, _)| text.is_selectable())
                     })
                 });
-                let selects_area = self.selection_area_press(
-                    target,
-                    x,
-                    y,
-                    mouse.modifiers.contains(KeyModifiers::SHIFT),
-                );
-                if selects_area {
+                // An inline control owns its contact before the surrounding
+                // selectable paragraph. A text link still permits dragging
+                // through its text, as does a field inside a pressable view.
+                let control = pressable.filter(|id| {
+                    link.is_none()
+                        && path
+                            .iter()
+                            .take_while(|node| Some(**node) != field)
+                            .any(|node| node == id)
+                });
+                let selects_area = control.is_none()
+                    && self.selection_area_press(
+                        target,
+                        x,
+                        y,
+                        mouse.modifiers.contains(KeyModifiers::SHIFT),
+                    );
+                if let Some(id) = control {
+                    self.selection_area_release();
+                    self.set_focus_from(Some(id), FocusSource::Pointer);
+                } else if selects_area {
                     self.set_focus_from(field, FocusSource::Pointer);
                 } else if let Some(id) = field {
                     // Focus changes the editor's scrolling and caret spacing.
@@ -7007,11 +7021,14 @@ mod tests {
         assert_eq!(presses(&surface), [10, 10, 10]);
 
         // An interactive attachment keeps its own contact instead of
-        // activating the enclosing text span's link.
+        // activating the enclosing text span's link or selecting its paragraph.
+        surface.node_mut(2).unwrap().props.selection_area = true;
         surface.node_mut(4).unwrap().props.pointer_events = PointerEvents::Auto;
         surface.node_mut(4).unwrap().events = mask(&[EventKind::Press]);
         surface.events.clear();
         surface.handle_event(mouse(MouseEventKind::Down(MouseButton::Left), 2, 3));
+        assert_eq!(surface.focused(), Some(4));
+        assert!(!surface.selection_area_dragging());
         surface.handle_event(mouse(MouseEventKind::Up(MouseButton::Left), 2, 3));
         assert_eq!(presses(&surface), [4]);
         surface.node_mut(4).unwrap().props.pointer_events = PointerEvents::None;
