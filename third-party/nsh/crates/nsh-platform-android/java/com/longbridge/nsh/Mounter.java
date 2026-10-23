@@ -1553,6 +1553,22 @@ final class Mounter {
     /** Canvas animated value slot `n` arrives as property `CANVAS_ARG + n` (`animation.rs`). */
     private static final int CANVAS_ARG = 1000;
 
+    /** How much further each sticky cell sticks (px; an animated `StickyCell::offset`). */
+    private final java.util.HashMap<Integer, Float> stickyOffsets = new java.util.HashMap<>();
+    /** The scroll view that pins each sticky cell. */
+    final java.util.HashMap<Integer, ScrollBox> stickyHosts = new java.util.HashMap<>();
+
+    /** How much further sticky cell `id` sticks (px). */
+    float stickyOffset(int id) {
+        Float offset = stickyOffsets.get(id);
+        return offset == null ? 0 : offset;
+    }
+
+    /** Sticky cell `id` sticks no animated value further in (until an output says so). */
+    void forgetStickyOffset(int id) {
+        stickyOffsets.remove(id);
+    }
+
     void outputs(float[] out) {
         if (out == null || out.length == 0) return;
         for (int i = 1; i + 2 < out.length; i += 3) {
@@ -1619,6 +1635,14 @@ final class Mounter {
                         decor.shadowRadius = radius;
                         v.invalidate();
                     }
+                    break;
+                }
+                case 15: {
+                    // A sticky cell sticks further in: its scroll view pins it again.
+                    int id = Float.floatToRawIntBits(out[i]);
+                    Float old = stickyOffsets.put(id, value * density);
+                    ScrollBox s = stickyHosts.get(id);
+                    if (s != null && (old == null || old != value * density)) s.pinSticky();
                     break;
                 }
                 default: break;
@@ -1957,7 +1981,9 @@ final class Mounter {
         String autofill = optString(b, objects);
         boolean inputRtl = b.getInt() != 0;
         boolean caretHidden = b.getInt() != 0;
+        boolean pasteInserts = b.getInt() != 0;
         if (!(v instanceof InputBox)) return;
+        ((InputBox) v).pasteInserts = pasteInserts;
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
         ((InputBox) v).setAutofill(autofill);
         ((InputBox) v).edit.setLayoutDirection(inputRtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
@@ -2314,6 +2340,10 @@ final class Mounter {
     }
 
     /** An event with an object payload. */
+    void paste(int id, String text, byte[][] images, String[] uris) {
+        Native.paste(handle(), id, text, images, uris);
+    }
+
     void eventMap(int id, int kind, String[] keys, Object[] values) {
         Native.eventMap(handle(), id, kind, keys, values);
     }

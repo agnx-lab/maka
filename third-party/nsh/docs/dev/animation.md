@@ -25,7 +25,8 @@
   Rust components call `ui::sample_easing` / `sample_spring` / `sample_decay` / `sample_decay_within`.
   Bindable: `opacity`, `backgroundColor`, `borderColor` (all sides), a text's `color` (the whole text: iOS and Android draw
   it into a layer and paint over it in the color, `SourceIn` / `SRC_IN`), `shadowColor` / `shadowOpacity` /
-  `shadowRadius`, and the translate / scale / rotate parts of `transform`. iOS shapes the decoration with the bound
+  `shadowRadius`, the translate / scale / rotate parts of `transform`, and where views stick: a sticky view's `top` /
+  `left` and a list's `stickyHeaderOffset` (`StickyCell::offset`, `docs/dev/scrolling-and-lists.md`). iOS shapes the decoration with the bound
   values (and the layers for them even while they are transparent: `bound_style`), then sets the colors and shadow
   on those layers each frame; Android and web get them as properties (`Mounter.java` codes 11–14; the web composes
   `box-shadow`, dropping layered `boxShadow`s while bound). Driven on the main thread by `CADisplayLink`,

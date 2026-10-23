@@ -2611,6 +2611,14 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if let (EventKind::ChangeText, EventPayload::Text { text, count }) = (event, &payload) {
                 state.core.input_changed(id, text, *count);
             }
+            // The platform knows the caret in the input, the core where
+            // the input is.
+            if event == EventKind::CaretMove {
+                state.core.locate_caret(id, &mut payload);
+            }
+            if event == EventKind::Paste {
+                payload = payload.into_paste();
+            }
             // Events on a Rust component's parts are the component's.
             if deliver_component_event(
                 script,

@@ -488,6 +488,10 @@ a host component receives at most one detent before the host dispatches
 its callbacks and delivers more input. Raw `Surface` hosts opt into service
 requests explicitly with `set_host_services_enabled`; clipboard reads and
 pastes are completed through the checked methods above.
+Native text pastes report `onPaste` before `onChangeText`. `pasteBehavior="report"`
+reports the text without changing the selection or edit count; the default
+`"insert"` retains literal terminal text, including line endings. Clipboard
+completions still require the original focus, selection, edit count and grant.
 
 `TextEngine::measure_canvas(&self, &CanvasFont, &str) -> Option<Points>`
 returns an optional Canvas line advance. Its default is `None`, which uses
