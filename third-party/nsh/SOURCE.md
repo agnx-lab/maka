@@ -19,14 +19,25 @@
 
 # Native Shell (NSH)
 
-This directory vendors the complete tracked source of
+This directory initially imported the complete tracked source of
 [`M4n5ter/nsh`, `tui/terminal-backend`](https://github.com/M4n5ter/nsh/tree/tui/terminal-backend)
 at `de176695240d550f2b303643b8019146c7989e7f`. The upstream project is
 [`longbridge/nsh`](https://github.com/longbridge/nsh).
 
-`upstream.json` records the imported revision and SHA-256 of every imported file.
+`upstream.json` keeps that initial `repository` and `revision`. Its
+`upstream_revision` records the latest integrated `longbridge/nsh` main revision:
+`de52bb3f9c236c48f0414f1bb36c17b92914ff91`. The first upstream synchronization
+starts from `6bb0b7908043132067456e4a21dd57c90a0bdce5`, already included in the
+initial fork import.
+
+`files` records each imported file's SHA-256. A `file_sources` entry identifies
+the repository and revision supplying that file's current import baseline;
+files without an entry retain the initial fork source. These hashes describe
+source bytes, not later Maka adaptations or conflict resolutions (for example,
+the README retains the terminal backend description). This is a mixed-source
+vendor tree, not a claim that one upstream revision contains the fork features.
 The source, tests, resources, original licenses and independent workspaces are
-retained verbatim. `SOURCE.md` and `upstream.json` are Maka's provenance files.
+retained. `SOURCE.md` and `upstream.json` are Maka's provenance files.
 Maka's workspace uses these local crates, including NSH's offscreen renderer and
 image codec; changing them here changes the code built and tested with Maka.
 
