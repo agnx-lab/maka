@@ -354,8 +354,32 @@ impl Fixture {
         } else {
             json!([])
         };
+        let permissions = if file_tool.is_some() {
+            // File-tool workflows use the product's real fresh-installation
+            // policy, so an allowed write exercises its default authority.
+            let bundle = std::env::var_os("MAKA_PRODUCT_BUNDLE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../bundle/dist")
+                });
+            let source = std::fs::read_to_string(bundle.join("authoring/composition.mjs")).unwrap();
+            let vm = maka_js_runtime::plugin::Vm::pure(Default::default()).unwrap();
+            let module = vm.load("real-host-installation".into(), source).unwrap();
+            let installation = module
+                .call(
+                    vec!["installation".into()],
+                    vec![json!({"workspace":workspace,"helper":env!("CARGO_BIN_EXE_maka")})],
+                )
+                .await
+                .unwrap();
+            module.close().await.unwrap();
+            vm.shutdown().await;
+            installation["agent"]["permissions"].clone()
+        } else {
+            json!({"access":"read_only","requestPermissions":true})
+        };
         let mut plan = json!({"environment":{"location":"host"},"instances":{
-            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":tools,"todo":true,"permissions":{"access":if file_tool.is_some() { "workspace_write" } else { "read_only" },"requestPermissions":true}}), if has_files { json!({"files":[{"kind":"instance","path":["files"],"export":"files"}]}) } else { json!({}) }),
+            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":tools,"todo":true,"permissions":permissions}), if has_files { json!({"files":[{"kind":"instance","path":["files"],"export":"files"}]}) } else { json!({}) }),
             "settings":node(&settings, 2, json!({}), json!({})),
             "authentication":node(&authentication, 6, json!({}), json!({})),
             "setup":node(&setup, 7, json!({}), json!({})),

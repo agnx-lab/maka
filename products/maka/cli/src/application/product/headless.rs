@@ -269,7 +269,6 @@ async fn begin(
     }))
     .await?;
     configuration["agent"]["workspaceRoots"] = serde_json::to_value(&roots)?;
-    configuration["agent"]["permissions"]["access"] = json!("read_only");
     configuration["skills"]["projectRoots"] = serde_json::to_value(&roots)?;
     configuration["processes"]["filesystem"]["rules"] = Value::Array(
         roots
@@ -523,7 +522,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn public_host_resumes_original_source_and_starts_with_read_only_permissions() {
+    async fn public_host_starts_with_workspace_write_and_preserves_saved_permissions() {
         let directory = tempfile::tempdir().unwrap();
         let namespaces = maka_event_log::root::RootNamespaces {
             ownership: directory.path().join("owners"),
@@ -562,7 +561,7 @@ mod tests {
         let config = serde_json::to_value(agent).unwrap();
         assert_eq!(
             config["configuration"]["values"]["permissions"]["access"],
-            "read_only"
+            "workspace_write"
         );
         assert_eq!(
             config["configuration"]["values"]["workspaceRoots"][0]["path"],
@@ -593,6 +592,14 @@ mod tests {
             revision
         );
         let mut customized = original.source().input.clone();
+        customized
+            .instances
+            .get_mut("agent")
+            .unwrap()
+            .configuration
+            .values
+            .get_mut("permissions")
+            .unwrap()["access"] = json!("read_only");
         let restriction =
             json!({"path": workspace.join("private"), "scope": "subtree", "access": "deny"});
         customized

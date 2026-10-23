@@ -1298,4 +1298,61 @@ export const conversationMessages = {
   'Selected file': ['Selected file', '所选文件', '所選檔案'],
   '(empty)': ['(empty)', '（空）', '（空）'],
   '{message} {detail}': ['{message} {detail}', '{message} {detail}', '{message} {detail}'],
+  Sandbox: ['Sandbox', '沙箱', '沙箱'],
+  'Sandbox and approvals': ['Sandbox and approvals', '沙箱与审批', '沙箱與審批'],
+  'Close sandbox settings': ['Close sandbox settings', '关闭沙箱设置', '關閉沙箱設定'],
+  'Choose a conversation to change sandbox settings.': [
+    'Choose a conversation to change sandbox settings.',
+    '选择对话后可更改沙箱设置。',
+    '選擇對話後可變更沙箱設定。',
+  ],
+  'Loading sandbox settings…': [
+    'Loading sandbox settings…',
+    '正在加载沙箱设置…',
+    '正在載入沙箱設定…',
+  ],
+  'Saving sandbox settings…': [
+    'Saving sandbox settings…',
+    '正在保存沙箱设置…',
+    '正在儲存沙箱設定…',
+  ],
+  'Sandbox off': ['Sandbox off', '关闭沙箱', '關閉沙箱'],
+  'Full access · Sandbox off': [
+    'Full access · Sandbox off',
+    '完全访问 · 关闭沙箱',
+    '完整存取 · 關閉沙箱',
+  ],
+  'Read files without changing the workspace.': [
+    'Read files without changing the workspace.',
+    '读取文件，不更改工作区。',
+    '讀取檔案，不變更工作區。',
+  ],
+  'Read and write within the workspace.': [
+    'Read and write within the workspace.',
+    '在工作区内读写文件。',
+    '在工作區內讀寫檔案。',
+  ],
+  'Approval requests': ['Approval requests', '审批请求', '審批請求'],
+  'Ask for approval': ['Ask for approval', '请求审批', '請求審批'],
+  'Do not ask for approval': ['Do not ask for approval', '不请求审批', '不請求審批'],
+  'Tools outside this policy are blocked when approval requests are off.': [
+    'Tools outside this policy are blocked when approval requests are off.',
+    '关闭审批请求时，超出当前策略的工具操作将被阻止。',
+    '關閉審批請求時，超出目前策略的工具操作將被阻止。',
+  ],
+  'Applies to this conversation. Changing either setting clears earlier approvals.': [
+    'Applies to this conversation. Changing either setting clears earlier approvals.',
+    '仅作用于当前对话。更改任一设置会清除先前的授权。',
+    '僅作用於目前對話。變更任一設定會清除先前的授權。',
+  ],
+  'Sandbox settings rejected: {reason}': [
+    'Sandbox settings rejected: {reason}',
+    '沙箱设置被拒绝：{reason}',
+    '沙箱設定被拒絕：{reason}',
+  ],
+  'This conversation changed. Review its current sandbox settings, then choose again.': [
+    'This conversation changed. Review its current sandbox settings, then choose again.',
+    '此对话已更改。请核对当前沙箱设置后重新选择。',
+    '此對話已變更。請核對目前沙箱設定後重新選擇。',
+  ],
 } as const satisfies Catalog;

@@ -29,6 +29,8 @@ import type { AttachmentDraft } from './attachmentDraft';
 import type { ImagePreview } from './ImageThumbnail';
 import { Checklist } from './Checklist';
 import { QueueDock, type QueueSession } from './QueueDock';
+import { SessionPermissionsSelect } from './SessionPermissionsSelect';
+import type { SessionPermissions } from './sessionPermissions';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { C, bodyTextStyle, compact, controlStyle } from './ui';
 import { Icon } from './Icon';
@@ -54,7 +56,7 @@ export type ComposerSession = {
   backend(): BackendIdentity;
   modelDetails(): ModelDetails;
   refreshModel(): Promise<void>;
-  permissions(): string;
+  permissions: SessionPermissions;
   workspace(): string;
   empty(): boolean;
   error(): string;
@@ -398,13 +400,7 @@ export function Composer(props: {
                 <Icon name="paperclip" color={C.secondary} />
               </Button>
             </If>
-            <Text
-              pointerEvents="none"
-              numberOfLines={1}
-              style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}
-            >
-              {props.session()?.permissions()}
-            </Text>
+            <SessionPermissionsSelect owner={props.session()?.permissions ?? null} />
             <If when={props.session() !== null}>
               <View pointerEvents="box-none" style={{ flex: 1, minWidth: 0 }}>
                 {props.models}
