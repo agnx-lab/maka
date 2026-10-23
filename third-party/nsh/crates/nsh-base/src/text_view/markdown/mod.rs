@@ -102,7 +102,7 @@ fn parse_trees(parser: &Parser, source: &Source, segments: &[Segment], out: &mut
                 // Front matter is only the document's first lines.
                 out.push(tree(parser, source.slice(range.clone()), range.start == 0));
             }
-            Segment::Container(container) => parse_trees(parser, &source, &container.children, out),
+            Segment::Container(container) => parse_trees(parser, source, &container.children, out),
         }
     }
 }
@@ -943,9 +943,12 @@ impl<'a> Converter<'a> {
     fn convert_inline(&mut self, node: &Node, out: &mut Vec<Inline>) {
         let begin = out.len();
         match node {
-            // A soft line break is a space: the paragraph flows.
             Node::Text(text) => {
-                let text = text.value.replace('\n', " ");
+                let text = if self.parser.options.preserve_line_breaks {
+                    text.value.clone()
+                } else {
+                    text.value.replace('\n', " ")
+                };
                 if self.mapped {
                     out.push(Inline::text(text));
                 } else {

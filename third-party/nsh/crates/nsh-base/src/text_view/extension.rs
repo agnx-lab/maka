@@ -103,6 +103,10 @@ pub struct MarkdownOptions {
     /// then not read.
     #[prop(default)]
     pub mdx: bool,
+    /// Keep single line breaks in paragraphs instead of flowing them as
+    /// spaces (default false). Useful for messages with intentional lines.
+    #[prop(default)]
+    pub preserve_line_breaks: bool,
     /// The text is still arriving (a reply streamed by an AI model):
     /// syntax its end leaves open (`**bold`, `` `code ``, `[link](`, a
     /// table's header alone) is shown as if it were closed, not as
@@ -120,6 +124,7 @@ impl Default for MarkdownOptions {
             frontmatter: false,
             mdx: false,
             streaming: false,
+            preserve_line_breaks: false,
         }
     }
 }

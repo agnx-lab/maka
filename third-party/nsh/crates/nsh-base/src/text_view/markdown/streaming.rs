@@ -154,7 +154,7 @@ fn inline(tail: &Source) -> Source {
     let text = links(&text);
     let text = tag(&text);
     let mut text = close(&text);
-    if &*text != &**tail {
+    if *text != **tail {
         text.truncate(text.trim_end().len());
     }
     text

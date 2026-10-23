@@ -93,7 +93,11 @@ impl Source {
         out.finish()
     }
     /// Compose the parser's lexical UTF-16 mapping with rewrite provenance.
-    pub(super) fn project(&self, text: &str, segments: Vec<TextSourceSegment>) -> Vec<TextSourceSegment> {
+    pub(super) fn project(
+        &self,
+        text: &str,
+        segments: Vec<TextSourceSegment>,
+    ) -> Vec<TextSourceSegment> {
         let mut out = Vec::new();
         #[cfg(debug_assertions)]
         let units = text.encode_utf16().count() as u32;

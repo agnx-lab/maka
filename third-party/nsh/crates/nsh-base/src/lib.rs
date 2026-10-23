@@ -84,8 +84,8 @@ pub use crate::{
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
         TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart,
-        TextViewImageContext, TextViewImageFlow, TextViewLabels, TextViewLinkTarget,
+        TextViewEvent, TextViewImageContext, TextViewImageFlow, TextViewLabels,
+        TextViewLinkPressEvent, TextViewLinkTarget, TextViewLinks, TextViewMath, TextViewPart,
         TextViewParts, TextViewProps, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},

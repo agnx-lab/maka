@@ -947,7 +947,7 @@ impl Cx {
         checked: Option<bool>,
         depth: u8,
     ) -> AnyElement {
-        let marker = match checked {
+        match checked {
             Some(checked) => {
                 let mut parts = vec![Part::ListMarker, Part::TaskMarker];
                 if checked {
@@ -1014,8 +1014,7 @@ impl Cx {
                     .text_color(move || theme().muted_foreground);
                 self.part(marker, Part::ListMarker).into_element()
             }
-        };
-        marker
+        }
     }
 
     /// `el` with part `part`'s classes and style.
@@ -1738,10 +1737,10 @@ impl Cx {
         let pressed = image.clone();
         let is_link = link.is_some();
         let press_link = link.clone().map(|url| self.link_press(url, target));
-        let press = Some(move || match &press_link {
+        let press = move || match &press_link {
             Some(press) => press(),
             None => scope.emit(TextViewEvent::ImagePress(pressed.clone())),
-        });
+        };
         let role = if is_link {
             AccessibilityRole::Link
         } else {
@@ -1769,7 +1768,7 @@ impl Cx {
                     .focusable(true)
                     .element_ref(&target)
                     .label(SharedString::from(image.alt.clone()))
-                    .on_press(press.expect("image press"))
+                    .on_press(press)
                     .child(el)
                     .into_element();
             }
@@ -1830,14 +1829,11 @@ impl Cx {
                     .rounded(px(8.0))
                     .w_full()
                     .aspect_ratio(move || ratio.or_else(aspect).unwrap_or(1.0));
-                let el = match press {
-                    Some(press) => el
-                        .role(role)
-                        .focusable(true)
-                        .element_ref(&target)
-                        .on_press(press),
-                    None => el.role(AccessibilityRole::Image),
-                };
+                let el = el
+                    .role(role)
+                    .focusable(true)
+                    .element_ref(&target)
+                    .on_press(press);
                 return view()
                     .w(box_width)
                     .max_w(relative(1.0))
@@ -1858,14 +1854,11 @@ impl Cx {
                     .translate_y(move || size().height / 2.0 - px(0.35 * em))
             }
         };
-        let el = match press {
-            Some(press) => el
-                .role(role)
-                .focusable(true)
-                .element_ref(&target)
-                .on_press(press),
-            None => el.role(AccessibilityRole::Image),
-        };
+        let el = el
+            .role(role)
+            .focusable(true)
+            .element_ref(&target)
+            .on_press(press);
         self.part(el, Part::Image).into_element()
     }
 }
@@ -2394,11 +2387,7 @@ mod tests {
         app.wait_for("old false").unwrap();
         app.press("text:same").unwrap();
         app.wait_for("press 2 focus true").unwrap();
-        let node = app
-            .screen()
-            .press_target("text:same")
-            .unwrap()
-            .unwrap();
+        let node = app.screen().press_target("text:same").unwrap().unwrap();
         assert!(
             app.screen()
                 .commands()

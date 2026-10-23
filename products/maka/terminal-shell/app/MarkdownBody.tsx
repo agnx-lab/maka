@@ -54,7 +54,7 @@ export function MarkdownBody(props: {
           markdown={props.row().text}
           sourceId={props.sourceId}
           selectable
-          options={{ streaming: true }}
+          options={{ streaming: true, preserveLineBreaks: true }}
           labels={{ table: tr('Markdown table'), copied: tr('Copied') }}
           onScrollIntent={props.userScroll}
           onParseError={(reason) => failure.set(reason)}

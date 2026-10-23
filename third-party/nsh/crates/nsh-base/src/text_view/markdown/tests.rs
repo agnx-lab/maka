@@ -95,6 +95,16 @@ fn soft_and_hard_breaks() {
             t("four"),
         ])]
     );
+    assert_eq!(
+        Parser::new()
+            .options(MarkdownOptions {
+                preserve_line_breaks: true,
+                ..options()
+            })
+            .markdown("one\ntwo")
+            .blocks,
+        vec![p(vec![t("one\ntwo")])]
+    );
     // CRLF reads as LF.
     assert_eq!(blocks("a\r\nb\r\n\r\nc"), blocks("a\nb\n\nc"));
 }
