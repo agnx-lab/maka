@@ -32,7 +32,6 @@ maka-capabilities.workspace = true
 base64 = "0.22.1"
 maka-event-log.workspace = true
 maka-model.workspace = true
-maka-js-runtime.workspace = true
 maka-tools.workspace = true
 serde.workspace = true
 serde_json.workspace = true

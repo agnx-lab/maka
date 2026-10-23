@@ -40,7 +40,7 @@ pub enum ToolProfile {
 mod behavior;
 pub use behavior::BehaviorId;
 mod tool_policy;
-pub use tool_policy::EditingTools;
+pub use tool_policy::{CodeLanguage, EditingTools};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -136,6 +136,9 @@ pub struct InvocationConfiguration {
     pub collaboration_mode: CollaborationMode,
     pub orchestration_mode: BehaviorId,
     pub tool_mode: ToolMode,
+    /// Frozen Code Mode interpreter. Historical invocations used JavaScript.
+    #[serde(default, skip_serializing_if = "CodeLanguage::is_javascript")]
+    pub code_language: CodeLanguage,
     /// None means there was no Session-owned model binding (e.g. local Code).
     pub model: Option<ModelBinding>,
     pub thinking_level: Option<ThinkingLevel>,

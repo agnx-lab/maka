@@ -60,6 +60,14 @@ pub struct ModelOverride {
     )]
     #[schemars(with = "bool")]
     pub code_mode: Option<bool>,
+    /// Code Mode interpreter; omitted selects JavaScript.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    #[schemars(with = "crate::execution::CodeLanguage")]
+    pub code_mode_language: Option<crate::execution::CodeLanguage>,
     /// Independent of Code Mode: select patch editing or structured Edit/Write.
     #[serde(
         default,

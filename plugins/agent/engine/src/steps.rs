@@ -46,7 +46,10 @@ pub(super) async fn run(
         input.invocation.clone(),
         catalog,
         input.configuration.tool_mode,
-        inner.cells.clone(),
+        inner
+            .cells
+            .clone()
+            .with_language(input.configuration.code_language),
         session.loaded,
     )
     .with_model(input.provider.tool_context())

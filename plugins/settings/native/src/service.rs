@@ -135,6 +135,7 @@ async fn model_choice(
         }),
         tools: Some(ModelToolPreferences {
             code_mode: overrides.and_then(|value| value.code_mode),
+            code_mode_language: overrides.and_then(|value| value.code_mode_language),
             apply_patch: overrides.and_then(|value| value.apply_patch),
         }),
         selection: ModelSelection {
@@ -383,6 +384,7 @@ impl Handler for Settings {
                         .entry(input.selection.model_id.clone())
                         .or_default();
                     model.code_mode = input.tools.code_mode;
+                    model.code_mode_language = input.tools.code_mode_language;
                     model.apply_patch = input.tools.apply_patch;
                     model.context_window = input.limits.context_window;
                     model.input_limit = input.limits.input_limit;

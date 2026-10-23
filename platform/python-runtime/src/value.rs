@@ -48,9 +48,9 @@ pub(crate) fn to_json(value: ObjectRef<'_>) -> Result<Value, String> {
 }
 
 fn convert(value: ObjectRef<'_>, depth: usize) -> Result<Value, String> {
-    // The JSON transport uses serde_json's default recursion boundary (128).
+    // Business JSON values have one depth bound, independent of protocol framing.
     // Cycles also terminate here; they can never silently become repr strings.
-    if depth >= 128 {
+    if depth >= crate::protocol::MAX_JSON_DEPTH {
         return Err("JSON value is cyclic or exceeds the transport nesting limit".into());
     }
     Ok(match value.type_name() {

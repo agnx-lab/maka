@@ -57,6 +57,7 @@ pub fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = stdin.lock();
     let mut output = stdout.lock();
     let start: Start = read(&mut input)?;
+    write(&mut output, &Request::Ready)?;
     let result = execute(
         start,
         ResourceLimits {
@@ -267,7 +268,7 @@ fn read<T: serde::de::DeserializeOwned>(
     if input.read_line(&mut line)? == 0 {
         return Err("Host closed the worker protocol".into());
     }
-    Ok(serde_json::from_str(&line)?)
+    Ok(crate::protocol::decode(line.as_bytes())?)
 }
 fn write(
     output: &mut impl Write,

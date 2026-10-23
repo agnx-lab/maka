@@ -27,7 +27,7 @@ fn engine(log: Arc<EventLog>) -> Engine {
     Engine::new(
         log,
         maka_model::ModelExecutor::new(Duration::from_secs(10)).unwrap(),
-        maka_js_runtime::CodeExecutor::new(Default::default()).unwrap(),
+        maka_tools::CodeExecutor::new(Default::default()).unwrap(),
     )
 }
 

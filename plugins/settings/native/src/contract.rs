@@ -71,6 +71,10 @@ pub struct ModelChoice {
 pub struct ModelToolPreferences {
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<bool>")]
     pub code_mode: Option<bool>,
+    #[schemars(
+        with = "maka_plugin_core::wire_schema::RequiredNullable<maka_agent_facts::execution::CodeLanguage>"
+    )]
+    pub code_mode_language: Option<maka_agent_facts::execution::CodeLanguage>,
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<bool>")]
     pub apply_patch: Option<bool>,
 }

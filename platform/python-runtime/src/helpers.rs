@@ -26,6 +26,9 @@ pub(crate) fn invoke(
     mut kwargs: serde_json::Map<String, Value>,
     context: &CellContext,
 ) -> Result<Value, CellDiagnostic> {
+    for value in args.iter().chain(kwargs.values()) {
+        crate::protocol::validate_json(value)?;
+    }
     let fields: &[&str] = match name {
         "text" | "notify" | "audio" | "generated_image" => &["value"],
         "image" => &["value", "detail"],

@@ -26,7 +26,7 @@ use maka_agent_facts::tool_call::ToolRejection;
 use maka_agent_facts::tools::ToolError;
 use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::CodeExecutor;
+use maka_tools::CodeExecutor;
 use maka_tools::{RunTools, ToolMode};
 use serde_json::json;
 use std::sync::{Arc, atomic::Ordering};

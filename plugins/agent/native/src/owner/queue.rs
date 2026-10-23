@@ -391,6 +391,7 @@ impl Owner {
                 BehaviorId::default()
             },
             tool_mode: ToolMode::Direct,
+            code_language: Default::default(),
             model: None,
             thinking_level: None,
             system_prompt,
@@ -402,6 +403,7 @@ impl Owner {
                 configuration.model = Some(source.accepted.binding.clone());
                 configuration.thinking_level = source.accepted.thinking_level;
                 configuration.tool_mode = source.accepted.tool_mode;
+                configuration.code_language = source.accepted.code_language;
                 configuration.editing_tools = source.accepted.editing_tools;
                 let tools =
                     self.selected_tools(&basis, basis.tool_discovery, configuration.editing_tools);

@@ -21,6 +21,6 @@
 
 [English](README.md)
 
-分发带日志记录的工具调用，并提供 Code Mode。`RequestTools`、`RunTools` 和 `StepTools` 在各自执行作用域内保留工具选择。Code Mode 使用共用 JavaScript 运行时，沿相同的授权工具路径转发。工具结果、取消和实际清理是不同的结果。
+分发带日志记录的工具调用，并提供 Code Mode。`RequestTools`、`RunTools` 和 `StepTools` 在各自执行作用域内保留工具选择。Code Mode 默认使用共用 JavaScript 运行时，也可通过模型设置 `codeModeLanguage: "python"` 选择随包提供的 Monty Python worker。两种语言沿相同的授权工具路径转发，共享会话 JSON 存储。工具结果、取消和实际清理是不同的结果。
 
 [源码](src/lib.rs) · [Cargo 配置](Cargo.toml)

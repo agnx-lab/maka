@@ -123,8 +123,17 @@ impl Target {
         }
     }
 
+    pub fn python_worker(self) -> &'static str {
+        if self == Self::Win32X64 {
+            "bin/maka-python-worker.exe"
+        } else {
+            "bin/maka-python-worker"
+        }
+    }
+
     pub fn is_executable(self, name: &str) -> bool {
         name == self.executable()
+            || name == self.python_worker()
             || name == self.desktop_executable()
             || Some(name) == self.service_executable()
     }

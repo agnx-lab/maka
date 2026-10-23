@@ -65,6 +65,7 @@ async fn executor_invocation_transcript() {
             collaboration_mode: CollaborationMode::Agent,
             orchestration_mode: BehaviorId::default(),
             tool_mode: ToolMode::Direct,
+            code_language: Default::default(),
         }));
         log.append(&event("a", opening)).await.unwrap();
         log.append(&event(

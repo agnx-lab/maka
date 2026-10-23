@@ -678,7 +678,7 @@ impl Fixture {
                             Arc::get_mut(&mut owner).unwrap().engine = Engine::new(
                                 store,
                                 model,
-                                maka_js_runtime::CodeExecutor::new(Default::default()).unwrap(),
+                                maka_tools::CodeExecutor::new(Default::default()).unwrap(),
                             );
                         }
                         *capture.lock().unwrap() = Some((owner.clone(), services));

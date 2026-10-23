@@ -44,6 +44,7 @@ pub fn configuration(tool_mode: ToolMode) -> InvocationConfiguration {
         collaboration_mode: CollaborationMode::Agent,
         orchestration_mode: BehaviorId::default(),
         tool_mode,
+        code_language: Default::default(),
         model: None,
         thinking_level: None,
     }

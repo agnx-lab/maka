@@ -20,17 +20,21 @@
 mod declarations;
 mod session;
 pub(crate) use session::Cells;
-pub(super) fn declarations(definitions: &[ToolDefinition]) -> String {
-    declarations::render(definitions)
+pub(super) fn declarations(definitions: &[ToolDefinition], language: CodeLanguage) -> String {
+    match language {
+        CodeLanguage::JavaScript => declarations::render(definitions),
+        CodeLanguage::Python => declarations::python(definitions),
+    }
 }
 
+use crate::CodeExecutor;
+use maka_agent_facts::execution::CodeLanguage;
 use maka_agent_facts::tool_call::ToolCallIdentity;
 use maka_agent_facts::tool_call::ToolOrigin;
 use maka_agent_facts::tool_call::ToolRejection;
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
 use maka_agent_facts::tools::ToolJournal;
-use maka_js_runtime::CodeExecutor;
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -51,7 +55,19 @@ fn default_wait_yield() -> u64 {
     10_000
 }
 
-pub(super) fn definition() -> ToolDefinition {
+pub(super) fn definition(language: CodeLanguage) -> ToolDefinition {
+    if language == CodeLanguage::Python {
+        return ToolDefinition {
+            freeform: Some(maka_agent_facts::tools::FreeformGrammar::Lark {
+                definition: EXEC_GRAMMAR.replace(r"\/\/", "#"),
+            }),
+            output_schema: None,
+            provider: None,
+            name: "exec".into(),
+            description: include_str!("cell/python.md").into(),
+            input_schema: schemars::schema_for!(CodeInput).into(),
+        };
+    }
     ToolDefinition {
         freeform: Some(maka_agent_facts::tools::FreeformGrammar::Lark { definition: EXEC_GRAMMAR.into() }), output_schema: None, provider: None,
         name: "exec".into(),
@@ -78,7 +94,7 @@ Host execution: 64 MiB V8 heap, 30 seconds cumulative synchronous execution (asy
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CodeInput {
-    /// Async JavaScript module. Emit content using helpers.
+    /// Source in the selected Code Mode language. Emit content using helpers.
     code: String,
     /// Observation wait in milliseconds (0..60000), not an execution timeout.
     #[serde(default = "default_yield")]
@@ -139,7 +155,11 @@ fn observation_limits(yield_time_ms: u64, tokens: usize) -> Result<(), ToolRejec
     Ok(())
 }
 
-pub(super) fn source(input: &Value) -> Result<CodeInput, ToolRejection> {
+pub(super) fn source(input: &Value, language: CodeLanguage) -> Result<CodeInput, ToolRejection> {
+    let prefix = match language {
+        CodeLanguage::JavaScript => "// @exec:",
+        CodeLanguage::Python => "# @exec:",
+    };
     let mut value = if let Some(code) = input.as_str() {
         serde_json::json!({"code":code})
     } else {
@@ -149,7 +169,7 @@ pub(super) fn source(input: &Value) -> Result<CodeInput, ToolRejection> {
         && let Some(pragma) = code
             .lines()
             .next()
-            .and_then(|line| line.trim_start().strip_prefix("// @exec:"))
+            .and_then(|line| line.trim_start().strip_prefix(prefix))
     {
         let options: serde_json::Map<String, Value> = serde_json::from_str(pragma)
             .map_err(|error| invalid(format!("invalid exec pragma: {error}")))?;

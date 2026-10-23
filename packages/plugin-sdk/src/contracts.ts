@@ -41540,6 +41540,10 @@ export const contracts = {
                       'Omitted means model-specific defaults; false is an explicit opt-out.',
                     type: 'boolean',
                   },
+                  codeModeLanguage: {
+                    description: 'Code Mode interpreter; omitted selects JavaScript.',
+                    $ref: '#/$defs/CodeLanguage',
+                  },
                   applyPatch: {
                     description:
                       'Independent of Code Mode: select patch editing or structured Edit/Write.',
@@ -41608,6 +41612,11 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
+              },
+              CodeLanguage: {
+                description: 'Interpreter used only for model-facing Code Mode cells.',
+                type: 'string',
+                enum: ['javascript', 'python'],
               },
               ThinkingLevel: {
                 type: 'string',
@@ -41963,6 +41972,10 @@ export const contracts = {
                       'Omitted means model-specific defaults; false is an explicit opt-out.',
                     type: 'boolean',
                   },
+                  codeModeLanguage: {
+                    description: 'Code Mode interpreter; omitted selects JavaScript.',
+                    $ref: '#/$defs/CodeLanguage',
+                  },
                   applyPatch: {
                     description:
                       'Independent of Code Mode: select patch editing or structured Edit/Write.',
@@ -42031,6 +42044,11 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
+              },
+              CodeLanguage: {
+                description: 'Interpreter used only for model-facing Code Mode cells.',
+                type: 'string',
+                enum: ['javascript', 'python'],
               },
               ThinkingLevel: {
                 type: 'string',
@@ -42952,12 +42970,27 @@ export const contracts = {
                   codeMode: {
                     type: ['boolean', 'null'],
                   },
+                  codeModeLanguage: {
+                    anyOf: [
+                      {
+                        $ref: '#/$defs/CodeLanguage',
+                      },
+                      {
+                        type: 'null',
+                      },
+                    ],
+                  },
                   applyPatch: {
                     type: ['boolean', 'null'],
                   },
                 },
                 additionalProperties: false,
-                required: ['codeMode', 'applyPatch'],
+                required: ['codeMode', 'codeModeLanguage', 'applyPatch'],
+              },
+              CodeLanguage: {
+                description: 'Interpreter used only for model-facing Code Mode cells.',
+                type: 'string',
+                enum: ['javascript', 'python'],
               },
               SettingsModelLimitSettings: {
                 type: 'object',
@@ -43867,12 +43900,27 @@ export const contracts = {
                   codeMode: {
                     type: ['boolean', 'null'],
                   },
+                  codeModeLanguage: {
+                    anyOf: [
+                      {
+                        $ref: '#/$defs/CodeLanguage',
+                      },
+                      {
+                        type: 'null',
+                      },
+                    ],
+                  },
                   applyPatch: {
                     type: ['boolean', 'null'],
                   },
                 },
                 additionalProperties: false,
-                required: ['codeMode', 'applyPatch'],
+                required: ['codeMode', 'codeModeLanguage', 'applyPatch'],
+              },
+              CodeLanguage: {
+                description: 'Interpreter used only for model-facing Code Mode cells.',
+                type: 'string',
+                enum: ['javascript', 'python'],
               },
               SettingsModelLimitSettings: {
                 type: 'object',
@@ -44463,6 +44511,10 @@ export const contracts = {
                       'Omitted means model-specific defaults; false is an explicit opt-out.',
                     type: 'boolean',
                   },
+                  codeModeLanguage: {
+                    description: 'Code Mode interpreter; omitted selects JavaScript.',
+                    $ref: '#/$defs/CodeLanguage',
+                  },
                   applyPatch: {
                     description:
                       'Independent of Code Mode: select patch editing or structured Edit/Write.',
@@ -44531,6 +44583,11 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
+              },
+              CodeLanguage: {
+                description: 'Interpreter used only for model-facing Code Mode cells.',
+                type: 'string',
+                enum: ['javascript', 'python'],
               },
               ThinkingLevel: {
                 type: 'string',
@@ -44970,12 +45027,27 @@ export const contracts = {
                   codeMode: {
                     type: ['boolean', 'null'],
                   },
+                  codeModeLanguage: {
+                    anyOf: [
+                      {
+                        $ref: '#/$defs/CodeLanguage',
+                      },
+                      {
+                        type: 'null',
+                      },
+                    ],
+                  },
                   applyPatch: {
                     type: ['boolean', 'null'],
                   },
                 },
                 additionalProperties: false,
-                required: ['codeMode', 'applyPatch'],
+                required: ['codeMode', 'codeModeLanguage', 'applyPatch'],
+              },
+              CodeLanguage: {
+                description: 'Interpreter used only for model-facing Code Mode cells.',
+                type: 'string',
+                enum: ['javascript', 'python'],
               },
               SettingsModelLimits: {
                 type: 'object',
