@@ -59,7 +59,8 @@ import { performSessionAction, type SessionAction } from './sessionLifecycle';
 type OverlayTarget = {
   sessionId: string | null;
 } & (
-  | { kind: 'commands' | 'workspaces' | 'models' | 'sessions' }
+  | { kind: 'commands' | 'workspaces' | 'sessions' }
+  | { kind: 'models'; focusOnClose?: 'composer' }
   | { kind: 'settings'; model?: ModelSelection }
 );
 type Overlay = OverlayTarget & { instance: number };
@@ -191,6 +192,19 @@ function App() {
     overlay.set(null);
     return true;
   };
+  const closeModels = (owner: ConversationHandle, instance: number) => {
+    const current = overlay();
+    if (
+      current?.kind !== 'models' ||
+      current.sessionId !== owner.sessionId ||
+      selected() !== owner.sessionId ||
+      handle() !== owner ||
+      !closeOverlay(instance)
+    )
+      return false;
+    if (current.focusOnClose === 'composer') owner.focus();
+    return true;
+  };
   const open = (request: OverlayTarget) => {
     const { sessionId } = request;
     if (!alive || selected() !== sessionId) return;
@@ -284,7 +298,8 @@ function App() {
           reason: result.reason ?? result.kind,
         });
       await switchSession(result.session.id, expectedSessionId);
-      if (selected() === result.session.id) open({ kind: 'models', sessionId: result.session.id });
+      if (selected() === result.session.id)
+        open({ kind: 'models', sessionId: result.session.id, focusOnClose: 'composer' });
       await browsing.refresh();
     } catch (reason) {
       report(reason);
@@ -564,7 +579,7 @@ function App() {
           if (original.method === 'create' && result.kind === 'created') {
             await switchSession(result.session.id);
             if (selected() === result.session.id && !result.session.backend)
-              open({ kind: 'models', sessionId: result.session.id });
+              open({ kind: 'models', sessionId: result.session.id, focusOnClose: 'composer' });
           }
         } catch (reason) {
           report(reason);
@@ -840,7 +855,7 @@ function App() {
                     }}
                     current={() => selected() === owner.sessionId && handle() === owner}
                     toggle={toggleModels}
-                    close={closeOverlay}
+                    close={(instance) => closeModels(owner, instance)}
                     manage={manageModels}
                     select={(instance, backend) => chooseModel(owner, instance, backend)}
                   />
