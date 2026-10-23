@@ -26,7 +26,7 @@ at `de176695240d550f2b303643b8019146c7989e7f`. The upstream project is
 
 `upstream.json` keeps that initial `repository` and `revision`. Its
 `upstream_revision` records the latest integrated `longbridge/nsh` main revision:
-`44278a653d73b7f8626e964f7895b8a4c4a964dc`. The first upstream synchronization
+`7ed244990097dbbec6b177e26dbc357cb0dba654`. The first upstream synchronization
 starts from `6bb0b7908043132067456e4a21dd57c90a0bdce5`, already included in the
 initial fork import.
 
@@ -43,6 +43,10 @@ from the upstream layout tree's reusable slab index. This prevents a delayed
 pointer observation from activating a newly allocated hint or anchor; the
 existing hint-lifetime regression covers release and reuse. Keep this adaptation
 until an upstream owner-identity mechanism provides the same guarantee.
+The list integration also applies published source counts and splices before
+issuing more paced bindings. This retains the fork's source-publication fence
+while using upstream visible-first scheduling; regressions cover source changes
+inside both visible and overscan row constructors.
 
 Maka's workspace uses these local crates, including NSH's offscreen renderer and
 image codec; changing them here changes the code built and tested with Maka.
