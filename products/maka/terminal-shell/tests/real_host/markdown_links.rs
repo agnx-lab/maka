@@ -181,7 +181,8 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
         // viewer. Native Tab reveals its original inline button before click.
         tab_to_label(&mut view, "View full image: Remote diagram 中文").await;
         wait_view_state(&mut view, |view, screen| screen.contains('▀') && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Image && node.label == "Remote diagram 中文") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Image && node.label == "Remote linked diagram" && node.frame.size.width.0 == 64.0 && node.frame.size.height.0 == 48.0)).await;
-        wait_view(&mut view, |screen| screen.contains("Unavailable remote") && screen.contains("HTTP 404")).await;
+        // The native error text stays whole in AX when its URL and status wrap.
+        wait_view_state(&mut view, |view, screen| screen.contains("Unavailable remote") && view.accessibility_snapshot().iter().any(|node| node.label.contains("Unavailable remote") && node.label.contains("HTTP 404"))).await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "View full image: Remote linked diagram"), "a network linked image also has only its original Link target");
         let remote = support::wait_enabled_button(&mut view, "View full image: Remote diagram 中文").await;
         support::click_node(&mut view, remote.clone());
