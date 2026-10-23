@@ -27,6 +27,7 @@ import { keymap } from 'nsh/keymap';
 import { Icon } from './Icon';
 import { tr } from './locale';
 import { C, captionTextStyle, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
+import { dialogTop } from './chrome';
 
 export type ViewerImage = { uri: string; width: number; height: number; title: string };
 export type OpenImageViewer = (image: ViewerImage, restoreFocus: () => boolean) => void;
@@ -171,7 +172,7 @@ export function ImageViewer(props: { image: ViewerImage; close(): void }) {
           pointerEvents="box-none"
           style={{
             position: 'absolute',
-            top: 16,
+            top: dialogTop(16),
             left: 16,
             right: 16,
             flexDirection: 'row',

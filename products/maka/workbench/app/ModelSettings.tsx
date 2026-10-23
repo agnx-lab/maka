@@ -41,6 +41,7 @@ import {
 } from './ui';
 import { Icon } from './Icon';
 import { tr } from './locale';
+import { dialogTop } from './chrome';
 
 type Section = 'general' | 'connections' | 'network' | 'plugins';
 type BackAction = { section: Section; identity: string };
@@ -142,6 +143,7 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
         justifyContent: 'center',
         alignItems: 'center',
         padding: 16,
+        paddingTop: dialogTop(16),
         backgroundColor: '#00000099',
       }}
     >

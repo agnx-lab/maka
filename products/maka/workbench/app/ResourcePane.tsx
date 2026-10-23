@@ -41,6 +41,7 @@ import {
   controlHoverStyle,
   controlFocusStyle,
 } from './ui';
+import { controlsRight, windowDrag } from './chrome';
 
 export function ResourcePane(props: { resources: Resources; docked: boolean }) {
   const resources = props.resources;
@@ -71,7 +72,16 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
       }}
       style={{ flex: 1, minHeight: 0, backgroundColor: C.background, padding: 8, gap: 8 }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 4 }}>
+      <View
+        desktop={props.docked ? windowDrag : undefined}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          flexShrink: 0,
+          gap: 4,
+          paddingRight: controlsRight(props.docked),
+        }}
+      >
         <Scroll horizontal focusable={false} style={{ flex: 1, minWidth: 0 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Button

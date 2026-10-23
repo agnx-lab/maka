@@ -22,6 +22,7 @@
 //! each run it in their own backend.
 
 pub mod bindings;
+pub mod host;
 pub mod markdown;
 
 use nsh_engine::{Bundle, EngineConfig, Limits, Policy};

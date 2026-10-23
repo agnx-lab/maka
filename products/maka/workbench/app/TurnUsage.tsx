@@ -25,6 +25,7 @@ import type { ModelUsage, UsageModelAttempt } from '../../../../packages/plugin-
 import { host } from './host';
 import { C, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
 import { Icon } from './Icon';
+import { dialogTop } from './chrome';
 
 type Reading =
   | { kind: 'loading'; checked: number }
@@ -158,6 +159,7 @@ export function TurnUsage(props: {
         justifyContent: 'center',
         alignItems: 'center',
         padding: 16,
+        paddingTop: dialogTop(16),
         backgroundColor: '#00000099',
       }}
     >

@@ -20,10 +20,7 @@
 //! Runs the NSH application against one launcher-selected public Host.
 
 use crate::terminal;
-use maka_app_client::{Client, Journal};
-use maka_event_log::root;
 use maka_host_runtime::application::host::startup;
-use maka_plugin_core::operation::receipt_reader_contract;
 use maka_workbench::bindings::Bindings;
 use nsh_core::{
     Points, Size,
@@ -62,7 +59,8 @@ impl Args {
             .map(PathBuf::from)
             .ok_or("home directory unavailable; select --root")?;
         #[cfg(windows)]
-        let home = root::windows::account_home().map_err(|error| error.to_string())?;
+        let home =
+            maka_event_log::root::windows::account_home().map_err(|error| error.to_string())?;
         Ok(home.join(".maka/application/host"))
     }
 
@@ -87,30 +85,8 @@ impl Args {
         if stop.load(Ordering::Acquire) {
             return native.close().await;
         }
-        let prepare = async {
-            let location = root::resolve(&path).map_err(|error| error.to_string())?;
-            if native.source().state_domain != location.root_id() {
-                return Err("application Host changed during terminal startup admission".to_owned());
-            }
-            if native.catalogue().describe("receipts")?.contract != receipt_reader_contract() {
-                return Err("Host receipts endpoint has a different contract".into());
-            }
-            let directory = location.canonical_path().join("clients");
-            root::private_directory(&directory).map_err(|error| error.to_string())?;
-            let journal = Journal::open(&directory.join("terminal.sqlite")).await?;
-            Ok((journal, directory))
-        }
-        .await;
-        let (journal, client_directory) = match prepare {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                return match native.close().await {
-                    Ok(()) => Err(error),
-                    Err(cleanup) => Err(format!("{error}; terminal Host cleanup: {cleanup}")),
-                };
-            }
-        };
-        let client = Client::new(native, journal, "receipts".into())?;
+        let (client, client_directory) =
+            maka_workbench::host::admit(native, &path, "terminal").await?;
         let runtime = tokio::runtime::Handle::current();
         let bindings = Bindings::new(client, runtime.clone());
         let mut config = configuration(bindings.registry(self.session), runtime);

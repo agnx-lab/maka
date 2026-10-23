@@ -49,16 +49,17 @@ fn shell(directory: &Path) -> PathBuf {
 fn shell_at(executable: PathBuf) -> PathBuf {
     std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
     std::fs::write(&executable,
-        "#!/bin/sh\nprintf '%s\n' \"$MAKA_HOST_ENDPOINT\" \"$MAKA_HOST_EPOCH\" \"$$\" \"$#\"\nread status || exit 1\nexit \"$status\"\n",
+        "#!/bin/sh\nprintf '%s\n' \"$MAKA_HOST_ROOT\" \"$MAKA_HOST_ENDPOINT\" \"$MAKA_HOST_EPOCH\" \"$$\" \"$#\"\nread status || exit 1\nexit \"$status\"\n",
     ).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     executable
 }
 
 async fn started(executable: &Path, root: &Path) -> (Child, PathBuf, uuid::Uuid, i32) {
+    // A Root relative to the launcher's directory reaches the shell absolute.
     let mut child = Command::new(executable)
         .args(["desktop", "--root"])
-        .arg(root)
+        .arg(root.file_name().unwrap())
         .current_dir(root.parent().unwrap())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -67,6 +68,12 @@ async fn started(executable: &Path, root: &Path) -> (Child, PathBuf, uuid::Uuid,
         .spawn()
         .unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let shell_root = PathBuf::from(lines.next_line().await.unwrap().expect("shell Root"));
+    assert!(shell_root.is_absolute(), "{}", shell_root.display());
+    assert_eq!(
+        std::fs::canonicalize(&shell_root).unwrap(),
+        std::fs::canonicalize(root).unwrap()
+    );
     let endpoint = PathBuf::from(lines.next_line().await.unwrap().expect("shell endpoint"));
     let epoch = lines
         .next_line()

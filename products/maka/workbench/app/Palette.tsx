@@ -35,6 +35,7 @@ import {
   controlDisabledStyle,
   secondaryTextStyle,
 } from './ui';
+import { dialogTop } from './chrome';
 
 export type PaletteEntry = {
   id: string;
@@ -85,6 +86,7 @@ export function Palette(props: {
         alignItems: 'center',
         backgroundColor: '#00000099',
         padding: 16,
+        paddingTop: dialogTop(16),
       }}
     >
       <View
@@ -125,6 +127,12 @@ export function Palette(props: {
               keymap.bind('up', () => move(-1), { when: 'always', repeat: true, within: node }),
               keymap.bind('down', () => move(1), { when: 'always', repeat: true, within: node }),
               keymap.bind('enter', activate, { when: 'always', within: node }),
+              // One Escape closes the palette, as its close button says; a
+              // text field alone would only lose the focus.
+              keymap.bind('escape', () => props.close(props.instance), {
+                when: 'always',
+                within: node,
+              }),
             ];
             removeSearchKeys = () => unbind.forEach((remove) => remove());
           }}

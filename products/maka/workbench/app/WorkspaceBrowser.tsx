@@ -54,6 +54,7 @@ import {
   type SessionActionTarget,
 } from './sessionLifecycle';
 import { sessionStatusCaption } from './sessionStatus';
+import { controlsLeft, ownTitleBar, TITLE_BAR_HEIGHT, windowDrag } from './chrome';
 
 export type WorkspaceBrowserProps = {
   browsing: Browsing;
@@ -73,6 +74,7 @@ export type WorkspaceBrowserProps = {
 };
 
 export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
+  const titleBarRow = () => ownTitleBar && !!props.docked;
   const browser = props.browsing;
   const choosingWorkspace = signal(false);
   const selectedRow = signal<string | null>(null);
@@ -293,10 +295,26 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         removeEscape();
         removeEscape = keymap.bind('escape', escape, { when: 'always', within: node });
       }}
-      style={{ flex: 1, minHeight: 0, backgroundColor: C.surface, padding: 12, gap: 8 }}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        backgroundColor: C.surface,
+        padding: 12,
+        // Docked, its top row is the window's title bar there.
+        paddingTop: titleBarRow() ? 0 : 12,
+        gap: 8,
+      }}
     >
       <View
-        style={{ height: compact() ? 32 : 40, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+        desktop={titleBarRow() ? windowDrag : undefined}
+        style={{
+          height: titleBarRow() ? TITLE_BAR_HEIGHT : compact() ? 32 : 40,
+          // 8 points past the window controls, inside the browser's 12.
+          paddingLeft: titleBarRow() ? Math.max(0, controlsLeft(true) - 4) : 0,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+        }}
       >
         <Image src={logo} resizeMode="contain" style={{ width: 24, height: 24 }} />
         <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600', flex: 1 }}>

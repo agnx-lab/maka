@@ -21,11 +21,7 @@
 
 [English](README.md)
 
-`maka-desktop-shell` 通过保留的 GPUI shell 和 QuickJS 运行时执行 [app](app/)。原生模块提供公共 Host 客户端、选定文件和系统语言；app 负责自己的视图与命令。
-
-会话位于末尾时跟随新输出。向上滚动会暂停跟随；回到末尾或发送一条被 Host 受理的消息后恢复。发送被拒绝时保留阅读位置。
-
-语言与当前连接的 Host 助手设置共用。app 在启动和每次打开设置时读取语言，更改经 Host 确认并读回设置后才应用。自动语言跟随 Host 的系统，未保存的语言偏好则使用 Host 配置的默认值。已受理的任务保留受理时的语言。冲突和保存失败会显示错误，不自动重试变更。外观仍保存在 app 本地。
+`maka-desktop-shell` 通过 NSH 的 GPUI 后端，在独立窗口中运行[工作台](../workbench/README.zh-CN.md)，支持 macOS、Windows 和 Linux。它运行的就是[终端 shell](../terminal-shell/README.zh-CN.md) 所运行的应用，编译在可执行文件内。在图形桌面上，工作台的顶部栏即窗口的标题栏，应用菜单提供工作台的命令及其快捷键。
 
 在仓库根目录构建：
 
@@ -34,24 +30,14 @@ just build
 # 或：just build --release
 ```
 
-构建生成 CLI、shell 及可执行文件旁的完整 app。macOS 上改为在 `maka` 旁生成 `Maka.app`：shell 位于 `Contents/MacOS`，app 位于 `Contents/Resources/app`，另有 `Info.plist` 和图标（取自 `assets/logo.png`），系统因此把窗口显示为 Maka 并使用其图标。`maka desktop` 启动的是 bundle 内的 shell，所以只用 Cargo 重新构建 shell 之后，要再运行一次 `just build` 来更新它。`--target TRIPLE` 可选择其他 Rust 目标。原生包包含 `bin/maka`、`bin/maka-desktop-shell` 和 `bin/app/`，Windows 可执行文件带后缀并附带 service helper；macOS 原生包包含 `bin/maka` 和 `bin/Maka.app/`。打包的 shell 无参数启动时会从可执行文件旁（macOS 上为所在 bundle 内）找到 app，不依赖工作目录。
+构建生成 CLI 和 shell。macOS 上在 `maka` 旁生成 `Maka.app`：shell 位于 `Contents/MacOS`，另有 `Info.plist` 和图标（取自 `assets/logo.png`），系统因此把窗口显示为 Maka 并使用其图标。`maka desktop` 启动的是 bundle 内的 shell，所以只用 Cargo 重新构建 shell 之后，要再运行一次 `just build` 来更新它。`--target TRIPLE` 可选择其他 Rust 目标。原生包包含 `bin/maka` 和 `bin/maka-desktop-shell`，Windows 可执行文件带后缀并附带 service helper；macOS 原生包包含 `bin/maka` 和 `bin/Maka.app/`。
 
-通过持有原始 Host 客户端的启动器运行：
+通过启动器启动：
 
 ```sh
 /absolute/path/to/maka desktop --root /absolute/path/to/business-host
 ```
 
-`--root` 必填，指向实际业务 Host Root。现有本地连接路径会将缺失的 Root 初始化为标准只读业务 Host，或重开已保存的部署。启动器根据已连接 Host 校验 discovery 的 endpoint、source 和 epoch，然后向子进程传入 `MAKA_HOST_ENDPOINT` 与 `MAKA_HOST_EPOCH`。shell 运行期间，启动器保留自己的 Host 客户端；子进程退出或启动失败时结清该客户端。退出会请求空闲关闭，其他已连接客户端仍会保留 Host。取消只停止本次启动器创建的子进程。
+`--root` 为必填项，指定实际的业务 Host Root。启动器把缺失的 Root 初始化为标准只读业务 Host，或重开其已保存的部署；随后对照已连接 Host 的端点、来源和 epoch 校验发现信息，并把 `MAKA_HOST_ROOT`、`MAKA_HOST_ENDPOINT` 和 `MAKA_HOST_EPOCH` 传给 shell。shell 以与终端 shell 相同的方式接入该 Host，并把客户端数据保存在该 Root 下。
 
-直接开发时，先保持一个已有 Host 可用，并提供其 endpoint，以及已知时的 epoch。shell 保留原有命令：
-
-```sh
-export MAKA_HOST_ENDPOINT=/path/to/host.sock
-export MAKA_HOST_EPOCH=UUID
-target/debug/maka-desktop-shell run --dir products/maka/desktop-shell/app
-target/debug/maka-desktop-shell dev --dir products/maka/desktop-shell/app
-target/debug/maka-desktop-shell check --dir products/maka/desktop-shell/app
-```
-
-`dev` 重新加载源码 app，使用 Host 的操作仍需相同连接环境。`check` 加载应用描述并报告诊断。`--help` 与 `--version` 不打开窗口，也不启动 Host。
+关闭窗口、应用菜单的退出项和退出快捷键都会关闭窗口；shell 随后与 Host 断开并退出。启动器同样只断开连接，因此 Host 会完成已接受的工作，在没有客户端后停止。取消启动器只会停止它启动的 shell。

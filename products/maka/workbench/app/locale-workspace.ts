@@ -258,11 +258,7 @@ export const workspaceMessages = {
     '開啟{area}差異：{path}',
   ],
   Parent: msg_directoryParent,
-  'Parent folder · Alt+Up': [
-    'Parent folder · Alt+Up',
-    '上级文件夹 · Alt+Up',
-    '上一層資料夾 · Alt+Up',
-  ],
+  'Parent folder': ['Parent folder', '上级文件夹', '上一層資料夾'],
   'Parent workspace folder': ['Parent workspace folder', '上级工作区文件夹', '上一層工作區資料夾'],
   'Permanently delete this conversation and its history. Workspace files and independent forks are kept.':
     [
@@ -485,11 +481,6 @@ export const workspaceMessages = {
   Untracked: ['Untracked', '未跟踪', '未追蹤'],
   'Updating conversation…': ['Updating conversation…', '正在更新对话…', '正在更新對話…'],
   'Use this folder': ['Use this folder', '使用此文件夹', '使用此資料夾'],
-  'Use this folder · Ctrl+Enter': [
-    'Use this folder · Ctrl+Enter',
-    '使用此文件夹 · Ctrl+Enter',
-    '使用此資料夾 · Ctrl+Enter',
-  ],
   'Use this workspace folder': [
     'Use this workspace folder',
     '使用此工作区文件夹',

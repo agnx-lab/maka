@@ -56,6 +56,7 @@ import {
   controlStyle,
   inputBorderRadius,
   inputTextStyle,
+  shortcut,
 } from './ui';
 import { ChoiceIndicator } from './ChoiceIndicator';
 import { Icon } from './Icon';
@@ -983,7 +984,7 @@ export function InteractionComposer({
             label={tr('Refresh status')}
             icon="refresh"
             iconOnly={windowSize().width < 720}
-            tooltip={tr('Refresh status · Ctrl+R')}
+            tooltip={shortcut(tr('Refresh status'), 'mod+r')}
             disabled={loading() || busy()}
             onPress={inputAction(refreshRendered, { sessionId, requestId })}
           />
@@ -1038,10 +1039,10 @@ export function InteractionComposer({
                 primary
                 tooltip={
                   request()?.kind === 'form'
-                    ? tr('Submit form · Ctrl+Enter')
+                    ? shortcut(tr('Submit form'), 'mod+enter')
                     : request()?.kind === 'question'
-                      ? tr('Submit answers · Ctrl+Enter')
-                      : tr('Allow · Ctrl+Enter')
+                      ? shortcut(tr('Submit answers'), 'mod+enter')
+                      : shortcut(tr('Allow'), 'mod+enter')
                 }
                 label={
                   busy()

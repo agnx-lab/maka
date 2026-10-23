@@ -17,10 +17,16 @@
  * under the License.
  */
 
-// Unified diff text from `gitDiff`, as the rows the Changes tool draws.
+// Unified diff text from `gitDiff`, as the rows the Changes view draws.
+
+export type PatchRow =
+  | { kind: 'meta' | 'hunk'; text: string }
+  | { kind: 'context'; text: string; old: number; new: number }
+  | { kind: 'added'; text: string; old: null; new: number }
+  | { kind: 'removed'; text: string; old: number; new: null };
 
 /** `text` with each tab replaced by the spaces to the next multiple of 4 columns. */
-function expandTabs(value) {
+function expandTabs(value: string): string {
   if (!value.includes('\t')) return value;
   let out = '';
   let column = 0;
@@ -50,12 +56,11 @@ const DROPPED = /^(?:diff --git |index |--- |\+\+\+ )/;
  * hunk the header's counts decide what a line is, not its first characters:
  * a removed line `-- a` arrives as `--- a`. Tabs are expanded to 4 columns.
  * Pure, with no imports, so tests run it under Node
- * (scripts/rust/desktop-patch.test.mjs).
- * @param {string} patch
+ * (scripts/rust/workbench-patch.test.mjs).
  */
-export function parsePatch(patch) {
-  const rows = [];
-  const meta = [];
+export function parsePatch(patch: string): PatchRow[] {
+  const rows: PatchRow[] = [];
+  const meta: string[] = [];
   const flush = () => {
     if (meta.length > 0) rows.push({ kind: 'meta', text: meta.join(' · ') });
     meta.length = 0;

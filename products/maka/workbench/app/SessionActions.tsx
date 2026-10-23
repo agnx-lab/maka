@@ -40,6 +40,7 @@ import {
   inputBorderRadius,
 } from './ui';
 import { Icon } from './Icon';
+import { dialogTop } from './chrome';
 
 type Page = 'actions' | 'rename' | 'fork' | 'remove';
 export function SessionActions(props: {
@@ -266,6 +267,7 @@ export function SessionActions(props: {
             justifyContent: 'center',
             alignItems: 'center',
             padding: 16,
+            paddingTop: dialogTop(16),
             backgroundColor: '#00000099',
           }}
         >

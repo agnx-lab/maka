@@ -150,11 +150,6 @@ export const settingsMessages = {
     '选择模型和推理强度',
     '選擇模型和推理強度',
   ],
-  'Choose model and effort · Ctrl+G': [
-    'Choose model and effort · Ctrl+G',
-    '选择模型和推理强度 · Ctrl+G',
-    '選擇模型和推理強度 · Ctrl+G',
-  ],
   'Choose plugin setting {value}': [
     'Choose plugin setting {value}',
     '选择插件设置 {value}',

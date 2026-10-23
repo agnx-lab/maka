@@ -42,6 +42,7 @@ import { createBrowsing } from './browsing';
 import type { BrowserWorkspace } from './browsing';
 import { Workbench, canDockBrowser } from './Workbench';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
+import { applicationMenu, dialogTop } from './chrome';
 import { performSessionAction, type SessionAction } from './sessionLifecycle';
 
 type Overlay = {
@@ -383,14 +384,14 @@ function App() {
       id: 'sessions',
       title: tr('Sessions'),
       detail: tr('Resume a conversation'),
-      hint: 'Ctrl+O',
+      hint: keymap.label('mod+o'),
       run: inputAction(commandSessions, context),
     },
     {
       id: 'new',
       title: tr('New conversation'),
       detail: tr('A fresh start in your workspace'),
-      hint: 'Ctrl+N',
+      hint: keymap.label('mod+n'),
       run: inputAction(commandNew, context),
     },
     {
@@ -403,7 +404,7 @@ function App() {
       id: 'models',
       title: tr('Models'),
       detail: tr('Choose the model for this conversation'),
-      hint: 'Ctrl+G',
+      hint: keymap.label('mod+g'),
       run: inputAction(commandModels, context),
     },
     {
@@ -426,6 +427,7 @@ function App() {
       id: 'latest',
       title: tr('Jump to latest'),
       detail: tr('Return to the newest messages'),
+      hint: keymap.label('mod+l'),
       run: inputAction(commandLatest, {
         instance: context.instance,
         sessionId: context.sessionId,
@@ -436,14 +438,14 @@ function App() {
       id: 'history-focus',
       title: tr('Focus conversation'),
       detail: tr('Scroll the whole conversation'),
-      hint: 'Alt+↑',
+      hint: keymap.label('alt+up'),
       run: inputAction(commandHistory, context),
     },
     {
       id: 'activity-focus',
       title: tr('Focus activity'),
       detail: tr('Read this turn’s independent activity panel'),
-      hint: 'Alt+↓',
+      hint: keymap.label('alt+down'),
       run: inputAction(commandActivity, {
         instance: context.instance,
         sessionId: context.sessionId,
@@ -466,13 +468,10 @@ function App() {
   keymap.bind('mod+o', () => open({ kind: 'sessions', sessionId: selected() }), { when: 'always' });
   keymap.bind('mod+g', () => open({ kind: 'models', sessionId: selected() }), { when: 'always' });
   keymap.bind('mod+n', () => newConversation(selected()), { when: 'always' });
-  keymap.bind(
-    'mod+l',
-    () => {
-      if (handle()) handle()!.jumpLatest(handle()!.activeTurn());
-    },
-    { when: 'always' },
-  );
+  const jumpLatest = () => {
+    if (handle()) handle()!.jumpLatest(handle()!.activeTurn());
+  };
+  keymap.bind('mod+l', jumpLatest, { when: 'always' });
   keymap.bind('alt+up', () => handle()?.focusHistory(), { when: 'always' });
   keymap.bind(
     'alt+down',
@@ -481,6 +480,16 @@ function App() {
     },
     { when: 'always' },
   );
+  // The bindings above take the same keys first; the menu shows and offers them.
+  applicationMenu({
+    newConversation: () => newConversation(selected()),
+    chooseWorkspace: () => open({ kind: 'workspaces', sessionId: selected() }),
+    sessions: () => open({ kind: 'sessions', sessionId: selected() }),
+    commands: () => open({ kind: 'commands', sessionId: selected() }),
+    models: () => open({ kind: 'models', sessionId: selected() }),
+    latest: jumpLatest,
+    settings: () => open({ kind: 'settings', sessionId: selected() }),
+  });
   const recoverControls = async () => {
     if (recovering()) return;
     recovering.set(true);
@@ -818,6 +827,7 @@ function App() {
                   justifyContent: 'center',
                   alignItems: 'center',
                   padding: 16,
+                  paddingTop: dialogTop(16),
                   backgroundColor: '#00000099',
                 }}
               >

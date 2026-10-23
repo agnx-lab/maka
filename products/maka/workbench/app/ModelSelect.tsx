@@ -52,6 +52,7 @@ import {
   controlHoverStyle,
   controlFocusStyle,
   controlDisabledStyle,
+  shortcut,
 } from './ui';
 
 type Pane = 'root' | 'models' | 'effort';
@@ -121,7 +122,7 @@ export function ModelSelect(props: {
       trigger={
         <Button
           accessibilityLabel={tr('Choose model and effort')}
-          tooltip={`${label()} · ${tr('Choose model and effort · Ctrl+G')}`}
+          tooltip={`${label()} · ${shortcut(tr('Choose model and effort'), 'mod+g')}`}
           onPress={inputAction(props.toggle, {
             sessionId: owner.sessionId,
             instance: props.instance(),
@@ -532,6 +533,7 @@ function ModelMenu(props: {
               keymap.bind('up', () => move(-1), { when: 'always', repeat: true, within: node }),
               keymap.bind('down', () => move(1), { when: 'always', repeat: true, within: node }),
               keymap.bind('enter', activate, { when: 'always', within: node }),
+              keymap.bind('escape', back, { when: 'always', within: node }),
             ];
             removeSearchKeys = () => unbind.forEach((remove) => remove());
           }}

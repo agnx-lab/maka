@@ -52,10 +52,6 @@ fn terminal_fixture() {
         "cargo:rerun-if-changed={}",
         source.join("../workbench/app").display()
     );
-    println!(
-        "cargo:rerun-if-changed={}",
-        source.join("../desktop-shell/app/patch.js").display()
-    );
     let mut host = nsh_core::ui::Registry::ui_set("maka/host");
     host.native_values(&["host", "AttachmentPicker", "TerminalGrid"]);
     let mut markdown = nsh_core::ui::Registry::ui_set("maka/markdown");

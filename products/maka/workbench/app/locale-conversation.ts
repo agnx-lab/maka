@@ -97,7 +97,6 @@ export const conversationMessages = {
     '仅允许以下路径和网络目标，授权范围：',
     '僅允許以下路徑和網路目標，授權範圍：',
   ],
-  'Allow · Ctrl+Enter': ['Allow · Ctrl+Enter', '允许 · Ctrl+Enter', '允許 · Ctrl+Enter'],
   'An action is being confirmed. Try again in a moment.': [
     'An action is being confirmed. Try again in a moment.',
     '正在确认操作，请稍后重试。',
@@ -147,7 +146,6 @@ export const conversationMessages = {
     '僅允許本次原始呼叫，不授權後續呼叫。',
   ],
   'Attach files': ['Attach files', '添加附件', '新增附件'],
-  'Attach files · Ctrl+U': ['Attach files · Ctrl+U', '添加附件 · Ctrl+U', '新增附件 · Ctrl+U'],
   'Attachment state needs attention. Your draft is kept.': [
     'Attachment state needs attention. Your draft is kept.',
     '附件状态需要处理，草稿已保留。',
@@ -161,11 +159,6 @@ export const conversationMessages = {
   'Browse current changes': ['Browse current changes', '浏览当前更改', '瀏覽目前變更'],
   'Browse files': ['Browse files', '浏览文件', '瀏覽檔案'],
   'Browse sessions': ['Browse sessions', '浏览对话', '瀏覽對話'],
-  'Browse sessions · Ctrl+O': [
-    'Browse sessions · Ctrl+O',
-    '浏览对话 · Ctrl+O',
-    '瀏覽對話 · Ctrl+O',
-  ],
   'Browse workspace files': ['Browse workspace files', '浏览工作区文件', '瀏覽工作區檔案'],
   'Browse workspace files and current changes': [
     'Browse workspace files and current changes',
@@ -264,7 +257,6 @@ export const conversationMessages = {
   ],
   'Code copied': ['Code copied', '代码已复制', '程式碼已複製'],
   Commands: msg_paletteTitle,
-  'Commands · Ctrl+P': ['Commands · Ctrl+P', '命令 · Ctrl+P', '命令 · Ctrl+P'],
   'Complete original arguments loaded.': [
     'Complete original arguments loaded.',
     '已加载完整原始参数。',
@@ -711,11 +703,6 @@ export const conversationMessages = {
     '傳送前請先恢復原上傳回執。',
   ],
   'Refresh status': ['Refresh status', '刷新状态', '重新整理狀態'],
-  'Refresh status · Ctrl+R': [
-    'Refresh status · Ctrl+R',
-    '刷新状态 · Ctrl+R',
-    '重新整理狀態 · Ctrl+R',
-  ],
   'Refresh terminals': ['Refresh terminals', '刷新终端', '重新整理終端'],
   'Refresh workspace files': ['Refresh workspace files', '刷新工作区文件', '重新整理工作區檔案'],
   Rejected: ['Rejected', '已拒绝', '已拒絕'],
@@ -806,11 +793,6 @@ export const conversationMessages = {
     '捲動整個對話',
   ],
   'Search commands': ['Search commands', '搜索命令', '搜尋命令'],
-  'Search commands · Ctrl+P': [
-    'Search commands · Ctrl+P',
-    '搜索命令 · Ctrl+P',
-    '搜尋命令 · Ctrl+P',
-  ],
   'Search commands…': ['Search commands…', '搜索命令…', '搜尋命令…'],
   'Search files': ['Search files', '搜索文件', '搜尋檔案'],
   'Search notice': ['Search notice', '搜索提示', '搜尋提示'],
@@ -877,17 +859,7 @@ export const conversationMessages = {
   'Stop response · Esc': ['Stop response · Esc', '停止回复 · Esc', '停止回覆 · Esc'],
   Stopped: msg_graphStatus_stopped,
   'Submit answers': msg_questionSubmit,
-  'Submit answers · Ctrl+Enter': [
-    'Submit answers · Ctrl+Enter',
-    '提交答案 · Ctrl+Enter',
-    '提交答案 · Ctrl+Enter',
-  ],
   'Submit form': msg_formSubmit,
-  'Submit form · Ctrl+Enter': [
-    'Submit form · Ctrl+Enter',
-    '提交表单 · Ctrl+Enter',
-    '提交表單 · Ctrl+Enter',
-  ],
   'Symbolic link': ['Symbolic link', '符号链接', '符號連結'],
   'Terminal result is unknown. Recover the original action before trying again.': [
     'Terminal result is unknown. Recover the original action before trying again.',

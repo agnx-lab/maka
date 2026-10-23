@@ -21,9 +21,18 @@ import { tr } from './locale';
 import { Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
+import { keymap } from 'nsh/keymap';
 import { platform, windowSize } from 'nsh/device';
 import { Icon } from './Icon';
 import { sessionStatusCaption } from './sessionStatus';
+import {
+  controlsLeft,
+  controlsRight,
+  docked,
+  ownTitleBar,
+  TITLE_BAR_HEIGHT,
+  windowDrag,
+} from './chrome';
 
 export const C = {
   background: '#161719',
@@ -52,6 +61,9 @@ export const codeTextStyle = {
 // Rounded Input clipping rasterizes the editor on a cell surface.
 export const inputBorderRadius = platform.isTerminal ? 0 : 8;
 export const compact = () => windowSize().height < 480;
+/** A control's name and its shortcut, in the keys of the platform the app runs on. */
+export const shortcut = (label: string, keystroke: string) =>
+  `${label} · ${keymap.label(keystroke)}`;
 export const controlStyle = {
   minHeight: 32,
   paddingHorizontal: 12,
@@ -85,11 +97,19 @@ export function Header(props: {
   };
   return (
     <View
+      desktop={windowDrag}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        height: !platform.isTerminal && !props.title && !props.status ? 32 : compact() ? 32 : 48,
+        paddingLeft: 16 + controlsLeft(!docked.browser()),
+        paddingRight: 16 + controlsRight(!docked.preview()),
+        height: ownTitleBar
+          ? TITLE_BAR_HEIGHT
+          : !platform.isTerminal && !props.title && !props.status
+            ? 32
+            : compact()
+              ? 32
+              : 48,
         gap: 8,
         borderBottomWidth: !platform.isTerminal && !props.title && !props.status ? 0 : 1,
         borderBottomColor: C.line,
@@ -98,7 +118,7 @@ export function Header(props: {
       <Button
         onPress={props.commands}
         accessibilityLabel={tr('Open commands')}
-        tooltip={tr('Search commands · Ctrl+P')}
+        tooltip={shortcut(tr('Search commands'), 'mod+p')}
         style={{
           ...controlStyle,
           ...(platform.isTerminal
@@ -112,7 +132,7 @@ export function Header(props: {
         <If when={platform.isTerminal} else={<Icon name="search" color={C.secondary} />}>
           <View pointerEvents="none" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ color: C.secondary, fontSize: 13 }}>{tr('Commands')}</Text>
-            <Text style={{ color: C.muted, fontSize: 11 }}>Ctrl+P</Text>
+            <Text style={{ color: C.muted, fontSize: 11 }}>{keymap.label('mod+p')}</Text>
           </View>
         </If>
       </Button>
@@ -120,7 +140,7 @@ export function Header(props: {
         <Button
           onPress={props.browse}
           accessibilityLabel={tr('Browse sessions')}
-          tooltip={tr('Browse sessions · Ctrl+O')}
+          tooltip={shortcut(tr('Browse sessions'), 'mod+o')}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}

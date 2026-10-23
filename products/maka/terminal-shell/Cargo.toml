@@ -27,10 +27,8 @@ publish.workspace = true
 [dependencies]
 base64 = "0.22.1"
 clap.workspace = true
-maka-app-client.workspace = true
 maka-event-log.workspace = true
 maka-host-runtime.workspace = true
-maka-plugin-core.workspace = true
 maka-workbench.workspace = true
 nsh-core.workspace = true
 nsh-engine.workspace = true

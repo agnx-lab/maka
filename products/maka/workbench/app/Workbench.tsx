@@ -23,6 +23,7 @@ import { windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
 import { Dialog } from 'nsh/base';
 import { C } from './ui';
+import { dialogTop, docked } from './chrome';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 import { ResourcePane } from './ResourcePane';
 import { ImageViewer } from './ImageViewer';
@@ -91,6 +92,10 @@ export function Workbench(props: {
     browser();
     preview();
     drag = null;
+  });
+  effect(() => {
+    docked.browser.set(browser());
+    docked.preview.set(preview());
   });
   const resize = (delta: number) => preferredWidth.set(clamp(width() + delta * CELL));
   const previewDialog = signal(false);
@@ -195,7 +200,7 @@ export function Workbench(props: {
             sessionId: props.resources.sessionId()!,
             instance: props.resources.instance(),
           })}
-          style={{ flex: 1, padding: 8, backgroundColor: '#000000cc' }}
+          style={{ flex: 1, padding: 8, paddingTop: dialogTop(8), backgroundColor: '#000000cc' }}
         >
           <ResourcePane resources={props.resources} docked={false} />
         </Dialog>

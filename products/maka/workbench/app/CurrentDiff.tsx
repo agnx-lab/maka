@@ -24,7 +24,7 @@ import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { host } from './host';
 import type { GitArea, GitDiff, WorkspacePath } from '../../../../packages/plugin-sdk/src/index.js';
-import { parsePatch } from '../../desktop-shell/app/patch.js';
+import { parsePatch } from './patch';
 import { Icon } from './Icon';
 import {
   C,

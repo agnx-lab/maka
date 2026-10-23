@@ -40,8 +40,10 @@ import {
   controlHoverStyle,
   controlFocusStyle,
   controlDisabledStyle,
+  shortcut,
 } from './ui';
 import { Icon } from './Icon';
+import { dialogTop } from './chrome';
 
 type Location = {
   id: number;
@@ -207,6 +209,7 @@ export function WorkspacePicker(props: {
         alignItems: 'center',
         backgroundColor: '#00000099',
         padding: 16,
+        paddingTop: dialogTop(16),
       }}
     >
       <Each of={[location().id]} key={(id: number) => id}>
@@ -261,7 +264,7 @@ export function WorkspacePicker(props: {
                     when: 'always',
                     within: node,
                   }),
-                  keymap.bind('ctrl+enter', () => chooseCurrent(read), {
+                  keymap.bind('mod+enter', () => chooseCurrent(read), {
                     when: 'always',
                     within: node,
                   }),
@@ -319,7 +322,7 @@ export function WorkspacePicker(props: {
                 <Button
                   disabled={!read.trail.length}
                   accessibilityLabel={tr('Parent workspace folder')}
-                  tooltip={tr('Parent folder · Alt+Up')}
+                  tooltip={shortcut(tr('Parent folder'), 'alt+up')}
                   onPress={inputAction(back, { location: read.id })}
                   style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                   hoverStyle={controlHoverStyle}
@@ -358,6 +361,10 @@ export function WorkspacePicker(props: {
                         within: node,
                       }),
                       keymap.bind('enter', () => activate(read), { when: 'always', within: node }),
+                      keymap.bind('escape', () => props.close(props.instance), {
+                        when: 'always',
+                        within: node,
+                      }),
                     ];
                     removeSearchKeys = () => unbind.forEach((remove) => remove());
                   }}
@@ -463,7 +470,7 @@ export function WorkspacePicker(props: {
                 <Button
                   disabled={!currentDirectory(read) || !!error()}
                   accessibilityLabel={tr('Use this workspace folder')}
-                  tooltip={tr('Use this folder · Ctrl+Enter')}
+                  tooltip={shortcut(tr('Use this folder'), 'mod+enter')}
                   onPress={
                     currentDirectory(read)
                       ? inputAction(choose, {

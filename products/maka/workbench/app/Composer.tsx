@@ -32,7 +32,7 @@ import { QueueDock, type QueueSession } from './QueueDock';
 import { SessionPermissionsSelect } from './SessionPermissionsSelect';
 import type { SessionPermissions } from './sessionPermissions';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
-import { C, bodyTextStyle, compact, controlStyle } from './ui';
+import { C, bodyTextStyle, compact, controlStyle, shortcut } from './ui';
 import { Icon } from './Icon';
 import logo from './assets/maka.png';
 
@@ -363,7 +363,7 @@ export function Composer(props: {
                 sessionId: props.session()?.sessionId ?? null,
               })}
               accessibilityLabel={tr('Open commands')}
-              tooltip={tr('Commands · Ctrl+P')}
+              tooltip={shortcut(tr('Commands'), 'mod+p')}
               style={{
                 width: 32,
                 height: 32,
@@ -380,7 +380,7 @@ export function Composer(props: {
             <If when={props.session() !== null}>
               <Button
                 accessibilityLabel={tr('Attach files')}
-                tooltip={tr('Attach files · Ctrl+U')}
+                tooltip={shortcut(tr('Attach files'), 'mod+u')}
                 disabled={props.session()!.attachments.restoring()}
                 onPress={inputAction(props.session()!.attachments.open, {
                   owner: props.session()!.sessionId,

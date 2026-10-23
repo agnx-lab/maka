@@ -40,6 +40,7 @@ export const commonMessages = {
   Close: msg_closeModels,
   'Close · Esc': ['Close · Esc', '关闭 · Esc', '關閉 · Esc'],
   'Connections & models': ['Connections & models', '连接与模型', '連線與模型'],
+  Edit: ['Edit', '编辑', '編輯'],
   Failed: msg_graphStatus_failed,
   'Loading…': ['Loading…', '正在加载…', '正在載入…'],
   Models: msg_models,
@@ -52,4 +53,6 @@ export const commonMessages = {
   Terminal: ['Terminal', '终端', '終端機'],
   Unavailable: msg_thinkingUnavailable,
   'Untitled conversation': ['Untitled conversation', '未命名对话', '未命名對話'],
+  View: ['View', '显示', '顯示'],
+  Window: ['Window', '窗口', '視窗'],
 } as const satisfies Catalog;

@@ -49,7 +49,9 @@ impl Args {
         let _signals = crate::signals::watch(stop.clone())?;
         let mut client = crate::deployment::connect_local(self.root.clone()).await?;
         let result = self.launch(&client, &stop).await;
-        let cleanup = client.quit().await;
+        // Detach, as the terminal does: the Host finishes the work it accepted
+        // and then stops once no client is left.
+        let cleanup = client.close().await;
         match (result, cleanup) {
             (Ok(code), Ok(())) => {
                 #[cfg(windows)]
@@ -76,6 +78,7 @@ impl Args {
         }
         let executable = std::env::current_exe()?.with_file_name(SHELL);
         let mut child = Command::new(&executable)
+            .env("MAKA_HOST_ROOT", std::path::absolute(&self.root)?)
             .env("MAKA_HOST_ENDPOINT", &registered.endpoint)
             .env("MAKA_HOST_EPOCH", registered.host_epoch.to_string())
             .kill_on_drop(true)
