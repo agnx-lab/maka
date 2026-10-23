@@ -17,11 +17,11 @@
  * under the License.
  */
 
-//! Print the terminal's native Markdown module declarations for TypeScript.
+//! Print the workbench's native Markdown module declarations for TypeScript.
 
 fn main() {
     print!(
         "{}",
-        nsh_core::ui::declarations(&maka_terminal_shell::markdown::registry(), &[])
+        nsh_core::ui::declarations(&maka_workbench::markdown::registry(), &[])
     );
 }
