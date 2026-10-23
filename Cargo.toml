@@ -16,7 +16,7 @@
 # under the License.
 
 [workspace]
-exclude = ["third-party/gpui-fast", "third-party/async-io", "third-party/gix-index", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto", "third-party/termina"]
+exclude = ["third-party/nsh", "third-party/gpui-fast", "third-party/async-io", "third-party/gix-index", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto", "third-party/termina"]
 default-members = ["products/maka/cli"]
 members = [
     "plugins/agent/facts",
@@ -92,13 +92,13 @@ publish = false
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }
-nsh-core = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1" }
-nsh-engine = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1" }
-nsh-platform-tui = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1" }
-nsh-platform-gpui = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1", default-features = false, features = ["js"] }
-nsh-gpui-terminal = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1" }
-nsh-bundler = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1", default-features = false }
-nsh-base = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1" }
+nsh-core = { path = "third-party/nsh/crates/nsh-core" }
+nsh-engine = { path = "third-party/nsh/crates/nsh-engine" }
+nsh-platform-tui = { path = "third-party/nsh/crates/nsh-platform-tui" }
+nsh-platform-gpui = { path = "third-party/nsh/crates/gpui/nsh-platform-gpui", default-features = false, features = ["js"] }
+nsh-gpui-terminal = { path = "third-party/nsh/crates/gpui/nsh-gpui-terminal" }
+nsh-bundler = { path = "third-party/nsh/crates/nsh-bundler", default-features = false }
+nsh-base = { path = "third-party/nsh/crates/nsh-base" }
 maka-agent-facts = { path = "plugins/agent/facts" }
 maka-packages = { path = "platform/packages" }
 maka-agent-ports = { path = "plugins/agent/ports" }
@@ -216,8 +216,8 @@ gpui-fast-macos = { path = "third-party/gpui-fast/crates/gpui_macos" }
 gpui-fast-windows = { path = "third-party/gpui-fast/crates/gpui_windows" }
 gpui-fast-linux = { path = "third-party/gpui-fast/crates/gpui_linux" }
 # The terminal backend owns the offscreen renderer and image codec.
-gpui-fast-wgpu = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1" }
-icy_sixel = { git = "https://github.com/M4n5ter/nsh", rev = "f15da62cac1e1064d289fb7aa1f437db20d871d1" }
+gpui-fast-wgpu = { path = "third-party/nsh/third-party/gpui-wgpu" }
+icy_sixel = { path = "third-party/nsh/third-party/icy_sixel" }
 gpui-pre-scheduler = { path = "third-party/gpui-fast/crates/scheduler" }
 
 [patch."https://github.com/longbridge/gpui-kit"]

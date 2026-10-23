@@ -21,6 +21,8 @@
 
 An experimental Agent workbench built with NSH, supporting mouse and keyboard interaction and connecting to or starting a Maka Host Root.
 
+NSH lives in [`third-party/nsh`](../../../third-party/nsh/SOURCE.md). Cargo builds the runtime, TSX bundler, `nsh-base` components and UI declaration generator from that source; a separate NSH checkout is unnecessary. Make related NSH and Maka changes in the same tree and validate them together with the terminal's [real Host tests](tests/real_host.rs): `cargo test -p maka-cli --no-default-features --test terminal_real_host`.
+
 ## Start
 
 From the workspace root, build the product bundle and start the terminal interface in the Maka CLI:
@@ -81,6 +83,8 @@ Work uses one presentation: live activity stays in its own scrollable panel, wit
 Grouped activity has independent native scrolling, capped at half the reading viewport. A newly opened live group starts at the bottom, while a closed group starts at the top. An already open reader stays in place as the group closes. Scrolling up keeps your source reader in place when later replies arrive. Thinking disclosure and Source choices remain attached to their original rows across updates. Tool details load on demand from the Host; a layout change can reload their original source.
 
 Assistant responses format headings, emphasis, lists, quotes, tables and code. Each code block has its own **Copy code** action. **Show message source** switches to the exact selectable text; **Show formatted message** restores formatting. Partial history stays literal until its opening is loaded.
+
+Markdown images render inline from the conversation's workspace or an HTTP(S) URL. Workspace images use the existing Host file reader; network images load on the client through NSH's native image loader and cache. The application grants HTTP(S) GET, including the same permission check on each redirect. Activate an unlinked image to view it full screen, then close or press Escape to return to that image without changing the draft; linked images keep their original link target. Loading and failures have explicit captions, with retry available on an unlinked failed image. Source mode and message copy preserve the original Markdown.
 
 **Todo** sits above the composer and displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
 

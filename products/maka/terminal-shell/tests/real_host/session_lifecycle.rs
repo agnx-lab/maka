@@ -50,18 +50,109 @@ async fn actions(view: &mut AppView, title: &str) {
     wait_enabled_node(view, "Fork conversation").await;
 }
 
+fn assert_sandbox_selection(view: &AppView, access: &str, ask: bool) {
+    let nodes = view.accessibility_snapshot();
+    for (label, selected) in [
+        ("Read only", access == "read_only"),
+        ("Workspace write", access == "workspace_write"),
+        ("Full access · Sandbox off", access == "danger_full_access"),
+        ("Ask for approval", ask),
+        ("Do not ask for approval", !ask),
+    ] {
+        let choice = nodes
+            .iter()
+            .find(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == label)
+            .unwrap();
+        assert!(
+            !choice.state.disabled,
+            "{label} must remain usable during the real run"
+        );
+        assert_eq!(
+            choice.state.selected, selected,
+            "the Host policy must select {label}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_drafts() {
     tokio::time::timeout(Duration::from_secs(90), async {
-        let mut fixture = Fixture::open().await;
-        fixture.seed_history(1).await;
+        let mut fixture = Fixture::files("write").await;
         let client = fixture.client().await;
+        let initial = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        assert_eq!(initial["session"]["permissions"], json!({"access":"workspace_write","requestPermissions":true}));
+        assert_eq!(initial["session"]["boundaryRevision"], 0);
+        let started = support::mutate(&client, "send", json!({
+            "sessionId":fixture.session,"message":"History question 00","model":fixture.selection
+        })).await;
+        assert_eq!(started["kind"], "started");
+        fixture.next_request().await.tool("WorkspaceDocument", json!({
+            "path":"default-sandbox.txt","content":"DEFAULT_WORKSPACE_WRITE_ALLOWED\n"
+        })).await;
+        let mut request = fixture.next_request().await;
+        let tool_result = request.body["messages"].as_array().unwrap().iter().rev()
+            .find(|message| message["role"] == "tool").unwrap()["content"].as_str().unwrap();
+        let written: Value = serde_json::from_str(tool_result).unwrap();
+        assert_eq!(written["kind"], "completed", "the actual default policy must allow workspace writes: {written}");
+        assert_eq!(std::fs::read_to_string(fixture.directory.path().join("workspace/default-sandbox.txt")).unwrap(), "DEFAULT_WORKSPACE_WRITE_ALLOWED\n");
+        request.delta("Default workspace write completed; the original run remains active.").await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
         wait_view(&mut view, |screen| screen.contains("NSH real Agent")).await;
         tab_to_label(&mut view, "Message composer").await;
         wait_editable_composer(&mut view).await;
         view.handle_event(Event::Paste("Original draft stays with its owner".into()));
         support::wait_draft(&client, &fixture.session, "Original draft stays with its owner").await;
+
+        support::click_button(&mut view, "Sandbox and approvals").await;
+        wait_enabled_node(&mut view, "Close sandbox settings").await;
+        assert_sandbox_selection(&view, "workspace_write", true);
+        // Each axis preserves the other. The provider stream stays open so
+        // these are real active-run metadata changes, rather than idle mocks.
+        for (choice, access, ask, boundary) in [
+            ("Read only", "read_only", true, 1),
+            ("Do not ask for approval", "read_only", false, 2),
+            ("Workspace write", "workspace_write", false, 3),
+            ("Full access · Sandbox off", "danger_full_access", false, 4),
+            ("Ask for approval", "danger_full_access", true, 5),
+        ] {
+            wait_enabled_node(&mut view, choice).await;
+            support::click_button(&mut view, choice).await;
+            wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter()
+                .any(|node| node.label == choice && node.state.selected && !node.state.disabled)).await;
+            assert_sandbox_selection(&view, access, ask);
+            let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+            assert_eq!(observed["session"]["permissions"], json!({"access":access,"requestPermissions":ask}));
+            assert_eq!(observed["session"]["boundaryRevision"], boundary);
+            assert_eq!(observed["session"]["title"], initial["session"]["title"]);
+            assert_eq!(observed["session"]["labels"], initial["session"]["labels"]);
+            assert_eq!(observed["run"]["invocationId"], started["invocationId"], "sandbox choices must keep the same real run alive");
+        }
+        evidence("session-sandbox-full-access", &view.snapshot());
+        // Escape belongs to the popover while the composer's Stop shortcut is
+        // also live. Closing settings must not stop that original invocation.
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view_state(&mut view, |view, _| !view.accessibility_snapshot().iter()
+            .any(|node| node.label == "Close sandbox settings")).await;
+        assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["run"]["invocationId"], started["invocationId"]);
+        support::wait_draft(&client, &fixture.session, "Original draft stays with its owner").await;
+        drop(view);
+        bindings.close().await.unwrap();
+        let client = fixture.client().await;
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        wait_editable_composer(&mut view).await;
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Original draft stays with its owner"));
+        support::click_button(&mut view, "Sandbox and approvals").await;
+        wait_enabled_node(&mut view, "Close sandbox settings").await;
+        assert_sandbox_selection(&view, "danger_full_access", true);
+        let restored = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        assert_eq!(restored["session"]["permissions"], json!({"access":"danger_full_access","requestPermissions":true}));
+        assert_eq!(restored["session"]["boundaryRevision"], 5);
+        assert_eq!(restored["run"]["invocationId"], started["invocationId"]);
+        support::click_button(&mut view, "Close sandbox settings").await;
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        wait_view_state(&mut view, |view, _| !view.accessibility_snapshot().iter()
+            .any(|node| node.label == "Stop response")).await;
 
         // The search's keyboard action opens the highlighted original row.
         shortcut(&mut view, 'o');
@@ -173,7 +264,7 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         support::wait_draft(&client, &fork_id, "Independent fork draft").await;
         assert!(fixture.directory.path().join("workspace").is_dir(), "deleting a conversation must retain its workspace");
         assert!(client.pending_controls().await.unwrap().is_empty());
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "lifecycle actions must not replay any real model request");
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "sandbox and lifecycle actions must not replay any real model request");
         evidence("session-lifecycle-final", &view.snapshot());
         drop(view);
         bindings.close().await.unwrap();

@@ -1117,7 +1117,7 @@ async fn actual_http_runs_overlap_and_observer_loss_does_not_cancel_execution() 
         assert_eq!(metrics["contextLastKnown"], false);
         let (basis, _) = fixture.store.context_usage(&first).await.unwrap();
         let maka_event_log::context::LatestMainContext::Selected(basis) = basis else { panic!("missing accepted main request") };
-        let seconds = basis.recorded_at.duration_since(basis.requested_at.unwrap()).unwrap().as_secs_f64();
+        let seconds = basis.finished_at.unwrap().duration_since(basis.requested_at.unwrap()).unwrap().as_secs_f64();
         assert_eq!(metrics["outputTokensPerSecond"].as_f64().unwrap(), 2.0 / seconds);
         assert!(completed["run"].is_null());
         assert_eq!(completed["session"]["activity"], "idle");

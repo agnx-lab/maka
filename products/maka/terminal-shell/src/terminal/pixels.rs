@@ -30,7 +30,14 @@ pub(super) use input::Inbox;
 use nsh_engine::EngineConfig;
 pub(super) use probe::Probe;
 pub(super) use probe::{Capabilities, MouseCoordinates, Protocol};
-use std::{sync::atomic::Ordering, thread, time::Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Instant,
+};
 
 /// Uses the single input reader during negotiation. No engine has started, so
 /// automatic selection cannot create competing applications or Host clients.
@@ -245,9 +252,11 @@ pub(super) fn run(
                         {
                             return Ok(());
                         }
+                        let pending = Arc::new(AtomicBool::new(false));
                         let (commands, frames) =
-                            super::ui::spawn(config).map_err(|error| error.to_string())?;
-                        return super::drive(output, presentation, &commands, &frames);
+                            super::ui::spawn(config, pending.clone(), thread::current())
+                                .map_err(|error| error.to_string())?;
+                        return super::drive(output, presentation, &commands, &frames, &pending);
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {

@@ -79,7 +79,11 @@ const textSourceExtensions = new Set([
   '.css',
   '.csv',
   '.diff',
+  '.dockerfile',
+  '.h',
+  '.hlsl',
   '.html',
+  '.java',
   '.js',
   '.json',
   '.jsonc',
@@ -87,6 +91,7 @@ const textSourceExtensions = new Set([
   '.lock',
   '.md',
   '.mjs',
+  '.modulemap',
   '.mts',
   '.nsh',
   '.patch',
@@ -94,6 +99,8 @@ const textSourceExtensions = new Set([
   '.plist',
   '.ps1',
   '.py',
+  '.rb',
+  '.rc',
   '.rs',
   '.sbpl',
   '.sh',
@@ -105,6 +112,8 @@ const textSourceExtensions = new Set([
   '.tsv',
   '.tsx',
   '.txt',
+  '.wgsl',
+  '.xml',
   '.yaml',
   '.yml',
 ]);
@@ -116,10 +125,17 @@ const textSourceBasenames = new Set([
   '.gitattributes',
   '.gitignore',
   '.mailmap',
+  'Cargo.toml.orig',
+  'CNAME',
   'DISCLAIMER-WIP',
   'Dockerfile',
   'LICENSE',
+  'LICENSE-APACHE',
+  'LICENSE-MIT',
+  'LICENSE-MPL',
   'NOTICE',
+  'default-env',
+  'layerfs',
   'network-policy',
   'pre-commit',
 ]);
@@ -632,7 +648,7 @@ function validateNonTextInputs(candidateRoot, identity, entries) {
       const basename = entry.slice(entry.lastIndexOf('/') + 1);
       const extension = extname(basename).toLowerCase();
       if (
-        !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text) &&
+        !/[\u0000-\u0008\u000b\u000e-\u001f\u007f]/u.test(text) &&
         (textSourceExtensions.has(extension) || textSourceBasenames.has(basename))
       ) {
         continue;

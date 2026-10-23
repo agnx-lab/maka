@@ -342,7 +342,7 @@ mod tests {
             projection_current: true,
             sequence: 3,
             requested_at: None,
-            recorded_at: SystemTime::UNIX_EPOCH,
+            finished_at: Some(SystemTime::UNIX_EPOCH),
             model_id: "model".into(),
             route_identity: "route".into(),
             connection_id: Some("connection".into()),

@@ -3570,7 +3570,6 @@ zeroize_derive@1.5.0 (Apache-2.0 OR MIT); authors declared by package: The RustC
 zune-core@0.5.1 (MIT OR Apache-2.0 OR Zlib)
 zune-jpeg@0.5.15 (MIT OR Apache-2.0 OR Zlib); authors declared by package: caleb <etemesicaleb@gmail.com>
 
-git+https://github.com/M4n5ter/nsh?rev=f15da62cac1e1064d289fb7aa1f437db20d871d1#f15da62cac1e1064d289fb7aa1f437db20d871d1 :: third_party/llrt-types/LICENSE
 https://crates.io/api/v1/crates/apple-cf/0.9.3/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/apple-metal/0.8.8/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/approx/0.5.1/download :: LICENSE
@@ -3634,6 +3633,7 @@ https://crates.io/api/v1/crates/zeroize/1.9.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/zeroize_derive/1.5.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/zune-core/0.5.1/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/zune-jpeg/0.5.15/download :: LICENSE-APACHE
+https://github.com/M4n5ter/nsh#de176695240d550f2b303643b8019146c7989e7f (adapted; third-party/nsh/crates/nsh-js) :: third_party/llrt-types/LICENSE
 https://github.com/awslabs/llrt#7b95c82a9b15e7ddfb2778eca4b5a63111e74f51 (adapted; third-party/llrt-crypto) :: LICENSE
 https://raw.githubusercontent.com/awslabs/llrt/7b95c82a9b15e7ddfb2778eca4b5a63111e74f51/LICENSE
 https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE
@@ -19306,10 +19306,10 @@ gpui-fast-windows@0.1.10 (Apache-2.0)
 gpui-fast@0.1.10 (Apache-2.0); authors declared by package: Nathan Sobo <nathan@zed.dev>
 gpui-pre-scheduler@0.3.9 (Apache-2.0)
 
-git+https://github.com/M4n5ter/nsh?rev=f15da62cac1e1064d289fb7aa1f437db20d871d1#f15da62cac1e1064d289fb7aa1f437db20d871d1 :: LICENSE
 https://crates.io/api/v1/crates/gpui-fast-apple/0.1.10/download :: LICENSE
 https://crates.io/api/v1/crates/gpui-fast-macros/0.1.10/download :: LICENSE
 https://crates.io/api/v1/crates/gpui-fast-platform/0.1.10/download :: LICENSE
+https://github.com/M4n5ter/nsh#de176695240d550f2b303643b8019146c7989e7f (adapted; third-party/nsh/third-party/gpui-wgpu) :: LICENSE
 https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui) :: ../../LICENSE-APACHE
 https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui) :: LICENSE-APACHE
 https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui_linux) :: ../../LICENSE-APACHE
@@ -19531,7 +19531,7 @@ Apache License
 
 gpui-fast-wgpu@0.1.10 (Apache-2.0); authors declared by package: Longbridge
 
-git+https://github.com/M4n5ter/nsh?rev=f15da62cac1e1064d289fb7aa1f437db20d871d1#f15da62cac1e1064d289fb7aa1f437db20d871d1 :: test-assets/IBMPlexSans-license.txt
+https://github.com/M4n5ter/nsh#de176695240d550f2b303643b8019146c7989e7f (adapted; third-party/nsh/third-party/gpui-wgpu) :: test-assets/IBMPlexSans-license.txt
 
 Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
 
@@ -21760,7 +21760,7 @@ ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation a
 
 icy_sixel@0.5.1 (MIT OR Apache-2.0); authors declared by package: Mike Krüger <mkrueger@posteo.de>
 
-git+https://github.com/M4n5ter/nsh?rev=f15da62cac1e1064d289fb7aa1f437db20d871d1#f15da62cac1e1064d289fb7aa1f437db20d871d1 :: LICENSE-APACHE
+https://github.com/M4n5ter/nsh#de176695240d550f2b303643b8019146c7989e7f (adapted; third-party/nsh/third-party/icy_sixel) :: LICENSE-APACHE
 
 Apache License
                            Version 2.0, January 2004
@@ -21968,7 +21968,7 @@ Apache License
 
 icy_sixel@0.5.1 (MIT OR Apache-2.0); authors declared by package: Mike Krüger <mkrueger@posteo.de>
 
-git+https://github.com/M4n5ter/nsh?rev=f15da62cac1e1064d289fb7aa1f437db20d871d1#f15da62cac1e1064d289fb7aa1f437db20d871d1 :: LICENSE-MIT
+https://github.com/M4n5ter/nsh#de176695240d550f2b303643b8019146c7989e7f (adapted; third-party/nsh/third-party/icy_sixel) :: LICENSE-MIT
 
 MIT License
 
@@ -26865,7 +26865,7 @@ nsh-package@0.2.0 (Apache-2.0)
 nsh-platform-gpui@0.2.0 (Apache-2.0)
 nsh-platform-tui@0.2.0 (Apache-2.0)
 
-https://raw.githubusercontent.com/M4n5ter/nsh/f15da62cac1e1064d289fb7aa1f437db20d871d1/LICENSE-APACHE
+https://raw.githubusercontent.com/M4n5ter/nsh/de176695240d550f2b303643b8019146c7989e7f/LICENSE-APACHE
 
 Copyright 2026 Longbridge <https://longbridge.com>
 

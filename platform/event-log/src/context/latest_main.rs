@@ -91,7 +91,13 @@ pub(super) async fn read_selected_at(
          json_extract(r.event_json, '$.invocation') AS ri, json_extract(o.event_json, '$.invocation') AS oi,
          json_extract(o.event_json, '$.fact.input.kind') AS opening_kind,
          json_extract(r.event_json, '$.fact.purpose') AS purpose,
-         json_extract(c.event_json, '$.recorded_at') AS recorded_at,
+         (SELECT json_extract(f.event_json, '$.recorded_at') FROM runtime_events f
+           WHERE f.invocation_id=c.invocation_id AND f.kind='model_observed'
+             AND json_extract(f.event_json, '$.invocation.session_id')=?1
+             AND CAST(json_extract(f.event_json, '$.fact.step_id') AS TEXT)=json_extract(c.event_json, '$.fact.step_id')
+             AND json_extract(f.event_json, '$.fact.event.kind')='finished'
+             AND f.sequence>r.sequence AND f.sequence<c.sequence
+           ORDER BY f.sequence LIMIT 1) AS finished_at,
          json_extract(r.event_json, '$.recorded_at') AS requested_at,
          json_extract(c.event_json, '$.fact.output.usage') AS usage,
          json_extract(r.event_json, '$.fact.model_id') AS model_id,
@@ -162,14 +168,18 @@ pub(super) async fn read_selected_at(
             }
             let usage: ModelUsage =
                 serde_json::from_str(row.try_get::<&str, _>("usage").ok()?).ok()?;
-            let recorded_at: SystemTime =
-                serde_json::from_str(row.try_get::<&str, _>("recorded_at").ok()?).ok()?;
+            let finished_at: Option<SystemTime> = row
+                .try_get::<Option<&str>, _>("finished_at")
+                .ok()?
+                .map(serde_json::from_str)
+                .transpose()
+                .ok()?;
             Some((
                 purpose,
                 Some(AcceptedMainContext {
                     projection_current: row.try_get("projection_current").ok()?,
                     sequence: sequence_number(sequence).ok()?,
-                    recorded_at,
+                    finished_at,
                     requested_at: row
                         .try_get::<Option<&str>, _>("requested_at")
                         .ok()

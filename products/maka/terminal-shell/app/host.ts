@@ -168,6 +168,12 @@ async function subscribe(
 // Local journal methods serialize these actual Rust DTOs. Their receipt business
 // values remain unknown and continue through the application's existing guards.
 export const host = {
+  markdownImageSource(target: string) {
+    const source = nativeHost.markdownImageSource(target);
+    return source.kind === 'workspace'
+      ? { kind: 'workspace' as const, path: { bytesBase64: source.path } }
+      : source;
+  },
   async openLink(target: string) {
     const link = await nativeHost.openLink(target);
     return link === null

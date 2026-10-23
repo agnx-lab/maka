@@ -46,6 +46,7 @@ import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import { FinalActions } from './FinalActions';
 import type { SessionAction } from './sessionLifecycle';
+import { createSessionPermissions } from './sessionPermissions';
 import { TurnPanel, TurnSummary, ActivityStatus, turnOutcome } from './TurnPanel';
 import type { GroupViewState, LiveActivity, TurnViewState } from './TurnPanel';
 import {
@@ -168,7 +169,7 @@ export function Conversation(props: ConversationProps) {
   const stoppingRun = signal<string | null>(null);
   const stopping = () => invocation() !== null && stoppingRun() === invocation();
   const workspace = signal('');
-  const permissions = signal('');
+  const permissions = createSessionPermissions(sessionId, props.control);
   const runTurn = signal<string | null>(null);
   const backend = signal<any>(null);
   const interactions = signal<AgentPendingInteractions>({ revision: -1, entries: [] });
@@ -565,10 +566,10 @@ export function Conversation(props: ConversationProps) {
     title.set(observed.session.title);
     archived.set(observed.session.archived);
     workspace.set(observed.session.workspace.path);
-    permissions.set(observed.session.permissions.access);
+    permissions.observe(observed.session);
     backend.set(observed.session.backend ?? observed.rememberedBackend ?? null);
-    metrics.set(observed.metrics ?? null);
     if (observed.through >= runThrough) {
+      metrics.set(observed.metrics ?? null);
       run.set(observed.run?.state ?? 'idle');
       invocation.set(observed.run?.invocationId ?? null);
       runTurn.set(observed.run?.turnId ?? null);
@@ -769,6 +770,7 @@ export function Conversation(props: ConversationProps) {
               (part) => part.invocationId !== event.invocationId || part.stepId !== fact.stepId,
             ),
           );
+          void observe().catch(report);
           changed = true;
           break;
         case 'ended':
@@ -1481,12 +1483,7 @@ export function Conversation(props: ConversationProps) {
     backend: () => backendIdentity(backend()),
     modelDetails,
     refreshModel,
-    permissions: () =>
-      ({
-        read_only: tr('Read only'),
-        workspace_write: tr('Workspace write'),
-        danger_full_access: tr('Full access'),
-      })[permissions() as 'read_only' | 'workspace_write' | 'danger_full_access'] ?? permissions(),
+    permissions,
     workspace,
     empty: () =>
       ready() &&
@@ -1941,19 +1938,15 @@ function metricText(value: any): string {
   const compact = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const parts: string[] = [];
   if (value.outputTokensPerSecond != null)
-    parts.push(
-      tr('{speed} tok/s (last request)', { speed: value.outputTokensPerSecond.toFixed(1) }),
-    );
+    parts.push(tr('{speed} tok/s', { speed: value.outputTokensPerSecond.toFixed(1) }));
   if (value.contextTokens != null) {
-    const context = `${value.approximate ? '≈' : ''}${compact(value.contextTokens)}`;
+    const context = `${value.approximate || value.contextLastKnown ? '≈' : ''}${compact(value.contextTokens)}`;
     const total = value.contextWindow != null ? ` / ${compact(value.contextWindow)}` : '';
     const percent =
       value.contextWindow > 0
         ? ` · ${Math.round((value.contextTokens / value.contextWindow) * 100)}%`
         : '';
-    parts.push(
-      `${tr(value.contextLastKnown ? 'Context (last known)' : 'Context')} ${context}${total}${percent}`,
-    );
+    parts.push(`${tr('Context')} ${context}${total}${percent}`);
   }
   return parts.join(' · ');
 }

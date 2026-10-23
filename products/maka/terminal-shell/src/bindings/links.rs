@@ -22,6 +22,7 @@
 use super::{Owner, execute};
 use maka_agent_api::contract::WorkspacePath;
 use nsh_core::ui::prelude::*;
+use nsh_core::ui::{JsHost, JsIn, JsOwned, PropError, TsTypes};
 use std::sync::Arc;
 use url::Url;
 
@@ -85,6 +86,43 @@ fn destination(target: &str) -> Result<Destination, String> {
             Ok(Destination::Workspace(path, parent))
         }
         Err(_) => Err("The link is not a valid URI or workspace-relative path.".into()),
+    }
+}
+
+/// An image selector, without reading a file or activating a browser.
+pub enum MarkdownImageSource {
+    Workspace { path: String },
+    Remote { uri: String },
+}
+
+impl JsValue for MarkdownImageSource {
+    fn ts_type(types: &mut TsTypes) -> String {
+        types.declare("MarkdownImageSource", |_| {
+            "export type MarkdownImageSource = { kind: 'workspace'; path: string } | { kind: 'remote'; uri: string };".into()
+        })
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        Err(value.expected("a Markdown image source resolved by the native binding"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        match self {
+            Self::Workspace { path } => serde_json::json!({"kind":"workspace","path":path}),
+            Self::Remote { uri } => serde_json::json!({"kind":"remote","uri":uri}),
+        }
+        .to_js(host)
+    }
+}
+
+pub(super) fn markdown_image(target: &str) -> Result<MarkdownImageSource, String> {
+    match destination(target)? {
+        Destination::Workspace(path, _) => Ok(MarkdownImageSource::Workspace {
+            path: path.bytes_base64,
+        }),
+        Destination::Browser(url) => Ok(MarkdownImageSource::Remote {
+            uri: url.to_string(),
+        }),
     }
 }
 
@@ -155,6 +193,24 @@ mod tests {
             panic!("expected browser URL")
         };
         assert_eq!(url.as_str(), "https://user:password@example.test/");
+        let MarkdownImageSource::Remote { uri } =
+            markdown_image("HTTPS://example.test/image 你好.png?q=中文#part").unwrap()
+        else {
+            panic!("expected native HTTP(S) image URI")
+        };
+        assert_eq!(
+            uri,
+            "https://example.test/image%20%E4%BD%A0%E5%A5%BD.png?q=%E4%B8%AD%E6%96%87#part"
+        );
+        let MarkdownImageSource::Workspace { path } =
+            markdown_image("docs/image%20你好.png").unwrap()
+        else {
+            panic!("expected original Host workspace image selector")
+        };
+        assert_eq!(
+            STANDARD.decode(path).unwrap(),
+            "docs/image 你好.png".as_bytes()
+        );
         for target in ["a.txt#L4", "a.txt?download=1#L4"] {
             let Destination::Workspace(path, _) = destination(target).unwrap() else {
                 panic!("expected file component")
@@ -179,6 +235,10 @@ mod tests {
             "https://example.test/\n",
         ] {
             assert!(destination(invalid).is_err(), "accepted {invalid:?}");
+            assert!(
+                markdown_image(invalid).is_err(),
+                "accepted image {invalid:?}"
+            );
         }
     }
 }

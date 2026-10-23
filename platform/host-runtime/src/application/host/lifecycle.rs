@@ -19,6 +19,7 @@
 
 //! Process residency observes physical connections; only Application decides work is idle.
 use super::{Host, LifecycleMode, Result};
+use maka_plugin_core::runtime::Phase;
 use std::{sync::Arc, time::Duration};
 use tokio::time::Instant;
 
@@ -52,6 +53,38 @@ impl Drop for Connection {
 }
 impl Host {
     pub async fn retire(&self, interrupt: bool, allow_idle_connections: bool) -> Result<bool> {
+        if !interrupt {
+            let mut updates = self.application.client().updates;
+            loop {
+                let pending = {
+                    let snapshot = updates.borrow_and_update();
+                    snapshot.startup_error.is_some()
+                        && !snapshot.initialization_failures.is_empty()
+                        && !snapshot.closing
+                        && snapshot.cleanup_error.is_none()
+                        && snapshot
+                            .instances
+                            .iter()
+                            .all(|instance| instance.calls == 0)
+                        && (snapshot.starting
+                            || snapshot.instances.iter().any(|instance| {
+                                instance.phase == Phase::Retiring
+                                    && snapshot
+                                        .initialization_failures
+                                        .contains(instance.activation.instance())
+                            }))
+                };
+                if !pending {
+                    break;
+                }
+                // Failed readiness can precede its original cleanup. Keep admission
+                // open while that owner settles, then recheck every atomic idle guard.
+                tokio::select! {
+                    result = updates.changed() => if result.is_err() { break; },
+                    () = self.stop.cancelled() => break,
+                }
+            }
+        }
         let _gate = self.access_gate.lock().await;
         if !interrupt && !allow_idle_connections && !self.sessions.lock().unwrap().is_empty() {
             return Ok(false);

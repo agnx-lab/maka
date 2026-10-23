@@ -16,3 +16,15 @@
 # working notes are not source-release inputs.
 /.claude export-ignore
 /.maka-shots export-ignore
+
+# Preserve verbatim whitespace in the pinned NSH source snapshot.
+/third-party/nsh/.gitattributes whitespace=-blank-at-eof
+/third-party/nsh/examples/gallery/TitleBar.tsx whitespace=-blank-at-eof
+/third-party/nsh/examples/gallery/demos/chat/markdown.tsx whitespace=-blank-at-eof
+/third-party/nsh/third-party/icy_sixel/Cargo.toml whitespace=-blank-at-eof
+/third-party/nsh/website/demos/hero-chat/chat/markdown.tsx whitespace=-blank-at-eof
+/third-party/nsh/website/demos/hero-chat/ui.tsx whitespace=-blank-at-eof
+/third-party/nsh/examples/gallery-rs/native/assets/fonts/OFL.txt whitespace=-blank-at-eol
+/third-party/nsh/examples/gallery/fonts/OFL.txt whitespace=-blank-at-eol
+/third-party/nsh/tests/compat/cases/layout/fonts/OFL.txt whitespace=-blank-at-eol
+/third-party/nsh/third-party/icy_sixel/src/decoder.rs whitespace=-blank-at-eol

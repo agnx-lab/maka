@@ -173,19 +173,27 @@ impl Args {
     }
 }
 
+/// The production bundle and its declared permissions, shared with native UI tests.
+pub fn application_bundle() -> Bundle {
+    let capabilities = nsh_core::access::Capabilities::from_json(&serde_json::json!({
+        "clipboard": true,
+        "network": {"http": [{"host":"*","methods":["GET"],"schemes":["http","https"]}]}
+    }))
+    .expect("static terminal application capabilities");
+    Bundle::source(APPLICATION.into())
+        .with_app_id(Some("org.apache.maka.terminal"))
+        .with_policy(Policy {
+            declared: Some(capabilities),
+            ..Default::default()
+        })
+}
+
 fn configuration(
     registry: nsh_core::ui::Registry,
     runtime: tokio::runtime::Handle,
 ) -> EngineConfig {
     let viewport = Size::new(Points(960.0), Points(640.0));
-    let mut capabilities = nsh_core::access::Capabilities::default();
-    capabilities.clipboard = true;
-    let app = Bundle::source(APPLICATION.into())
-        .with_app_id(Some("org.apache.maka.terminal"))
-        .with_policy(Policy {
-            declared: Some(capabilities),
-            ..Default::default()
-        });
+    let app = application_bundle();
     EngineConfig {
         viewport,
         environment: Environment {
@@ -238,6 +246,24 @@ mod tests {
     struct Command {
         #[command(flatten)]
         args: Args,
+    }
+
+    #[test]
+    fn application_bundle_grants_image_gets_without_other_http_methods_or_sockets() {
+        let access = application_bundle().policy.access();
+        for url in [
+            "http://127.0.0.1:1234/image.png",
+            "https://images.example.test/a.png",
+        ] {
+            assert!(access.allows_media(url));
+            assert!(access.allows_http("GET", url));
+            assert!(!access.allows_http("POST", url));
+            assert!(!access.allows_http("DELETE", url));
+        }
+        assert!(!access.allows_media("ftp://images.example.test/a.png"));
+        assert!(!access.allows_http("GET", "wss://images.example.test/a.png"));
+        assert!(!access.allows_socket("127.0.0.1", 1234));
+        assert!(access.declared.clipboard);
     }
 
     #[test]

@@ -71,7 +71,8 @@ fn assert_same_base(actual: &ModelContextSource, expected: &ModelContextSource) 
         panic!("expected completed Main evidence")
     };
     assert_eq!(actual.sequence, expected.sequence);
-    assert_eq!(actual.recorded_at, expected.recorded_at);
+    assert_eq!(actual.finished_at, expected.finished_at);
+    assert_eq!(actual.requested_at, expected.requested_at);
     assert_eq!(actual.model_id, expected.model_id);
     assert_eq!(actual.connection_id, expected.connection_id);
     assert_eq!(actual.checkpoint_event_id, expected.checkpoint_event_id);

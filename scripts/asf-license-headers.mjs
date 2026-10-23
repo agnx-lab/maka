@@ -171,6 +171,7 @@ const gpuiUpstreamFiles = new Set(
     'image-webp',
     'llrt-crypto',
     'termina',
+    'nsh',
   ].flatMap((project) =>
     Object.keys(
       JSON.parse(

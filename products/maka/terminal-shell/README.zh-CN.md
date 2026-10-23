@@ -21,6 +21,8 @@
 
 使用 NSH 构建的实验性 Agent 工作台，支持鼠标与键盘操作，连接或启动 Maka Host Root。
 
+NSH 源码位于 [`third-party/nsh`](../../../third-party/nsh/SOURCE.md)。Cargo 从这里构建运行时、TSX 打包器、`nsh-base` 组件和 UI 类型声明生成器，无需单独检出 NSH。相关的 NSH 与 Maka 修改在同一源码树中完成，并通过终端的[真实 Host 测试](tests/real_host.rs)一起验证：`cargo test -p maka-cli --no-default-features --test terminal_real_host`。
+
 ## 启动
 
 在仓库根目录构建产品包，再通过 Maka CLI 启动终端界面：
@@ -77,6 +79,8 @@ cargo run -p maka-cli
 **Todo** 位于输入区域上方，显示 Agent 的真实清单，包括当前事项和完成数量。Token 速度显示**上一次请求**的数据；上下文数据标明估算或最后已知值。没有可用数据时不显示相应指标。
 
 助手回复支持标题、强调、列表、引用、表格和代码格式，每个代码块提供独立的 **Copy code**。**Show message source** 切换到可选择的原文，**Show formatted message** 恢复格式。历史片段在开头加载完整前保持原文显示。
+
+Markdown 图片支持工作区相对路径和 HTTP(S) URL，并在正文中显示。工作区图片仍通过现有 Host 文件服务读取；网络图片由客户端的 NSH 原生加载器和缓存处理，应用只授予 HTTP(S) GET，每次重定向也检查权限。激活未带链接的图片可全屏查看，关闭或按 Escape 返回原图片并保留草稿；带链接的图片仍打开原链接目标。加载和失败都有明确提示，未带链接的失败图片可重试。原文模式和消息复制保留完整原始 Markdown。
 
 用户消息经 Host 记录后提供 **Copy user message**；已完成的回复提供 **Copy message**、**Fork from this turn** 和 **View this turn's model usage**，并显示原文切换、已记录的模型与耗时。紧凑的图标操作始终可用，配有完整的悬浮提示和无障碍名称。两种消息复制即使在历史窗口只显示末尾时也会读取完整原始消息。Fork 将历史复制到该回复所在轮次的完成边界，打开独立会话，原草稿仍留在原会话；后续轮次正在运行时，也可以从更早的已完成轮次分叉。Usage 读取原始记录中的本轮主模型请求，分别显示输入、输出、推理、缓存 token 与已记录的费用；缺失的计数或价格明确显示不可用。复制或导入的历史不会产生新的实体模型费用记录。
 

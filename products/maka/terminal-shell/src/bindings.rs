@@ -196,6 +196,15 @@ fn require_contract(endpoint: &str, method: &str, actual: &Contract) -> Result<(
 
 #[class]
 impl ApplicationHost {
+    /// Resolve the original Markdown target once. Workspace bytes remain with
+    /// the Host; HTTP(S) images use NSH's native loader and bundle permissions.
+    pub fn markdown_image_source(
+        &self,
+        target: String,
+    ) -> Result<links::MarkdownImageSource, String> {
+        links::markdown_image(&target)
+    }
+
     /// Hand an HTTP(S) link to this client's system browser, or return an exact
     /// workspace-relative path and parent for the original session's reader.
     /// This does not read files or execute anything on the connected Host.
