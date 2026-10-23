@@ -74,11 +74,37 @@ async fn preturn_keeps_anchor_and_latest_main_never_falls_back_a_broken_newer_tr
     assert!(
         matches!(source.latest_main, LatestMainContext::Selected(ref value) if value.context.is_none())
     );
-    log.append(&request("current", "new-main", ModelPurpose::Main, &source))
+    let mut requested = request("current", "new-main", ModelPurpose::Main, &source)
+        .event()
+        .clone();
+    requested.recorded_at = std::time::UNIX_EPOCH;
+    log.append(&EventWrite::plain(requested).unwrap())
         .await
         .unwrap();
     let mut latest = completion("current", "new-main", "newer").event().clone();
-    latest.recorded_at = std::time::UNIX_EPOCH;
+    let Fact::ModelCompleted { output, .. } = &latest.fact else {
+        panic!()
+    };
+    let mut finished = event(
+        "current",
+        Fact::ModelObserved {
+            step_id: "new-main".into(),
+            event: ModelEvent::Finished {
+                reason: output.finish_reason,
+                usage: output.usage.clone(),
+                provider_options: output.provider_options.clone(),
+            },
+        },
+    )
+    .event()
+    .clone();
+    let finished_at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(2);
+    finished.recorded_at = finished_at;
+    log.append(&EventWrite::plain(finished).unwrap())
+        .await
+        .unwrap();
+    // Remaining tools can settle later; they must not extend model request time.
+    latest.recorded_at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(12);
     log.append(&EventWrite::plain(latest).unwrap())
         .await
         .unwrap();
@@ -98,7 +124,8 @@ async fn preturn_keeps_anchor_and_latest_main_never_falls_back_a_broken_newer_tr
     else {
         panic!()
     };
-    assert_eq!(selected.recorded_at, std::time::UNIX_EPOCH);
+    assert_eq!(selected.finished_at, Some(finished_at));
+    assert_eq!(selected.requested_at, Some(std::time::UNIX_EPOCH));
     assert_eq!(selected.connection_id.as_deref(), Some("connection"));
     assert_eq!(
         selected.checkpoint_event_id.as_deref(),
@@ -107,7 +134,7 @@ async fn preturn_keeps_anchor_and_latest_main_never_falls_back_a_broken_newer_tr
     let inspect = rusqlite::Connection::open(&path).unwrap();
     inspect.execute("UPDATE event_log SET event_json=json_remove(event_json, '$.fact.context') WHERE operation_id='new-main' AND kind='model_requested'", []).unwrap();
     assert!(
-        matches!(log.latest_main_context("session").await.unwrap(), LatestMainContext::Selected(value) if value.context.is_none() && value.recorded_at == std::time::UNIX_EPOCH)
+        matches!(log.latest_main_context("session").await.unwrap(), LatestMainContext::Selected(value) if value.context.is_none() && value.finished_at == Some(finished_at))
     );
     inspect.execute("UPDATE event_log SET operation_id='missing-request' WHERE operation_id='new-main' AND kind='model_requested'", []).unwrap();
     assert!(matches!(

@@ -354,7 +354,8 @@ impl Handler for Agent {
                             });
                             let seconds = basis
                                 .requested_at
-                                .and_then(|at| basis.recorded_at.duration_since(at).ok())
+                                .zip(basis.finished_at)
+                                .and_then(|(at, finished)| finished.duration_since(at).ok())
                                 .map(|elapsed| elapsed.as_secs_f64())
                                 .filter(|seconds| *seconds > 0.0);
                             Some(SessionMetrics {

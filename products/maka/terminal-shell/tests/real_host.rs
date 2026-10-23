@@ -37,6 +37,8 @@ mod oauth;
 mod plugin_settings;
 #[path = "real_host/queue.rs"]
 mod queue;
+#[path = "real_host/request_metrics.rs"]
+mod request_metrics;
 #[path = "real_host/session_lifecycle.rs"]
 mod session_lifecycle;
 mod support;

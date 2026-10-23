@@ -568,8 +568,8 @@ export function Conversation(props: ConversationProps) {
     workspace.set(observed.session.workspace.path);
     permissions.observe(observed.session);
     backend.set(observed.session.backend ?? observed.rememberedBackend ?? null);
-    metrics.set(observed.metrics ?? null);
     if (observed.through >= runThrough) {
+      metrics.set(observed.metrics ?? null);
       run.set(observed.run?.state ?? 'idle');
       invocation.set(observed.run?.invocationId ?? null);
       runTurn.set(observed.run?.turnId ?? null);
@@ -770,6 +770,7 @@ export function Conversation(props: ConversationProps) {
               (part) => part.invocationId !== event.invocationId || part.stepId !== fact.stepId,
             ),
           );
+          void observe().catch(report);
           changed = true;
           break;
         case 'ended':
@@ -1937,19 +1938,15 @@ function metricText(value: any): string {
   const compact = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const parts: string[] = [];
   if (value.outputTokensPerSecond != null)
-    parts.push(
-      tr('{speed} tok/s (last request)', { speed: value.outputTokensPerSecond.toFixed(1) }),
-    );
+    parts.push(tr('{speed} tok/s', { speed: value.outputTokensPerSecond.toFixed(1) }));
   if (value.contextTokens != null) {
-    const context = `${value.approximate ? '≈' : ''}${compact(value.contextTokens)}`;
+    const context = `${value.approximate || value.contextLastKnown ? '≈' : ''}${compact(value.contextTokens)}`;
     const total = value.contextWindow != null ? ` / ${compact(value.contextWindow)}` : '';
     const percent =
       value.contextWindow > 0
         ? ` · ${Math.round((value.contextTokens / value.contextWindow) * 100)}%`
         : '';
-    parts.push(
-      `${tr(value.contextLastKnown ? 'Context (last known)' : 'Context')} ${context}${total}${percent}`,
-    );
+    parts.push(`${tr('Context')} ${context}${total}${percent}`);
   }
   return parts.join(' · ');
 }

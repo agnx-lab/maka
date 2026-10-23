@@ -294,7 +294,6 @@ export const conversationMessages = {
   ],
   'Confirming upload…': ['Confirming upload…', '正在确认上传…', '正在確認上傳…'],
   Context: ['Context', '上下文', '上下文'],
-  'Context (last known)': ['Context (last known)', '上下文（上次已知值）', '上下文（上次已知值）'],
   Contract: ['Contract', '契约', '契約'],
   'Conversation composer': ['Conversation composer', '对话输入区', '對話輸入區'],
   'Conversation creation rejected: {reason}': [
@@ -1281,11 +1280,7 @@ export const conversationMessages = {
     '{observation}；原更新订阅的清理尚未确认：{reason}',
     '{observation}；原更新訂閱的清理尚未確認：{reason}',
   ],
-  '{speed} tok/s (last request)': [
-    '{speed} tok/s (last request)',
-    '{speed} Token/秒（上次请求）',
-    '{speed} Token/秒（上次請求）',
-  ],
+  '{speed} tok/s': ['{speed} tok/s', '{speed} Token/秒', '{speed} Token/秒'],
   '{tool} · Permission boundary: {revision}': [
     '{tool} · Permission boundary: {revision}',
     '{tool} · 权限边界：{revision}',

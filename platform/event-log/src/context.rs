@@ -81,7 +81,8 @@ pub enum LatestMainContext {
 pub struct AcceptedMainContext {
     pub projection_current: bool,
     pub sequence: u64,
-    pub recorded_at: std::time::SystemTime,
+    /// The model stream's finish observation, before any remaining tool settlement.
+    pub finished_at: Option<std::time::SystemTime>,
     pub requested_at: Option<std::time::SystemTime>,
     pub model_id: String,
     pub route_identity: String,
