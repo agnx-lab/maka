@@ -32,7 +32,11 @@ use ratatui::{
 };
 use std::{
     io,
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::Instant,
 };
@@ -62,6 +66,8 @@ impl MountSink for Sink {
 pub(super) struct Frame {
     pub bytes: Option<Vec<u8>>,
     pub quit: bool,
+    pub deadline: Option<Instant>,
+    pub redraw_at: Option<Instant>,
 }
 
 pub(super) struct Advance {
@@ -84,7 +90,11 @@ impl Advance {
 
 type Frames = mpsc::Receiver<Result<Frame, String>>;
 
-pub(super) fn spawn(config: EngineConfig) -> io::Result<(mpsc::SyncSender<Advance>, Frames)> {
+pub(super) fn spawn(
+    config: EngineConfig,
+    pending: Arc<AtomicBool>,
+    driver: thread::Thread,
+) -> io::Result<(mpsc::SyncSender<Advance>, Frames)> {
     let (send, commands) = mpsc::sync_channel::<Advance>(1);
     let (frames, receive) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -94,16 +104,27 @@ pub(super) fn spawn(config: EngineConfig) -> io::Result<(mpsc::SyncSender<Advanc
                 Ok(session) => session,
                 Err(error) => {
                     let _ = frames.send(Err(error));
+                    driver.unpark();
                     return;
                 }
             };
+            let wake = driver.clone();
+            session.engine.set_wake(Arc::new(move || {
+                pending.store(true, Ordering::Release);
+                wake.unpark();
+            }));
             if frames.send(session.initial_frame()).is_err() {
                 return;
             }
+            driver.unpark();
             while let Ok(command) = commands.recv() {
-                let result = session.advance_if_needed(command);
+                let result = session.advance(command);
                 let failed = result.is_err();
-                if frames.send(result).is_err() || failed {
+                if frames.send(result).is_err() {
+                    return;
+                }
+                driver.unpark();
+                if failed {
                     return;
                 }
             }
@@ -121,6 +142,8 @@ struct Session {
     dirty: bool,
     started: Instant,
     effects: Vec<u8>,
+    deadline: Option<Instant>,
+    last_sent_focus_path: Option<Vec<nsh_core::NodeId>>,
 }
 
 impl Session {
@@ -161,26 +184,15 @@ impl Session {
             dirty: false,
             started: Instant::now(),
             effects: Vec::new(),
+            // The first advance obtains the engine's actual timer deadline.
+            deadline: Some(Instant::now()),
+            last_sent_focus_path: None,
         })
     }
 
     fn initial_frame(&mut self) -> Result<Frame, String> {
         self.apply_commits()?;
         self.encode(true)
-    }
-
-    fn advance_if_needed(&mut self, command: Advance) -> Result<Frame, String> {
-        if command.is_probe()
-            && !self.engine.needs_pump()
-            && !self.surface.animating()
-            && (!command.draw || (!self.dirty && self.effects.is_empty()))
-        {
-            return Ok(Frame {
-                bytes: None,
-                quit: self.surface.should_quit(),
-            });
-        }
-        self.advance(command)
     }
 
     fn advance(&mut self, command: Advance) -> Result<Frame, String> {
@@ -193,9 +205,7 @@ impl Session {
             self.surface.set_image_protocol(None);
             self.area = viewport(columns, rows)?;
             self.surface.resize(self.area.width, self.area.height);
-            self.engine
-                .control()
-                .set_focus_path(self.surface.focus_path());
+            self.sync_focus_path();
             self.environment.window = self.surface.viewport();
             let control = self.engine.control();
             control.resize(self.environment.window);
@@ -243,10 +253,10 @@ impl Session {
             self.forward_events()?;
             // The next physical event sees the ordinary native tree after
             // every callback from this event has reached the application.
-            self.engine.pump();
+            self.deadline = self.engine.pump();
             changed |= self.apply_commits()?;
         }
-        self.engine.pump();
+        self.deadline = self.engine.pump();
         changed |= self.apply_commits()?;
         changed |= self.surface.tick(self.started.elapsed().as_secs_f64());
         self.forward_events()?;
@@ -255,10 +265,7 @@ impl Session {
             let dirty = std::mem::take(&mut self.dirty);
             self.encode(dirty)
         } else {
-            Ok(Frame {
-                bytes: None,
-                quit: self.surface.should_quit(),
-            })
+            Ok(self.frame(None))
         }
     }
 
@@ -273,8 +280,8 @@ impl Session {
     }
 
     fn dispatch_events(&mut self, events: Vec<SurfaceEvent>) -> Result<(), String> {
+        self.sync_focus_path();
         let control = self.engine.control();
-        control.set_focus_path(self.surface.focus_path());
         for event in events {
             match event {
                 SurfaceEvent::Event(id, event, payload) => {
@@ -313,6 +320,14 @@ impl Session {
         Ok(())
     }
 
+    fn sync_focus_path(&mut self) {
+        let path = self.surface.focus_path();
+        if self.last_sent_focus_path.as_ref() != Some(&path) {
+            self.engine.control().set_focus_path(path.clone());
+            self.last_sent_focus_path = Some(path);
+        }
+    }
+
     fn apply_commits(&mut self) -> Result<bool, String> {
         let mut commits = std::mem::take(&mut *self.sink.0.lock().unwrap());
         if let Some(error) = commits.error {
@@ -333,10 +348,7 @@ impl Session {
 
     fn encode(&mut self, changed: bool) -> Result<Frame, String> {
         if !changed && self.effects.is_empty() {
-            return Ok(Frame {
-                bytes: None,
-                quit: self.surface.should_quit(),
-            });
+            return Ok(self.frame(None));
         }
         // This UI draws its own caret, so the physical cursor is always hidden.
         let writer = self.terminal.backend_mut().writer_mut();
@@ -359,10 +371,37 @@ impl Session {
         // Complete clipboard effects share this immutable physical write
         // and its original flush receipt.
         bytes.append(&mut self.effects);
-        Ok(Frame {
-            bytes: Some(bytes),
+        Ok(self.frame(Some(bytes)))
+    }
+
+    fn frame(&self, bytes: Option<Vec<u8>>) -> Frame {
+        let redraw_at = if self.dirty || !self.effects.is_empty() {
+            Some(Instant::now())
+        } else if self.surface.animating() {
+            // Native jobs expose pending work, not completion notifications.
+            // An animation that produced output follows the writer receipt;
+            // a silent pending job keeps the existing idle recheck interval.
+            Some(
+                Instant::now()
+                    + if bytes.is_some() {
+                        std::time::Duration::ZERO
+                    } else {
+                        super::TICK
+                    },
+            )
+        } else {
+            None
+        };
+        Frame {
+            bytes,
             quit: self.surface.should_quit(),
-        })
+            deadline: if self.engine.needs_pump() {
+                Some(Instant::now())
+            } else {
+                self.deadline
+            },
+            redraw_at,
+        }
     }
 }
 
@@ -392,6 +431,148 @@ mod tests {
         config.limits = Limits::default();
         config.ui_sets = vec![nsh_base::registry()];
         config
+    }
+
+    #[test]
+    fn background_host_reply_frame_and_timer_reach_unicode_output_without_input() {
+        use nsh_core::ui::prelude::*;
+
+        struct HostReply(Mutex<Option<tokio::sync::oneshot::Receiver<()>>>);
+        #[component]
+        fn BackgroundReply() -> impl IntoElement {
+            let reply = engine_context::<HostReply>()
+                .unwrap()
+                .0
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap();
+            let host = signal("");
+            let frame = signal("");
+            let timed = signal("");
+            spawn(async move {
+                reply.await.unwrap();
+                host.set("HOST_REPLY");
+                request_animation_frame(move |_| frame.set("FRAME_READY"));
+                set_timeout(std::time::Duration::from_millis(40), move || {
+                    timed.set("TIMER_READY");
+                });
+            });
+            view()
+                .child(text("WAITING"))
+                .child(text(move || host.get()))
+                .child(text(move || frame.get()))
+                .child(text(move || timed.get()))
+        }
+        struct Capture {
+            bytes: Vec<u8>,
+            flushed: mpsc::Sender<Vec<u8>>,
+        }
+        impl Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.bytes.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                let _ = self.flushed.send(std::mem::take(&mut self.bytes));
+                Ok(())
+            }
+        }
+        let (reply, response) = tokio::sync::oneshot::channel();
+        let mut options = config("");
+        options.app = App::Rust(nsh_core::ui::Root::of::<BackgroundReply>());
+        options.context = options.context.with(HostReply(Mutex::new(Some(response))));
+        let (flushed, output) = mpsc::channel();
+        let (started, start) = mpsc::sync_channel(1);
+        let stop = Arc::new(AtomicBool::new(false));
+        let driver = {
+            let stop = stop.clone();
+            thread::spawn(move || {
+                let presentation = super::super::Presentation {
+                    stop,
+                    ..Default::default()
+                };
+                let pending = Arc::new(AtomicBool::new(false));
+                let (commands, frames) =
+                    super::spawn(options, pending.clone(), thread::current()).unwrap();
+                let mut output = super::super::output::Output::new(Capture {
+                    bytes: Vec::new(),
+                    flushed,
+                })
+                .unwrap();
+                output.submit(b"SETUP".to_vec()).unwrap();
+                started.send(thread::current()).unwrap();
+                super::super::drive(&mut output, &presentation, &commands, &frames, &pending)
+            })
+        };
+        let wake = start
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let mut bytes = Vec::new();
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let mut await_text = |expected: &str| -> Result<(), mpsc::RecvTimeoutError> {
+            while !bytes
+                .windows(expected.len())
+                .any(|part| part == expected.as_bytes())
+            {
+                bytes.extend(
+                    output.recv_timeout(deadline.saturating_duration_since(Instant::now()))?,
+                );
+            }
+            Ok(())
+        };
+        let observed = (|| {
+            await_text("WAITING")?;
+            reply.send(()).unwrap();
+            await_text("HOST_REPLY")?;
+            await_text("FRAME_READY")?;
+            await_text("TIMER_READY")
+        })();
+        stop.store(true, Ordering::Release);
+        wake.unpark();
+        driver.join().unwrap().unwrap();
+        observed.unwrap();
+    }
+
+    #[test]
+    fn unchanged_and_cleared_native_focus_settle_without_idle_engine_work() {
+        let mut session = Session::new(config(
+            r#"
+            import { mount } from "nsh";
+            import { element, prop } from "nsh:rt";
+            mount(() => {
+                const input = element("input");
+                prop(input, "autoFocus", true);
+                prop(input, "value", "kept draft");
+                return input;
+            });
+            "#,
+        ))
+        .unwrap();
+        session.initial_frame().unwrap();
+        let editor = session.surface.input_context().unwrap();
+        assert_eq!(editor.text.as_deref(), Some("kept draft"));
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        for clear in [false, true] {
+            if clear {
+                session.sink.submit(MountBatch {
+                    items: vec![MountItem::Command {
+                        id: editor.node,
+                        command: nsh_core::Command::Blur,
+                    }],
+                });
+            }
+            let mut frame = session.advance(command([])).unwrap();
+            while session.engine.needs_pump() {
+                assert!(Instant::now() < deadline, "native focus never settled");
+                frame = session.advance(command([])).unwrap();
+            }
+            assert!(frame.deadline.is_none_or(|due| due > Instant::now()));
+            assert_eq!(frame.redraw_at, None);
+            assert_eq!(session.surface.focused(), (!clear).then_some(editor.node));
+        }
+        assert!(session.surface.focus_path().is_empty());
+        assert!(session.surface.snapshot().contains("kept draft"));
     }
 
     #[test]
@@ -910,7 +1091,13 @@ mod tests {
                 })
                 .unwrap();
                 output.submit(b"SETUP".to_vec()).unwrap();
-                let result = super::super::drive(&mut output, &presentation, &commands, &ready);
+                let result = super::super::drive(
+                    &mut output,
+                    &presentation,
+                    &commands,
+                    &ready,
+                    &AtomicBool::new(false),
+                );
                 let restored = output.close(b"CLEANUP".to_vec()).unwrap();
                 (result, restored)
             })
@@ -934,7 +1121,7 @@ mod tests {
                 !command.draw,
                 "blocked output must defer drawing, not native input"
             );
-            frames.send(session.advance_if_needed(command)).unwrap();
+            frames.send(session.advance(command)).unwrap();
             let editor = session.surface.input_context().unwrap();
             if editor.text.as_deref() == Some("draft你好😀") {
                 assert_eq!(editor.selection, 9..9);

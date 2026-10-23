@@ -143,10 +143,12 @@ pub(crate) fn run(
                 );
             }
         }
-        let (commands, frames) = ui::spawn(config).map_err(|error| error.to_string())?;
+        let pending = Arc::new(AtomicBool::new(false));
+        let (commands, frames) = ui::spawn(config, pending.clone(), thread::current())
+            .map_err(|error| error.to_string())?;
         // Returning drops both channel endpoints without joining either
         // blocked owner, including startup errors after terminal mutation.
-        drive(&mut output, &presentation, &commands, &frames)
+        drive(&mut output, &presentation, &commands, &frames, &pending)
     })();
     presentation.shutdown();
     // The platform guard must outlive the sole reader: restoring console modes
@@ -191,6 +193,7 @@ fn drive(
     presentation: &Presentation,
     commands: &mpsc::SyncSender<ui::Advance>,
     frames: &mpsc::Receiver<Result<ui::Frame, String>>,
+    pending: &AtomicBool,
 ) -> Result<(), String> {
     let Presentation { state, stop, .. } = presentation;
     let mut setup = true;
@@ -198,7 +201,8 @@ fn drive(
     // An encoded delta remains immutable until the sole writer accepts it.
     // Later native input can advance without producing another delta.
     let mut ready = None;
-    let mut next_tick = Instant::now();
+    let mut deadline = None;
+    let mut redraw_at = None;
     loop {
         if stop.load(Ordering::Acquire) {
             return Ok(());
@@ -225,6 +229,8 @@ fn drive(
                         return Ok(());
                     }
                     busy = false;
+                    deadline = frame.deadline;
+                    redraw_at = frame.redraw_at;
                     if let Some(bytes) = frame.bytes {
                         debug_assert!(ready.is_none());
                         ready = Some(bytes);
@@ -245,6 +251,9 @@ fn drive(
             }
         }
         if !busy {
+            // Consume only the notification whose work this advance handles.
+            // A wake during or after the send remains pending for the next one.
+            let woken = pending.swap(false, Ordering::AcqRel);
             let mut inbox = state.lock().unwrap();
             let command = ui::Advance {
                 image_protocol: inbox.graphics.take_ready(),
@@ -253,15 +262,36 @@ fn drive(
                 cancel_pointer: std::mem::take(&mut inbox.cancel_pointer),
                 draw: writable && !setup && ready.is_none(),
             };
-            if !command.is_probe() || Instant::now() >= next_tick {
+            if !command.is_probe()
+                || woken
+                || deadline.is_some_and(|due| due <= Instant::now())
+                || (command.draw && redraw_at.is_some_and(|due| due <= Instant::now()))
+            {
                 commands
                     .try_send(command)
                     .map_err(|error| error.to_string())?;
                 busy = true;
-                next_tick = Instant::now() + TICK;
             }
         }
-        thread::park_timeout(Duration::from_millis(2));
+        // Input, UI completion and writer receipts unpark this driver. Timer
+        // deadlines are real engine deadlines. TICK bounds external AtomicBool
+        // cancellation; silent native jobs also retain their idle recheck.
+        let next = (!busy)
+            .then(|| {
+                deadline
+                    .into_iter()
+                    .chain(
+                        (writable && !setup && ready.is_none())
+                            .then_some(redraw_at)
+                            .flatten(),
+                    )
+                    .min()
+            })
+            .flatten();
+        let wait = next.map_or(TICK, |due| {
+            due.saturating_duration_since(Instant::now()).min(TICK)
+        });
+        thread::park_timeout(wait);
     }
 }
 
@@ -389,6 +419,67 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn an_idle_unicode_driver_waits_for_work_and_coalesces_engine_wakes() {
+        let (started, initial) = mpsc::sync_channel(1);
+        let (commands, worker) = mpsc::sync_channel(1);
+        let (frames, receive) = mpsc::sync_channel(1);
+        let pending = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let driver = {
+            let pending = pending.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                let presentation = Presentation {
+                    stop,
+                    ..Default::default()
+                };
+                let mut output = Output::new(io::sink()).unwrap();
+                output.submit(b"SETUP".to_vec()).unwrap();
+                started.send(thread::current()).unwrap();
+                drive(&mut output, &presentation, &commands, &receive, &pending)
+            })
+        };
+        let wake = initial.recv_timeout(Duration::from_secs(2)).unwrap();
+        let idle = || ui::Frame {
+            bytes: None,
+            quit: false,
+            deadline: None,
+            redraw_at: None,
+        };
+        frames.send(Ok(idle())).unwrap();
+        wake.unpark();
+        assert!(matches!(
+            worker.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        pending.store(true, Ordering::Release);
+        wake.unpark();
+        let command = worker.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(command.is_probe());
+        assert!(command.draw);
+        // Completions while this advance is in flight coalesce into the next
+        // one, rather than being lost when its frame arrives.
+        for _ in 0..3 {
+            pending.store(true, Ordering::Release);
+            wake.unpark();
+        }
+        frames.send(Ok(idle())).unwrap();
+        wake.unpark();
+        let command = worker.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(command.is_probe());
+        assert!(command.draw);
+        frames.send(Ok(idle())).unwrap();
+        wake.unpark();
+        assert!(matches!(
+            worker.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        stop.store(true, Ordering::Release);
+        wake.unpark();
+        driver.join().unwrap().unwrap();
+    }
+
+    #[test]
     fn blocked_stdout_does_not_prevent_independent_cancel() {
         for external in [false, true] {
             blocked_cancel(external);
@@ -430,6 +521,8 @@ mod tests {
             .send(Ok(ui::Frame {
                 bytes: Some(b"FRAME".to_vec()),
                 quit: false,
+                deadline: None,
+                redraw_at: None,
             }))
             .unwrap();
         let (finished, result) = mpsc::sync_channel(1);
@@ -439,7 +532,13 @@ mod tests {
             ..Default::default()
         };
         thread::spawn(move || {
-            let result = drive(&mut output, &presentation, &commands, &receive);
+            let result = drive(
+                &mut output,
+                &presentation,
+                &commands,
+                &receive,
+                &AtomicBool::new(false),
+            );
             let _ = finished.send(result);
         });
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
