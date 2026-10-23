@@ -273,25 +273,33 @@ export function TurnNavigation(props: {
 export function ReturnToLatest(props: { visible: boolean; activate(): void }) {
   return (
     <If when={props.visible}>
-      <Button
-        accessibilityLabel={tr('Return to latest')}
-        onPress={props.activate}
+      <View
+        pointerEvents="box-none"
         style={{
-          ...controlStyle,
           position: 'absolute',
-          right: 32,
+          left: 0,
+          right: 0,
           bottom: 8,
-          flexDirection: 'row',
           alignItems: 'center',
-          gap: 8,
-          backgroundColor: C.raised,
         }}
-        hoverStyle={{ backgroundColor: C.surface }}
-        focusStyle={{ backgroundColor: C.accent }}
       >
-        <Icon name="latest" color={C.secondary} />
-        <Text style={{ ...captionTextStyle, color: C.text }}>{tr('Latest')}</Text>
-      </Button>
+        <Button
+          accessibilityLabel={tr('Return to latest')}
+          onPress={props.activate}
+          style={{
+            ...controlStyle,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            backgroundColor: C.raised,
+          }}
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.accent }}
+        >
+          <Icon name="latest" color={C.secondary} />
+          <Text style={{ ...captionTextStyle, color: C.text }}>{tr('Latest')}</Text>
+        </Button>
+      </View>
     </If>
   );
 }
