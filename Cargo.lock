@@ -8450,6 +8450,7 @@ dependencies = [
  "maka-interactions-native",
  "maka-jev-native",
  "maka-js-runtime",
+ "maka-mcp",
  "maka-model",
  "maka-network",
  "maka-packages",
@@ -9101,6 +9102,27 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "maka-mcp"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "libc",
+ "maka-agent-facts",
+ "maka-event-log",
+ "maka-network",
+ "maka-process",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "sse-stream",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "which 8.0.6",
 ]
 
 [[package]]
@@ -13688,6 +13710,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "serde",
+ "serde_json",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
@@ -13807,6 +13830,31 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "rmcp"
+version = "3.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ece64e19631fc38758181e637c15509a2c2709ee53bfde1e1d58f9dc991f919e"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "futures",
+ "http",
+ "indexmap 2.14.2",
+ "libc",
+ "pin-project-lite",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sse-stream",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -15806,6 +15854,19 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sse-stream"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c25ac7aff0abd1dbc474536e40416e1102c7dd9bfba0b9861c6d357f835dcfb4"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
 ]
 
 [[package]]

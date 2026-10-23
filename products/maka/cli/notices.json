@@ -1,13 +1,13 @@
 {
   "inputs": {
-    "Cargo.lock": "0beef01d067cb7053b60920692fb96b33e6de94bc79d7b64138ece9955e589c7",
-    "Cargo.toml": "dd22513000b4ab225b51ee4efc369a7c1f4699e659afa4ce238d554c550ce1ee",
+    "Cargo.lock": "15abcbac6002725ec40d906318e9dde24166801b96f9da5ac002196141771582",
+    "Cargo.toml": "c48a65b85fe2f39a7ab099ff1f7a31a3d4b6e7a437ced8a626d6b347f0942550",
     "package-lock.json": "2cd0e1423449277ccf0721dbfe554c6a6297d9242211f33e44b1a282a6d2b4b8",
     "package.json": "a6cf2b6e2d6c14ed98f1e09ba195f50260b7e1564a29a8e7477575654dc5d177",
-    "packages/plugin-sdk/src/configurations.ts": "93fcc2c070289ffd4b48dcbaee426d72abff74f95c3166ad73447eec588c011a",
+    "packages/plugin-sdk/src/configurations.ts": "62633c312a9c5f3b78848c10a2ce799c130033623407320b2958915cfadbcae3",
     "packages/plugin-sdk/src/contracts.ts": "f0782038b0efbb92f62d2b74f6d7371b1f344d2beabfd303810d32ff0d2f18ca",
     "packages/plugin-sdk/src/generated/methods.ts": "b455734da9caad154ec229cbaebeae8b438fa18250526f8c9c16df1ef76190bb",
-    "packages/plugin-sdk/src/generated/runtime.ts": "4b14adc35f45f5a81f05f363fb98fcea749842fbe7a0df886f4acbf65ae3d15f",
+    "packages/plugin-sdk/src/generated/runtime.ts": "1f3680546d06368f3b18c92f02547dffe05722784e4e073d95020f080641904e",
     "packages/plugin-sdk/src/index.ts": "88b6d3a3d55e0d720584967c27abeb10d5ca343cd2f346563452c8608f423e67",
     "packages/plugin-sdk/src/native.ts": "f94d07642c8dd32d786444c7ff4cbbadd5bb1debea44f124f84eadd321607fa8",
     "packages/plugin-sdk/src/ui.ts": "d669d2c5c70fc61aae3c0582f586950bf9cea863ee72b48af673e57c30c1b0b9",
@@ -44,8 +44,10 @@
     "plugins/agent/goal/Cargo.toml": "0e7b81aaa8b60b884a0f64fb586c03f7ecbdf1dc426d2d731ce8f80ba61cf9eb",
     "plugins/agent/graph/Cargo.toml": "b12c9de4be4fff7472d313e7176fd4289686f73f691fead2b130739256c8f7f8",
     "plugins/agent/insights/Cargo.toml": "e11b391c1304bb27d552322e9f31b9e1858340f81f49ebbb3d484b02c9238def",
+    "plugins/agent/mcp/Cargo.toml": "cd1e1fed2a94c36cde0c657d257f85b6c5b148e1844b480bb1f529a4f60baa24",
+    "plugins/agent/mcp/tests/server.mjs": "93018f7a7c1fc417576d9fcd6465f85e251da3d29072494d4d177d1bccb54a4a",
     "plugins/agent/model/Cargo.toml": "7381fd93808e887daba801f0c8ba5604fb8055d2b44f461064eba47f1a5b967e",
-    "plugins/agent/native/Cargo.toml": "4598708c46f69f360807fa1e6ecdf1f737913e317a84a689abb94c6c893d6ebf",
+    "plugins/agent/native/Cargo.toml": "429327c2adbfdf15b626f41e410282dcbbab30f108e19e8cf08542500aee09c6",
     "plugins/agent/ports/Cargo.toml": "f7623bda4c4413a1d4377eda079a769ff98a6ca9b6b40cf880d34dc30ba6a6f7",
     "plugins/agent/provider-protocol/Cargo.toml": "3375dc87772abd33b4cc19ed45969b7e96a16dc7fe8a00037765a3ce04567208",
     "plugins/agent/providers/Cargo.toml": "39a004b9e37326da6b30c04d07b4de8e35ab5d33aedb26bd1a7685ed68fe0865",
@@ -2746,5 +2748,5 @@
     "third-party/termina/upstream.json": "31ce8c2b8b45305bff1ce8a52db55f06e5887e770346dbc6c3ea3c574b58ebad",
     "tools/schema/Cargo.toml": "d8f47765451f555f872ea034945abd7afd54dc4c188ad5d5553932f8f2bc2462"
   },
-  "sha256": "ee11c025782319106c6a590e9ce1b0b1abd4e296faee0c6938d3678d1bcaa024"
+  "sha256": "e804cdbbaa5ce9e15f5489f10757bee058337e446399bf50c04f8239faba62f5"
 }

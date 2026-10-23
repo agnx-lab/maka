@@ -185,6 +185,7 @@ pub(crate) struct Owner {
     managed_worktrees: std::path::PathBuf,
     engine: Engine,
     tools: maka_tools::ToolCatalog,
+    mcp: crate::mcp::Servers,
     tool_basis: Vec<crate::tools::SelectedTool>,
     editing_tools: Vec<(String, maka_agent_facts::execution::EditingTools)>,
     planning_tools: Vec<String>,
@@ -234,7 +235,7 @@ impl Owner {
         input: Value,
         behavior: Option<BuiltinBehavior>,
         mut additional: Vec<maka_agent_facts::tools::ToolRegistration>,
-        internal_bindings: BTreeMap<String, Option<String>>,
+        mut internal_bindings: BTreeMap<String, Option<String>>,
         graphs: Option<Arc<crate::workhub::tasks::graph::Graphs>>,
         catalog: Arc<maka_providers::catalog::Catalog>,
     ) -> Result<Arc<Self>, String> {
@@ -349,6 +350,24 @@ impl Owner {
         if settings.todo {
             additional.extend(todo.tools());
         }
+        let mut mcp = match crate::mcp::Servers::open(
+            &settings.mcp_servers,
+            persistence.store().clone(),
+            &configuration,
+        )
+        .await
+        {
+            Ok(mcp) => mcp,
+            Err(error) => {
+                configuration
+                    .shutdown()
+                    .await
+                    .map_err(|_| "agent_configuration_cleanup_unconfirmed")?;
+                return Err(error);
+            }
+        };
+        additional.append(&mut mcp.registrations);
+        internal_bindings.append(&mut mcp.bindings);
         let internal_tools = additional
             .iter()
             .map(|tool| tool.definition.clone())
@@ -362,6 +381,7 @@ impl Owner {
             workers.clone(),
         )
         .and_then(|mut catalog| {
+            catalog.planning.extend(mcp.planning.iter().cloned());
             if settings.plans {
                 catalog.planning.push("SubmitPlan".into());
                 catalog.tools = catalog
@@ -414,6 +434,7 @@ impl Owner {
         } = match prepared_tools {
             Ok(tools) => tools,
             Err(error) => {
+                let mcp_cleanup = mcp.close().await;
                 configuration
                     .shutdown()
                     .await
@@ -423,6 +444,7 @@ impl Owner {
                             "Agent configuration store cleanup failed");
                         "agent_configuration_cleanup_unconfirmed"
                     })?;
+                mcp_cleanup?;
                 return Err(error);
             }
         };
@@ -467,6 +489,7 @@ impl Owner {
             credentials,
             engine,
             tools,
+            mcp,
             tool_basis,
             editing_tools,
             planning_tools,
@@ -1188,6 +1211,7 @@ impl Owner {
             };
             let recap = owner.recap_storage.finish().await;
             let auxiliary = owner.auxiliary.resources.finish().await;
+            let mcp = owner.mcp.close().await;
             let configuration = owner.configuration.shutdown().await;
             if let Err(error) = &configuration {
                 tracing::error!(stage = "configuration_store_shutdown", cause = crate::diagnostics::config_cause(error),
@@ -1198,6 +1222,7 @@ impl Owner {
             if !runs.quarantined.is_empty() {
                 return Err("agent_cleanup_unconfirmed".into());
             }
+            mcp?;
             scheduler?;
             todo?;
             goals?;

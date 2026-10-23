@@ -17,7 +17,6 @@
  * under the License.
  */
 
-use crate::contract::ServiceTool;
 use maka_agent_authority::interaction_wait::{wait, withdraw};
 use maka_agent_facts::interaction::Decision;
 use maka_agent_facts::interaction::InteractionOutcome;
@@ -30,12 +29,17 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
-pub(super) async fn confirm(
+pub(crate) struct Selection<'a> {
+    pub name: &'a str,
+    pub method: &'a str,
+    pub binding: &'a str,
+    pub service: &'a str,
+}
+
+pub(crate) async fn confirm(
     store: &EventLog,
     context: &ToolCallContext,
-    selection: &ServiceTool,
-    binding: &str,
-    service: String,
+    selection: Selection<'_>,
     input: &Value,
     cancellation: &CancellationToken,
 ) -> Result<(), ToolError> {
@@ -43,7 +47,7 @@ pub(super) async fn confirm(
         return Err(ToolError::Failed("service confirmation cancelled".into()));
     }
     let through = store
-        .tool_dispatch_fence(context, &selection.name, input)
+        .tool_dispatch_fence(context, selection.name, input)
         .await
         .map_err(|_| ToolError::Failed("service confirmation source unavailable".into()))?;
     let record = InteractionRecord {
@@ -53,17 +57,21 @@ pub(super) async fn confirm(
         request_id: format!(
             "service_{}",
             hex::encode(Sha256::digest(
-                serde_json::to_vec(&(&context.invocation, &context.operation_id, binding))
-                    .expect("original service call identity")
+                serde_json::to_vec(&(
+                    &context.invocation,
+                    &context.operation_id,
+                    selection.binding
+                ))
+                .expect("original service call identity")
             ))
         ),
         created_at: maka_agent_authority::now(),
         request: InteractionRequest::ServiceApproval {
             tool_use_id: context.tool_use_id(),
-            tool_name: selection.name.clone(),
-            service,
-            method: selection.method.clone(),
-            binding: binding.into(),
+            tool_name: selection.name.into(),
+            service: selection.service.into(),
+            method: selection.method.into(),
+            binding: selection.binding.into(),
             through,
         },
         outcome: None,

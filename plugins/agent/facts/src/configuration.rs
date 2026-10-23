@@ -24,6 +24,7 @@ pub mod headers;
 pub mod onboarding;
 pub use catalog_wire::*;
 pub use effects::*;
+pub mod mcp;
 mod model_catalog;
 mod model_info;
 mod model_override;

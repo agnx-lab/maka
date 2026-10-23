@@ -57,6 +57,7 @@ members = [
     "platform/js-runtime",
     "platform/code-runtime",
     "platform/python-runtime",
+    "plugins/agent/mcp",
     "plugins/agent/model",
     "plugins/agent/provider-protocol",
     "platform/network",
@@ -92,6 +93,7 @@ publish = false
 
 [workspace.dependencies]
 maka-python-runtime = { path = "platform/python-runtime" }
+maka-mcp = { path = "plugins/agent/mcp" }
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }

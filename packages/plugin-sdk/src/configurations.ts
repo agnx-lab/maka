@@ -144,6 +144,14 @@ export const configurations = {
     title: 'AgentConfiguration',
     type: 'object',
     properties: {
+      mcpServers: {
+        description: 'Explicitly trusted MCP servers. Catalogs are captured on Agent activation.',
+        type: 'array',
+        items: {
+          $ref: '#/$defs/McpServerConfiguration',
+        },
+        default: [],
+      },
       locale: {
         description: 'Deployment locale fallback; saved Root preference takes precedence.',
         type: 'string',
@@ -253,6 +261,133 @@ export const configurations = {
     additionalProperties: false,
     required: ['permissions', 'workspaceRoots', 'tools'],
     $defs: {
+      McpServerConfiguration: {
+        description:
+          'Explicit installation trust for an external MCP server. Tool annotations\nnever expand these permissions. Changes require reactivating the Agent.',
+        type: 'object',
+        properties: {
+          name: {
+            description: 'Stable namespace, using ASCII letters, digits and underscores.',
+            type: 'string',
+          },
+          transport: {
+            $ref: '#/$defs/McpTransport',
+          },
+          tools: {
+            description:
+              'Omitted selects all tools discovered from this explicitly trusted server.',
+            type: ['array', 'null'],
+            items: {
+              type: 'string',
+            },
+          },
+          readOnlyTools: {
+            description:
+              "Explicitly permit these remote tools in read-only workspaces and plans.\nThe server's readOnlyHint is descriptive and cannot grant this access.",
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+            default: [],
+          },
+          preapproved: {
+            description: 'Skip per-call confirmation only when the installer explicitly grants it.',
+            type: 'boolean',
+            default: false,
+          },
+          startupTimeoutMs: {
+            type: 'integer',
+            format: 'uint64',
+            minimum: 0,
+            default: 10000,
+          },
+          callTimeoutMs: {
+            type: 'integer',
+            format: 'uint64',
+            minimum: 0,
+            default: 120000,
+          },
+        },
+        additionalProperties: false,
+        required: ['name', 'transport'],
+      },
+      McpTransport: {
+        oneOf: [
+          {
+            description:
+              'Trusted installation process. Runs outside the session filesystem sandbox.',
+            type: 'object',
+            properties: {
+              command: {
+                type: 'string',
+              },
+              args: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                },
+                default: [],
+              },
+              cwd: {
+                description:
+                  'Absolute working directory, independent of model-controlled arguments.',
+                type: 'string',
+              },
+              env: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'string',
+                },
+                default: {},
+              },
+              passEnv: {
+                description: 'Environment variable names explicitly forwarded from the Host.',
+                type: 'array',
+                items: {
+                  type: 'string',
+                },
+                default: [],
+              },
+              type: {
+                type: 'string',
+                const: 'stdio',
+              },
+            },
+            additionalProperties: false,
+            required: ['type', 'command', 'cwd'],
+          },
+          {
+            type: 'object',
+            properties: {
+              url: {
+                type: 'string',
+              },
+              headers: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'string',
+                },
+                default: {},
+              },
+              headerEnv: {
+                description:
+                  'Header name to Host environment variable; keeps tokens out of config.',
+                type: 'object',
+                additionalProperties: {
+                  type: 'string',
+                },
+                default: {},
+              },
+              type: {
+                type: 'string',
+                const: 'streamable_http',
+              },
+            },
+            additionalProperties: false,
+            required: ['type', 'url'],
+          },
+        ],
+      },
       AgentAssistantConfiguration: {
         type: 'object',
         properties: {
@@ -635,6 +770,15 @@ export const configurations = {
         type: 'object',
         additionalProperties: false,
         properties: {
+          mcpServers: {
+            type: 'array',
+            items: {
+              $ref: '#/$defs/McpServerConfiguration',
+            },
+            description:
+              'Explicitly trusted MCP servers. Catalogs are captured on Agent activation.',
+            default: [],
+          },
           locale: {
             type: 'string',
             description: 'Deployment locale fallback; saved Root preference takes precedence.',
@@ -743,6 +887,133 @@ export const configurations = {
           },
         },
         required: ['permissions', 'workspaceRoots', 'tools'],
+      },
+      McpServerConfiguration: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Stable namespace, using ASCII letters, digits and underscores.',
+          },
+          transport: {
+            $ref: '#/$defs/McpTransport',
+          },
+          tools: {
+            type: ['array', 'null'],
+            items: {
+              type: 'string',
+            },
+            description:
+              'Omitted selects all tools discovered from this explicitly trusted server.',
+          },
+          readOnlyTools: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+            description:
+              "Explicitly permit these remote tools in read-only workspaces and plans.\nThe server's readOnlyHint is descriptive and cannot grant this access.",
+            default: [],
+          },
+          preapproved: {
+            type: 'boolean',
+            description: 'Skip per-call confirmation only when the installer explicitly grants it.',
+            default: false,
+          },
+          startupTimeoutMs: {
+            type: 'integer',
+            format: 'uint64',
+            minimum: 0,
+            default: 10000,
+          },
+          callTimeoutMs: {
+            type: 'integer',
+            format: 'uint64',
+            minimum: 0,
+            default: 120000,
+          },
+        },
+        required: ['name', 'transport'],
+        description:
+          'Explicit installation trust for an external MCP server. Tool annotations\nnever expand these permissions. Changes require reactivating the Agent.',
+      },
+      McpTransport: {
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              command: {
+                type: 'string',
+              },
+              args: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                },
+                default: [],
+              },
+              cwd: {
+                type: 'string',
+                description:
+                  'Absolute working directory, independent of model-controlled arguments.',
+              },
+              env: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'string',
+                },
+                default: {},
+              },
+              passEnv: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                },
+                description: 'Environment variable names explicitly forwarded from the Host.',
+                default: [],
+              },
+              type: {
+                type: 'string',
+                const: 'stdio',
+              },
+            },
+            required: ['type', 'command', 'cwd'],
+            description:
+              'Trusted installation process. Runs outside the session filesystem sandbox.',
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              url: {
+                type: 'string',
+              },
+              headers: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'string',
+                },
+                default: {},
+              },
+              headerEnv: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'string',
+                },
+                description:
+                  'Header name to Host environment variable; keeps tokens out of config.',
+                default: {},
+              },
+              type: {
+                type: 'string',
+                const: 'streamable_http',
+              },
+            },
+            required: ['type', 'url'],
+          },
+        ],
       },
       AgentAssistantConfiguration: {
         type: 'object',

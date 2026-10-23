@@ -18,7 +18,7 @@
  */
 
 //! Explicit service-to-tool projection. Imports describe bindings, not grants.
-mod approval;
+pub(crate) mod approval;
 mod computer;
 pub(crate) mod image;
 mod shell;
@@ -416,9 +416,12 @@ impl ToolPreparer for Service {
                         approval::confirm(
                             &store,
                             &context,
-                            &selection,
-                            &binding,
-                            target,
+                            approval::Selection {
+                                name: &selection.name,
+                                method: &selection.method,
+                                binding: &binding,
+                                service: &target,
+                            },
                             &input,
                             &cancellation,
                         )

@@ -83,6 +83,9 @@ pub use permissions::*;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentConfiguration")]
 pub struct Configuration {
+    /// Explicitly trusted MCP servers. Catalogs are captured on Agent activation.
+    #[serde(default)]
+    pub mcp_servers: Vec<maka_agent_facts::configuration::mcp::ServerConfiguration>,
     /// Deployment locale fallback; saved Root preference takes precedence.
     #[serde(default)]
     pub locale: String,
