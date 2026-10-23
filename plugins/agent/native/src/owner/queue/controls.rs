@@ -22,7 +22,8 @@ use maka_event_log::message_queue::{MessageQueue, QueueCommand, QueueEdit};
 
 impl MessageBasis {
     fn same_execution(&self, other: &Self) -> bool {
-        self.language == other.language
+        self.mcp_revision == other.mcp_revision
+            && self.language == other.language
             && self.compaction_prompt == other.compaction_prompt
             && self.graph == other.graph
             && self.collaboration_mode == other.collaboration_mode
@@ -204,7 +205,7 @@ impl Owner {
                                 &basis,
                                 false,
                                 basis.model.as_ref().and_then(|model| model.editing_tools),
-                            )
+                            )?
                             .names()
                         },
                     )

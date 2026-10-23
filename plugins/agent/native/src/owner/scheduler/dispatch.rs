@@ -155,7 +155,26 @@ impl Owner {
             .await
             .map_err(|_| "agent_preferences_unavailable")?;
         let language = self.resolve_language(&snapshot);
+        drop(runs);
+        let mcp_revision = self
+            .mcp_projects
+            .capture(&session.configuration.workspace)
+            .await?;
+        let runs = self.runs.lock().await;
+        if runs.closing || self.stop.is_cancelled() {
+            return Err("agent_closed".into());
+        }
+        let current = self.session(id).await?;
+        if current.configuration != session.configuration || current.archived {
+            return Err("scheduler_authorization_changed".into());
+        }
+        if self.graph_selected(id).await? {
+            return Err("graph_background_conflict".into());
+        }
+
+        let selected_catalog = self.mcp_projects.catalog(mcp_revision.as_deref())?;
         let mut basis = MessageBasis {
+            mcp_revision,
             language,
             compaction_prompt: Some(self.effective_compaction_prompt(&snapshot, language)),
             graph: None,
@@ -164,8 +183,8 @@ impl Owner {
             tool_discovery: self.settings.tool_discovery,
             allowed_tools: session.configuration.tools.clone(),
             background: Some(target.clone()),
-            internal_tools: self.internal_tools.clone(),
-            internal_bindings: self.internal_bindings.clone(),
+            internal_tools: selected_catalog.definitions.clone(),
+            internal_bindings: selected_catalog.bindings.clone(),
             behavior: self
                 .capture_behavior(&session.configuration.workspace, &snapshot, language)
                 .await?,

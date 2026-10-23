@@ -141,6 +141,10 @@ pub trait NativeOwner: Send + Sync + 'static {
     /// Must return promptly; close must settle any work started here, even if
     /// this hook panics. Rejected or already retiring activations never start.
     fn activated(&self) {}
+    /// Signal retirement before accepted calls drain. This nonblocking hook may
+    /// cancel owned pre-admission work that would otherwise delay those calls.
+    /// It does not release resources or acknowledge cleanup; close still owns it.
+    fn retiring(&self) {}
     /// Immutable execution facts not represented by the package, configuration
     /// or captured imports, including targets captured by the native factory.
     /// Returning Some attests that these facts fully identify this native

@@ -19433,6 +19433,116 @@ export const contracts = {
           },
           resources: {},
         },
+        projectMcp: {
+          mode: 'query',
+          input: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentMcpRead',
+            type: 'object',
+            properties: {
+              sessionId: {
+                type: 'string',
+              },
+            },
+            additionalProperties: false,
+            required: ['sessionId'],
+          },
+          output: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentMcpView',
+            oneOf: [
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    const: 'absent',
+                  },
+                },
+                required: ['kind'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  path: {
+                    type: 'string',
+                  },
+                  revision: {
+                    type: 'string',
+                  },
+                  trusted: {
+                    type: 'boolean',
+                  },
+                  servers: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/$defs/AgentMcpServerView',
+                    },
+                  },
+                  disabled: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                    },
+                  },
+                  kind: {
+                    type: 'string',
+                    const: 'configuration',
+                  },
+                },
+                additionalProperties: false,
+                required: ['kind', 'path', 'revision', 'trusted', 'servers', 'disabled'],
+              },
+            ],
+            $defs: {
+              AgentMcpServerView: {
+                description:
+                  'Displayed only to the user. Credentials are omitted, but their values remain\npart of the revision that is explicitly confirmed.',
+                type: 'object',
+                properties: {
+                  name: {
+                    type: 'string',
+                  },
+                  launch: {
+                    type: 'string',
+                  },
+                  environment: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                    },
+                  },
+                  headers: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                    },
+                  },
+                  preapproved: {
+                    type: 'boolean',
+                  },
+                  readOnlyTools: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                    },
+                  },
+                },
+                additionalProperties: false,
+                required: [
+                  'name',
+                  'launch',
+                  'environment',
+                  'headers',
+                  'preapproved',
+                  'readOnlyTools',
+                ],
+              },
+            },
+          },
+          resources: {},
+        },
         projects: {
           mode: 'query',
           input: {
@@ -25671,6 +25781,53 @@ export const contracts = {
             required: ['names'],
             title: 'AgentToolNames',
             $schema: 'https://json-schema.org/draft/2020-12/schema',
+          },
+          resources: {},
+        },
+        trustProjectMcp: {
+          mode: 'mutation',
+          input: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentMcpTrust',
+            type: 'object',
+            properties: {
+              sessionId: {
+                type: 'string',
+              },
+              revision: {
+                type: 'string',
+              },
+            },
+            additionalProperties: false,
+            required: ['sessionId', 'revision'],
+          },
+          output: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentMcpTrustResult',
+            oneOf: [
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    const: 'trusted',
+                  },
+                },
+                required: ['kind'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    const: 'changed',
+                  },
+                },
+                required: ['kind'],
+                additionalProperties: false,
+              },
+            ],
           },
           resources: {},
         },

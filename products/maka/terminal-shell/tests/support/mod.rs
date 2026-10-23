@@ -506,6 +506,8 @@ impl Fixture {
                             "directories",
                             "create",
                             "selectBackend",
+                            "projectMcp",
+                            "trustProjectMcp",
                             "globalInstructions",
                             "updateGlobalInstructions",
                             "metadata",

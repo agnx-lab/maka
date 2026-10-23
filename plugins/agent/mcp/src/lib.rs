@@ -94,12 +94,46 @@ impl ClientHandler for Handler {
 }
 type Ready = oneshot::Sender<Result<(Peer<RoleClient>, Vec<RemoteTool>), String>>;
 
+/// A failed startup separately reports whether its owned resources settled.
+#[derive(Debug)]
+pub struct StartupError {
+    pub message: String,
+    pub cleanup_confirmed: bool,
+}
+impl StartupError {
+    pub fn clean(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            cleanup_confirmed: true,
+        }
+    }
+    pub fn unconfirmed(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            cleanup_confirmed: false,
+        }
+    }
+}
 impl Connection {
     pub async fn connect(
         configuration: ServerConfiguration,
         network: maka_network::Policy,
     ) -> Result<Self, String> {
-        validate(&configuration)?;
+        Self::connect_cancellable(configuration, network, CancellationToken::new())
+            .await
+            .map_err(|error| error.message)
+    }
+    pub async fn connect_cancellable(
+        configuration: ServerConfiguration,
+        network: maka_network::Policy,
+        cancellation: CancellationToken,
+    ) -> Result<Self, StartupError> {
+        validate(&configuration).map_err(StartupError::clean)?;
+        if cancellation.is_cancelled() {
+            return Err(StartupError::clean("MCP startup cancelled"));
+        }
+        let cleanup_confirmed = Arc::new(AtomicBool::new(false));
+        let cleanup = cleanup_confirmed.clone();
         let stop = CancellationToken::new();
         let cancel_on_drop = stop.clone().drop_guard();
         let invalid = Arc::new(AtomicBool::new(false));
@@ -111,18 +145,23 @@ impl Connection {
         // Startup and teardown survive a dropped observer. No child or HTTP worker
         // can lose its owner when the activation request is cancelled.
         tokio::spawn(async move {
-            let result = own(config, network, owner_invalid, owner_stop, ready).await;
+            let result = own(config, network, owner_invalid, owner_stop, ready, cleanup).await;
             finished.send_replace(Some(result));
         });
-        let result = received
-            .await
-            .map_err(|_| "MCP connection owner disappeared".to_owned())?;
+        let result = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err("MCP startup cancelled".to_owned()),
+            result = received => result.unwrap_or_else(|_| Err("MCP connection owner disappeared".into())),
+        };
         let (peer, tools) = match result {
             Ok(ready) => ready,
             Err(error) => {
                 stop.cancel();
                 let cleanup = owned::closed(done).await;
-                return Err(cleanup.err().unwrap_or(error));
+                return Err(StartupError {
+                    message: cleanup.err().unwrap_or(error),
+                    cleanup_confirmed: cleanup_confirmed.load(Ordering::Acquire),
+                });
             }
         };
         cancel_on_drop.disarm();
@@ -274,6 +313,7 @@ async fn own(
     invalid: Arc<AtomicBool>,
     stop: CancellationToken,
     ready: Ready,
+    cleanup_confirmed: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut ready = Some(ready);
     let outcome = match &config.transport {
@@ -324,9 +364,15 @@ async fn own(
                 Ok::<_, String>(plan)
             })();
             match setup {
-                Err(error) => Err(error),
+                Err(error) => {
+                    cleanup_confirmed.store(true, Ordering::Release);
+                    Err(error)
+                }
                 Ok(plan) => match maka_process::pipe::spawn(plan).await {
-                    Err(_) => Err("MCP process startup failed".into()),
+                    Err(_) => {
+                        cleanup_confirmed.store(true, Ordering::Release);
+                        Err("MCP process startup failed".into())
+                    }
                     Ok(spawned) => {
                         let maka_process::pipe::Spawned {
                             mut child,
@@ -340,7 +386,16 @@ async fn own(
                         });
                         let transport = AsyncRwTransport::<RoleClient, _, _>::new(stdout, stdin)
                             .with_max_line_length(MAX_MESSAGE);
-                        let result = run(transport, &config, invalid, stop, &mut ready).await;
+                        let transport_cleaned = AtomicBool::new(false);
+                        let result = run(
+                            transport,
+                            &config,
+                            invalid,
+                            stop,
+                            &mut ready,
+                            &transport_cleaned,
+                        )
+                        .await;
                         let cleanup = async {
                             // EOF gives a cooperative stdio server time to process
                             // its final cancellation/close before forced group teardown.
@@ -363,6 +418,9 @@ async fn own(
                         // retain this Host's drain task indefinitely.
                         stderr.abort();
                         let _ = stderr.await;
+                        if cleanup.is_ok() && transport_cleaned.load(Ordering::Acquire) {
+                            cleanup_confirmed.store(true, Ordering::Release);
+                        }
                         cleanup.map_err(str::to_owned).and(result)
                     }
                 },
@@ -409,8 +467,21 @@ async fn own(
                 ))
             })();
             match setup {
-                Ok(transport) => run(transport, &config, invalid, stop, &mut ready).await,
-                Err(error) => Err(error),
+                Ok(transport) => {
+                    run(
+                        transport,
+                        &config,
+                        invalid,
+                        stop,
+                        &mut ready,
+                        &cleanup_confirmed,
+                    )
+                    .await
+                }
+                Err(error) => {
+                    cleanup_confirmed.store(true, Ordering::Release);
+                    Err(error)
+                }
             }
         }
     };
@@ -429,6 +500,7 @@ async fn run<T: Transport<RoleClient> + 'static>(
     invalid: Arc<AtomicBool>,
     stop: CancellationToken,
     ready: &mut Option<Ready>,
+    cleanup_confirmed: &AtomicBool,
 ) -> Result<(), String> {
     let (transport, closed) = owned::track(transport);
     let handler = Handler(invalid);
@@ -505,5 +577,6 @@ async fn run<T: Transport<RoleClient> + 'static>(
     tokio::time::timeout(CLEANUP, owned::closed(closed))
         .await
         .map_err(|_| "MCP transport cleanup unconfirmed".to_owned())??;
+    cleanup_confirmed.store(true, Ordering::Release);
     outcome
 }

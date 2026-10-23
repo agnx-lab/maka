@@ -147,6 +147,10 @@ impl Owner {
         };
         // This read-only basis selects tool names; it never renders or admits model work.
         let basis = MessageBasis {
+            mcp_revision: self
+                .mcp_projects
+                .available(&session.configuration.workspace)
+                .await?,
             language: Language::En,
             compaction_prompt: None,
             graph,
@@ -166,7 +170,7 @@ impl Owner {
         };
         let input = serde_json::to_value(SkillToolRequest {
             workspace: Some(session.configuration.workspace),
-            tools: self.selected_tools(&basis, false, Some(editing)).names(),
+            tools: self.selected_tools(&basis, false, Some(editing))?.names(),
             input: maka_skills_api::contract::ModelSearch {
                 query: input.query,
                 limit: Some(8),

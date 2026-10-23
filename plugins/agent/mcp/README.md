@@ -21,9 +21,45 @@
 
 Maka uses the official Rust MCP SDK (`rmcp`) for stdio and Streamable HTTP tool servers. The native Agent discovers tools at activation, then exposes them to direct calls, tool discovery and both Code Mode languages through the same tool catalog, approval flow and durable journal.
 
-## Configure a server
+## Portable configuration files
 
-Set `agent.mcpServers` in the product's `installation.json`, then [author and activate the installation](../../../products/maka/bundle/README.md#author-an-installation). For an existing installation, edit the Agent instance's `configuration.mcpServers` in the [Plugins composition editor](../../../products/maka/cli/README.md), save and reactivate the Agent. There is no dedicated MCP connection screen. The default is an empty list.
+Maka reads strict JSON with a `mcpServers` object from these locations, following the same home and workspace selection as `AGENTS.md`:
+
+| Scope | Selection order |
+| --- | --- |
+| User | `~/.maka/mcp.json`, `~/.maka/.mcp.json`, `~/.agents/mcp.json`, `~/.agents/.mcp.json` |
+| Project | `mcp.json`, then `.mcp.json`, directly in the conversation's selected workspace |
+
+The home is the Agent's configured `assistant.home`. No parent-directory search occurs. The first existing file in each scope wins; an empty server object masks the fallback file, and invalid/unreadable files produce an error instead of falling back. Files must be regular files within the selected directory and at most 1 MiB. Workspace-instruction preferences do not turn MCP loading off.
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "command": "node",
+      "args": ["./server.mjs"],
+      "env": {"DOCS_MODE": "local"}
+    },
+    "remote": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headerEnv": {"authorization": "MCP_AUTHORIZATION"}
+    }
+  }
+}
+```
+
+Entries replace whole servers by name, in this order: installation configuration → user file → project file. `{"disabled": true}` removes an inherited server. A file entry accepts `command`, `args`, `cwd`, `env`, `passEnv`, or `url`, `headers`, `headerEnv`, plus the tool selection, read-only permission, preapproval and timeout fields shown below. Transport is inferred from `command` or `url`; accepted explicit types are `stdio`, `http`, `streamable-http` and `streamable_http`. Legacy SSE, JSONC and `${…}` environment expansion are not supported; use `passEnv` or `headerEnv` for Host environment references.
+
+In files, omitted `cwd` means the configuration file's directory; relative `cwd` is resolved from that directory. Relative executable paths such as `./.venv/bin/mcp` resolve from the effective `cwd`; bare commands use `PATH`. Arguments are passed literally.
+
+User files load at Agent activation. Project files require explicit user confirmation in the terminal before any server connects or starts. Sending presents the selected file, commands/endpoints, environment/header references, preapproval and read-only grants while keeping the draft. Choose **Trust configuration**, then send the draft. The `projectMcp` query and `trustProjectMcp` mutation expose the same flow to other clients; Agent-originated calls cannot grant trust.
+
+Trust persists for the selected workspace identity, path and configuration revision. File changes require confirmation again. New messages capture the newly trusted catalog; already queued messages retain their original connections. Different workspaces have separate project catalogs even when server names match. No dedicated connection editor is included.
+
+## Installation configuration
+
+Set `agent.mcpServers` in the product's `installation.json`, then [author and activate the installation](../../../products/maka/bundle/README.md#author-an-installation). For an existing installation, edit the Agent instance's `configuration.mcpServers` in the [Plugins composition editor](../../../products/maka/cli/README.md), save and reactivate the Agent. The default installation list is empty.
 
 This is an Agent configuration fragment; merge it into the existing configuration:
 
@@ -64,17 +100,17 @@ Stdio uses a command and argument array, without a shell. `cwd` must be absolute
 
 ## Names, trust and results
 
-Server names contain 1–32 ASCII letters, digits or underscores. Public names are `mcp__<server>__<tool>`; other characters in a remote tool name become underscores. Collisions and unknown tools in explicit selections fail activation. For example, Code Mode calls `tools.mcp__local_docs__search({...})` in JavaScript or `await tools.mcp__local_docs__search({...})` in Python.
+Server names contain 1–32 ASCII letters, digits, underscores or hyphens. Public names are `mcp__<server>__<tool>`; server hyphens and other characters in remote tool names become underscores. Collisions and unknown tools in explicit selections fail activation. For example, Code Mode calls `tools.mcp__local_docs__search({...})` in JavaScript or `await tools.mcp__local_docs__search({...})` in Python.
 
 Omitting `tools` exposes all discovered tools from that server; an empty list exposes none. `readOnlyTools` explicitly trusts the named remote tools in read-only sessions and plans. Server `readOnlyHint` annotations cannot grant this permission. `preapproved` defaults to false, so calls require confirmation. Explicit preapproval skips confirmation but retains the session's live tool and workspace permission checks, including a recheck after approval. Planning still requires explicit read-only trust.
 
-Installing an MCP server is a trust decision. Stdio servers run as the Host user, outside the session filesystem sandbox, and may access the machine independently of tool calls. HTTP servers control their own filesystem, network and effects. Maka permissions govern which MCP calls are admitted; they do not sandbox the server. Start and tool discovery happen at Agent activation, before any per-call approval. Do not install untrusted servers or forward unrelated credentials.
+Installing an MCP server is a trust decision. Stdio servers run as the Host user, outside the session filesystem sandbox, and may access the machine independently of tool calls. HTTP servers control their own filesystem, network and effects. Maka permissions govern which MCP calls are admitted; they do not sandbox the server. Installation/user servers start at Agent activation; project servers start after configuration trust, on first use. Both occur before any per-call approval. Do not install untrusted servers or forward unrelated credentials.
 
 The journal and Code Mode preserve the full MCP `CallToolResult` envelope, including `content`, `structuredContent`, `isError`, annotations and metadata. Text, images and audio also use the existing model-output projection. `isError: true` remains a server-reported tool error in that envelope. Resource links remain references and are not fetched automatically. Server descriptions, schemas and returned text are untrusted content.
 
 ## Lifecycle and limits
 
-Tool schemas are frozen for an activation. A list-change notification retires the catalog; reactivate the Agent to discover a fresh catalog. A new protocol session gets a new binding identity, so previously queued work cannot silently acquire the replacement server. Submit a new message after reactivation. Failed required server startup fails Agent activation with the server name; servers are not silently omitted.
+Tool schemas are frozen for each captured connection. A list-change notification retires the catalog; reactivate the Agent to discover a fresh catalog. A new protocol session gets a new binding identity, so previously queued work cannot silently acquire the replacement server. Submit a new message after reactivation. Installation/user startup failure fails Agent activation; project startup failure rejects the new message with the server name. Servers are not silently omitted. Unconfirmed startup cleanup prevents further project startup in that activation and remains a shutdown error.
 
 Calls are sent once, with no automatic replay or expired-session recovery. Timeout/cancellation requests cancellation and retires an unsettled connection. Local stdio cleanup waits for process-group termination. Missing terminal results remain outcome-unknown; closing an HTTP connection cannot prove that external work stopped, so its cleanup remains unconfirmed. Inspect the external system before deliberately retrying an uncertain effect. Shutdown closes all owned connections.
 

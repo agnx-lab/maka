@@ -28,6 +28,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+#[path = "contract_mcp.rs"]
+mod mcp;
+pub use mcp::*;
 #[path = "contract_context.rs"]
 mod context;
 pub use context::*;
@@ -1508,6 +1511,8 @@ pub fn contract() -> Contract {
         transport: Transport::Remote,
         interface: Interface::Service {
             methods: BTreeMap::from([
+                ("projectMcp".into(), method::<McpRead, McpView>(MethodMode::Query)),
+                ("trustProjectMcp".into(), method::<McpTrust, McpTrustResult>(MethodMode::Mutation)),
                 (
                     "globalInstructions".into(),
                     method::<GlobalInstructionsRead, GlobalInstructionsView>(MethodMode::Query),

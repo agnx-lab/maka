@@ -6540,7 +6540,7 @@ export interface AgentConfiguration {
  */
 export interface McpServerConfiguration {
   /**
-   * Stable namespace, using ASCII letters, digits and underscores.
+   * Stable namespace, using ASCII letters, digits, underscores and hyphens.
    */
   name: string;
   transport: McpTransport;

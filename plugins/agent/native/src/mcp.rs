@@ -17,6 +17,24 @@
  * under the License.
  */
 
+mod files;
+mod projects;
+pub(crate) use projects::{Catalog, Prepared, Projects};
+
+pub(crate) fn global(
+    configurations: &[ServerConfiguration],
+    home: Option<(&cap_std::fs::Dir, &std::path::Path)>,
+) -> Result<Vec<ServerConfiguration>, String> {
+    let mut names = BTreeSet::new();
+    for config in configurations {
+        maka_mcp::validate(config)?;
+        if !names.insert(&config.name) {
+            return Err("MCP server names must be unique".into());
+        }
+    }
+    Ok(files::merge(configurations, &[&files::global(home)?]))
+}
+
 use maka_agent_api::{contract::WorkspaceAccess, session::SessionConfiguration};
 use maka_agent_facts::{
     configuration::mcp::ServerConfiguration,
@@ -38,6 +56,7 @@ use tokio_util::sync::CancellationToken;
 #[derive(Default)]
 pub(crate) struct Servers {
     connections: Vec<Connection>,
+    pub names: BTreeMap<String, Vec<String>>,
     pub registrations: Vec<ToolRegistration>,
     pub planning: Vec<String>,
     pub bindings: BTreeMap<String, Option<String>>,
@@ -48,38 +67,75 @@ impl Servers {
         store: Arc<EventLog>,
         configuration: &maka_config::ConfigurationStore,
     ) -> Result<Self, String> {
+        Self::open_cancellable(
+            configurations,
+            store,
+            configuration,
+            CancellationToken::new(),
+        )
+        .await
+        .map_err(|error| error.message)
+    }
+    pub async fn open_cancellable(
+        configurations: &[ServerConfiguration],
+        store: Arc<EventLog>,
+        configuration: &maka_config::ConfigurationStore,
+        cancellation: CancellationToken,
+    ) -> Result<Self, maka_mcp::StartupError> {
+        use maka_mcp::StartupError;
         let mut servers = Self::default();
         if configurations.is_empty() {
             return Ok(servers);
         }
         let mut names = BTreeSet::new();
         if configurations.len() > 64 {
-            return Err("At most 64 MCP servers may be configured".into());
+            return Err(StartupError::clean(
+                "At most 64 MCP servers may be configured",
+            ));
         }
         for config in configurations {
-            maka_mcp::validate(config)?;
+            maka_mcp::validate(config).map_err(StartupError::clean)?;
             if !names.insert(&config.name) {
-                return Err("MCP server names must be unique".into());
+                return Err(StartupError::clean("MCP server names must be unique"));
             }
         }
         let network = configuration
             .network_configuration()
             .await
-            .map_err(|_| "MCP network settings are unavailable")?;
+            .map_err(|_| StartupError::clean("MCP network settings are unavailable"))?;
         let network =
             maka_network::Policy::from_host_settings(&network.proxy, network.password.as_deref())
-                .map_err(|_| "MCP network settings are invalid")?;
+                .map_err(|_| StartupError::clean("MCP network settings are invalid"))?;
         for config in configurations {
-            let connection = match Connection::connect(config.clone(), network.clone()).await {
+            let connection = match Connection::connect_cancellable(
+                config.clone(),
+                network.clone(),
+                cancellation.clone(),
+            )
+            .await
+            {
                 Ok(connection) => connection,
                 Err(error) => {
-                    servers.close().await?;
-                    return Err(format!("MCP server {}: {error}", config.name));
+                    if let Err(cleanup) = servers.close().await {
+                        return Err(StartupError::unconfirmed(cleanup));
+                    }
+                    return Err(StartupError {
+                        message: format!("MCP server {}: {}", config.name, error.message),
+                        cleanup_confirmed: error.cleanup_confirmed,
+                    });
                 }
             };
             // A new external protocol session is a new authority generation.
             // Previously admitted work cannot silently acquire its replacement.
             let generation = format!("mcp:{}:{}", config.name, uuid::Uuid::new_v4());
+            servers.names.insert(
+                config.name.clone(),
+                connection
+                    .tools()
+                    .iter()
+                    .map(|tool| tool.definition.name.clone())
+                    .collect(),
+            );
             for tool in connection.tools() {
                 let name = tool.definition.name.clone();
                 if tool.read_only {

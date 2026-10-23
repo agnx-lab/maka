@@ -386,3 +386,40 @@ async fn http_rejects_oversized_json_error_chunked_and_sse_before_eof() {
         );
     }
 }
+
+#[tokio::test]
+async fn explicit_startup_cancellation_returns_confirmed_child_cleanup() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("record");
+    let mut settings = config("startup-hang", &record);
+    settings.startup_timeout_ms = 300_000;
+    let token = CancellationToken::new();
+    let startup = tokio::spawn(Connection::connect_cancellable(
+        settings,
+        Default::default(),
+        token.clone(),
+    ));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !record.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    token.cancel();
+    let error = tokio::time::timeout(Duration::from_secs(5), startup)
+        .await
+        .unwrap()
+        .unwrap()
+        .err()
+        .expect("cancelled startup");
+    assert!(error.cleanup_confirmed, "{}", error.message);
+    let pid = std::fs::read_to_string(record)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .find_map(|value| value["pid"].as_i64())
+        .unwrap();
+    #[cfg(unix)]
+    assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
+}

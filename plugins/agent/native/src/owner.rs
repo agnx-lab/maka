@@ -43,6 +43,7 @@ mod projects;
 pub(crate) use notifications::ReturnRoute;
 mod git;
 mod global_instructions;
+mod mcp;
 mod patches;
 mod queue;
 mod recall;
@@ -83,6 +84,8 @@ use maka_agent_api::session::SessionConfiguration;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MessageBasis {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mcp_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     compaction_prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,15 +183,13 @@ pub(crate) struct Owner {
     pub workspace_roots: Vec<workspace::Root>,
     instruction_home: Option<Arc<cap_std::fs::Dir>>,
     pub import_roots: Vec<workspace::Root>,
-    internal_tools: Vec<maka_agent_facts::tools::ToolDefinition>,
-    internal_bindings: BTreeMap<String, Option<String>>,
     managed_worktrees: std::path::PathBuf,
     engine: Engine,
     tools: maka_tools::ToolCatalog,
     mcp: crate::mcp::Servers,
+    mcp_projects: Arc<crate::mcp::Projects>,
     tool_basis: Vec<crate::tools::SelectedTool>,
     editing_tools: Vec<(String, maka_agent_facts::execution::EditingTools)>,
-    planning_tools: Vec<String>,
     skills: Option<skills::Library>,
     executors: crate::executor::Executors,
     runs: Arc<runs::Registry>,
@@ -292,6 +293,16 @@ impl Owner {
         let native_language = maka_config::language::native_language();
         let skills = skills::Library::select(&context, &settings, revision.clone())?;
         let instruction_home = assistant::open_home(settings.assistant.as_ref())?;
+        let mcp_configurations = crate::mcp::global(
+            &settings.mcp_servers,
+            instruction_home.as_deref().zip(
+                settings
+                    .assistant
+                    .as_ref()
+                    .and_then(|assistant| assistant.home.as_deref())
+                    .map(std::path::Path::new),
+            ),
+        )?;
         let executors = crate::executor::Executors::capture(&context, &settings.executors)?;
         let configuration = Arc::new(
             ConfigurationStore::for_root(root)
@@ -351,7 +362,7 @@ impl Owner {
             additional.extend(todo.tools());
         }
         let mut mcp = match crate::mcp::Servers::open(
-            &settings.mcp_servers,
+            &mcp_configurations,
             persistence.store().clone(),
             &configuration,
         )
@@ -368,7 +379,7 @@ impl Owner {
         };
         additional.append(&mut mcp.registrations);
         internal_bindings.append(&mut mcp.bindings);
-        let internal_tools = additional
+        let internal_tools: Vec<_> = additional
             .iter()
             .map(|tool| tool.definition.clone())
             .collect();
@@ -461,6 +472,21 @@ impl Owner {
             cells,
             Arc::new(crate::model::Prices(configuration.clone())),
         );
+        let mcp_projects = Arc::new(crate::mcp::Projects::new(
+            crate::mcp::Catalog {
+                tools: tools.clone(),
+                definitions: internal_tools.clone(),
+                bindings: internal_bindings.clone(),
+                planning: planning_tools.clone(),
+            },
+            prefix.clone(),
+            mcp_configurations,
+            mcp.names.clone(),
+            persistence.store().clone(),
+            configuration.clone(),
+            workers.clone(),
+            stop.child_token(),
+        ));
         Ok(Arc::new(Self {
             graphs,
             plans,
@@ -481,8 +507,6 @@ impl Owner {
             configured_locale,
             native_language,
             instruction_home,
-            internal_tools,
-            internal_bindings,
             settings,
             configuration,
             catalog,
@@ -490,9 +514,9 @@ impl Owner {
             engine,
             tools,
             mcp,
+            mcp_projects,
             tool_basis,
             editing_tools,
-            planning_tools,
             skills,
             executors,
             runs: Arc::default(),
@@ -572,9 +596,7 @@ impl Owner {
         let mut tools = input.tools;
         if let Some(names) = &mut tools {
             names.sort();
-            if names.windows(2).any(|pair| pair[0] == pair[1])
-                || names.iter().any(|name| !self.tools.contains(name))
-            {
+            if names.windows(2).any(|pair| pair[0] == pair[1]) {
                 return Ok(Created::Rejected {
                     reason: Rejection::ToolsUnavailable,
                 });
@@ -655,6 +677,21 @@ impl Owner {
                 session.configuration.workspace
             }
         };
+        if let Some(names) = &tools
+            && names.iter().any(|name| !self.tools.contains(name))
+        {
+            // A ceiling containing only baseline tools never starts project servers.
+            let revision = self.mcp_projects.available(&selected).await?;
+            let catalog = self.mcp_projects.catalog(revision.as_deref())?;
+            if names
+                .iter()
+                .any(|name| !self.tools.contains(name) && !catalog.tools.contains(name))
+            {
+                return Ok(Created::Rejected {
+                    reason: Rejection::ToolsUnavailable,
+                });
+            }
+        }
         let id = self.operation_id(operation);
         let record = self
             .store
@@ -832,8 +869,9 @@ impl Owner {
         basis: &MessageBasis,
         discovery: bool,
         editing: Option<maka_agent_facts::execution::EditingTools>,
-    ) -> maka_tools::ToolCatalog {
-        let selected = plan::select(&self.tools, basis, &self.planning_tools);
+    ) -> Result<maka_tools::ToolCatalog, String> {
+        let catalog = self.mcp_projects.catalog(basis.mcp_revision.as_deref())?;
+        let selected = plan::select(&catalog.tools, basis, &catalog.planning);
         let selected = if basis.graph.is_some() {
             selected
         } else {
@@ -863,11 +901,11 @@ impl Owner {
                 selected.excluding(&excluded)
             }
         };
-        if discovery {
+        Ok(if discovery {
             selected.with_discovery()
         } else {
             selected
-        }
+        })
     }
     pub async fn send(
         self: &Arc<Self>,
@@ -989,7 +1027,46 @@ impl Owner {
             .await
             .map_err(|_| "agent_preferences_unavailable")?;
         let language = self.resolve_language(&snapshot);
+        // Preserve ordinary send ordering. Only actual external startup leaves
+        // the admission gate; parsing and a cached catalog do not reorder work.
+        let (admission, queued, mcp_revision) = if external {
+            (admission, queued, None)
+        } else {
+            match self
+                .mcp_projects
+                .prepare(&session.configuration.workspace)
+                .await?
+            {
+                crate::mcp::Prepared::Ready(revision) => (admission, queued, revision),
+                crate::mcp::Prepared::Startup(proposal) => {
+                    drop(admission);
+                    let revision = self.mcp_projects.start(*proposal).await?;
+                    let admission = self.runs.session(&id).await;
+                    let queued = {
+                        let runs = admission.state().await;
+                        if runs.closing || self.stop.is_cancelled() {
+                            return Err("agent_closed".into());
+                        }
+                        if runs.quarantined.contains(&id) {
+                            return Err("agent_cleanup_unconfirmed".into());
+                        }
+                        let current = runs.controls.get(&id);
+                        if let Some(reason) = current.and_then(|control| control.failure) {
+                            return Err(reason.into());
+                        }
+                        current.map(|control| control.invocation.clone())
+                    };
+                    let current = self.session(&id).await?;
+                    if current.configuration != session.configuration || current.archived {
+                        return Err("agent_session_configuration_changed".into());
+                    }
+                    (admission, queued, revision)
+                }
+            }
+        };
+        let selected_catalog = self.mcp_projects.catalog(mcp_revision.as_deref())?;
         let mut basis = MessageBasis {
+            mcp_revision,
             language,
             compaction_prompt: Some(self.effective_compaction_prompt(&snapshot, language)),
             graph: None,
@@ -1001,12 +1078,12 @@ impl Owner {
             internal_tools: if external {
                 vec![]
             } else {
-                self.internal_tools.clone()
+                selected_catalog.definitions.clone()
             },
             internal_bindings: if external {
                 BTreeMap::new()
             } else {
-                self.internal_bindings.clone()
+                selected_catalog.bindings.clone()
             },
             behavior: self
                 .capture_behavior(&session.configuration.workspace, &snapshot, language)
@@ -1047,7 +1124,7 @@ impl Owner {
                         &basis,
                         false,
                         basis.model.as_ref().and_then(|model| model.editing_tools),
-                    )
+                    )?
                     .names()
                 },
             )
@@ -1188,9 +1265,14 @@ impl Owner {
             stop: self.stop.clone(),
         }))
     }
+    pub fn retiring(&self) {
+        self.mcp_projects.retire();
+    }
     pub fn close(self: &Arc<Self>) -> BoxFuture<'static, Result<(), String>> {
         let owner = self.clone();
         Box::pin(async move {
+            // Wake pending external startup before waiting for lifecycle readers.
+            owner.stop.cancel();
             {
                 let mut runs = owner.runs.lock().await;
                 runs.closing = true;
@@ -1211,6 +1293,7 @@ impl Owner {
             };
             let recap = owner.recap_storage.finish().await;
             let auxiliary = owner.auxiliary.resources.finish().await;
+            let projects = owner.mcp_projects.close().await;
             let mcp = owner.mcp.close().await;
             let configuration = owner.configuration.shutdown().await;
             if let Err(error) = &configuration {
@@ -1222,6 +1305,7 @@ impl Owner {
             if !runs.quarantined.is_empty() {
                 return Err("agent_cleanup_unconfirmed".into());
             }
+            projects?;
             mcp?;
             scheduler?;
             todo?;

@@ -116,6 +116,7 @@ pub(crate) fn catalog(
     let mut web_bindings = Vec::new();
     let mut computer_bindings = Vec::new();
     let mut shell_bindings = Vec::new();
+    let mut skill_bindings = Vec::new();
     let skill_contract = maka_skills_api::contract();
     let tool_names: Arc<Vec<(String, Option<EditingTools>)>> = Arc::new(
         selected
@@ -273,6 +274,9 @@ pub(crate) fn catalog(
                 mode: method.mode,
                 web_basis: None,
             };
+            if selection.input == ToolInput::Skill {
+                skill_bindings.push((selection.name.clone(), Arc::new(SkillBinding(service.clone()))));
+            }
             if selection.result == ToolResult::Computer {
                 computer_bindings.push((
                     selection.name.clone(),
@@ -333,6 +337,11 @@ pub(crate) fn catalog(
         .collect::<Result<Vec<_>, String>>()?;
     let mut catalog = ToolCatalog::new(registrations.into_iter().chain(additional))
         .map_err(|_| "agent_tool_catalog_invalid")?;
+    for (name, binding) in skill_bindings {
+        catalog = catalog
+            .with_request_binding([name].into(), binding)
+            .map_err(|_| "agent_skill_binding_invalid")?;
+    }
     for (name, binding) in web_bindings {
         catalog = catalog
             .with_request_binding([name].into(), binding)
@@ -661,6 +670,32 @@ fn mutation_result(reply: OperationReply, language: Language) -> Result<ToolSucc
         Receipt::NotRecorded => Err(ToolError::Failed(
             "native service operation was not recorded".into(),
         )),
+    }
+}
+
+// Skills compare requirements with the actual workspace/request tool ceiling.
+// Keeping this on the request binding also respects plans and editing styles.
+struct SkillBinding(Service);
+impl maka_tools::request::RequestBinding for SkillBinding {
+    fn bind(
+        &self,
+        request: maka_tools::request::BindingRequest,
+    ) -> maka_tools::request::BindingFuture {
+        let mut service = self.0.clone();
+        service.tool_names = Arc::new(
+            request
+                .available_tools
+                .into_iter()
+                .map(|name| (name, None))
+                .collect(),
+        );
+        let name = service.selection.name.clone();
+        Box::pin(async move {
+            Ok(std::collections::BTreeMap::from([(
+                name,
+                maka_tools::request::BoundTool::Prepared(Arc::new(service) as Arc<dyn ToolPreparer>),
+            )]))
+        })
     }
 }
 

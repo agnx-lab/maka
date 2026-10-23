@@ -61,6 +61,50 @@ import {
 } from '../../../../plugins/shared/locale-messages.js';
 
 export const conversationMessages = {
+  'MCP server configuration': ['MCP server configuration', 'MCP 服务器配置', 'MCP 伺服器設定'],
+  'Trust project MCP configuration?': [
+    'Trust project MCP configuration?',
+    '信任项目 MCP 配置？',
+    '信任專案 MCP 設定？',
+  ],
+  'These servers can run commands as your user or contact remote services. They start outside the conversation sandbox. Trust only servers you recognize.':
+    [
+      'These servers can run commands as your user or contact remote services. They start outside the conversation sandbox. Trust only servers you recognize.',
+      '这些服务器可以以你的用户身份运行命令或连接远程服务，启动时不受会话沙箱限制。请仅信任你认识的服务器。',
+      '這些伺服器可以以你的使用者身分執行命令或連線遠端服務，啟動時不受對話沙箱限制。請僅信任你認識的伺服器。',
+    ],
+  'Environment variables': ['Environment variables', '环境变量', '環境變數'],
+  'HTTP headers': ['HTTP headers', 'HTTP 请求头', 'HTTP 請求標頭'],
+  'Calls run without individual confirmation.': [
+    'Calls run without individual confirmation.',
+    '工具调用无需逐次确认。',
+    '工具呼叫無需逐次確認。',
+  ],
+  'Allowed in read-only sessions and plans': [
+    'Allowed in read-only sessions and plans',
+    '可在只读会话和计划模式中调用',
+    '可在唯讀對話和計畫模式中呼叫',
+  ],
+  'Disabled servers': ['Disabled servers', '已禁用的服务器', '已停用的伺服器'],
+  'Trust is saved for this workspace and configuration. Changes require confirmation again. Your draft has not been sent.':
+    [
+      'Trust is saved for this workspace and configuration. Changes require confirmation again. Your draft has not been sent.',
+      '信任仅对当前工作区和配置有效。配置变更后需要重新确认。草稿尚未发送。',
+      '信任僅對目前工作區和設定有效。設定變更後需要重新確認。草稿尚未傳送。',
+    ],
+  'Saving trust…': ['Saving trust…', '正在保存信任…', '正在儲存信任…'],
+  'Trust configuration': ['Trust configuration', '信任此配置', '信任此設定'],
+  'The MCP configuration changed. Review it again before trusting it.': [
+    'The MCP configuration changed. Review it again before trusting it.',
+    'MCP 配置已变更，请重新查看后再确认信任。',
+    'MCP 設定已變更，請重新檢視後再確認信任。',
+  ],
+  'Project MCP configuration trusted. Send your draft when ready.': [
+    'Project MCP configuration trusted. Send your draft when ready.',
+    '已信任项目 MCP 配置。准备好后可发送草稿。',
+    '已信任專案 MCP 設定。準備好後可傳送草稿。',
+  ],
+
   'A fresh start in your workspace': [
     'A fresh start in your workspace',
     '在工作区中开启新对话',

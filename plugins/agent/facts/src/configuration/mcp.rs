@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "McpServerConfiguration")]
 pub struct ServerConfiguration {
-    /// Stable namespace, using ASCII letters, digits and underscores.
+    /// Stable namespace, using ASCII letters, digits, underscores and hyphens.
     pub name: String,
     pub transport: Transport,
     /// Omitted selects all tools discovered from this explicitly trusted server.

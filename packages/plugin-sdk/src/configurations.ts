@@ -267,7 +267,7 @@ export const configurations = {
         type: 'object',
         properties: {
           name: {
-            description: 'Stable namespace, using ASCII letters, digits and underscores.',
+            description: 'Stable namespace, using ASCII letters, digits, underscores and hyphens.',
             type: 'string',
           },
           transport: {
@@ -894,7 +894,7 @@ export const configurations = {
         properties: {
           name: {
             type: 'string',
-            description: 'Stable namespace, using ASCII letters, digits and underscores.',
+            description: 'Stable namespace, using ASCII letters, digits, underscores and hyphens.',
           },
           transport: {
             $ref: '#/$defs/McpTransport',

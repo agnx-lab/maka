@@ -26,10 +26,11 @@ pub fn validate(configuration: &ServerConfiguration) -> Result<(), String> {
         || !configuration
             .name
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
     {
         return Err(
-            "MCP server name must contain 1–32 ASCII letters, digits or underscores".into(),
+            "MCP server name must contain 1–32 ASCII letters, digits, underscores or hyphens"
+                .into(),
         );
     }
     if !(1..=300_000).contains(&configuration.startup_timeout_ms)
@@ -134,7 +135,10 @@ pub(crate) fn tools(
                 }
             })
             .collect();
-        let public_name = format!("mcp__{}__{normalized}", configuration.name);
+        let public_name = format!(
+            "mcp__{}__{normalized}",
+            configuration.name.replace('-', "_")
+        );
         if name.is_empty() || public_name.len() > 128 || selected.contains_key(&public_name) {
             return Err("MCP tool names are empty, too long or collide after normalization".into());
         }
