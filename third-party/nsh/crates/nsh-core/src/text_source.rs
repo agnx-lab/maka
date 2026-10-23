@@ -25,7 +25,6 @@ pub enum TextSource {
 
 /// One rendered source segment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct TextSourceSegment {
     /// Inclusive local UTF-16 start.
     pub start: u32,

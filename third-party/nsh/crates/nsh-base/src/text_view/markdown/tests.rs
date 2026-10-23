@@ -275,6 +275,7 @@ fn code_blocks_and_rules() {
         ),
         vec![
             Block::CodeBlock(CodeBlock {
+                source: Vec::new(),
                 language: Some("rust".into()),
                 meta: Some("title=\"main.rs\"".into()),
                 code: "fn main() {}".into(),
@@ -388,9 +389,13 @@ fn math() {
                 t("."),
             ]),
             Block::Math {
+                source: Vec::new(),
                 tex: "\\int_0^1 x\\,dx".into()
             },
-            Block::Math { tex: "a^2".into() },
+            Block::Math {
+                source: Vec::new(),
+                tex: "a^2".into()
+            },
         ]
     );
     // Prices are prose.
@@ -439,6 +444,7 @@ fn tex_delimiters() {
                 t("."),
             ]),
             Block::Math {
+                source: Vec::new(),
                 tex: "\\int_0^1 x\\,dx".into()
             },
             p(vec![t("After "), code("\\(code\\)")]),
@@ -448,7 +454,10 @@ fn tex_delimiters() {
     assert_eq!(
         blocks("> \\[ a^2 \\]"),
         vec![Block::Blockquote {
-            children: vec![Block::Math { tex: "a^2".into() }],
+            children: vec![Block::Math {
+                source: Vec::new(),
+                tex: "a^2".into()
+            }],
             alert: None,
         }]
     );
@@ -1033,4 +1042,262 @@ fn inline_html_formatting_holds_markdown() {
         blocks("<code>*x*</code>"),
         vec![p(vec![Inline::Code { code: "*x*".into() }])]
     );
+}
+
+/// Read the actual native source-bearing leaves, in presentation order.
+type SourceRange = (u32, u32, u64, u64, nsh_core::TextSourceKind);
+type SourceLeaf = (String, Vec<SourceRange>);
+fn source_leaves(document: &Document) -> Vec<SourceLeaf> {
+    fn inlines(content: &[Inline], out: &mut Vec<SourceLeaf>) {
+        for inline in content {
+            match inline {
+                Inline::Source { content, segments } => out.push((
+                    if matches!(content.as_slice(), [Inline::Image(_)]) {
+                        "\u{fffc}".into()
+                    } else {
+                        content.iter().map(Inline::plain_text).collect()
+                    },
+                    segments
+                        .iter()
+                        .map(|s| (s.start, s.end, s.source_start, s.source_end, s.kind))
+                        .collect(),
+                )),
+                Inline::Strong { content }
+                | Inline::Emphasis { content }
+                | Inline::Strikethrough { content }
+                | Inline::Link { content, .. } => inlines(content, out),
+                _ => {}
+            }
+        }
+    }
+    fn block_leaves(blocks: &[Block], out: &mut Vec<SourceLeaf>) {
+        for block in blocks {
+            match block {
+                Block::Paragraph { content } | Block::Heading { content, .. } => {
+                    inlines(content, out)
+                }
+                Block::Blockquote { children, .. } => block_leaves(children, out),
+                Block::List { items, .. } => {
+                    for item in items {
+                        block_leaves(&item.children, out);
+                    }
+                }
+                Block::Custom(node) => block_leaves(&node.children, out),
+                Block::Table(table) => {
+                    for cell in table.head.iter().chain(table.rows.iter().flatten()) {
+                        inlines(&cell.content, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    block_leaves(&document.blocks, &mut out);
+    for note in &document.footnotes {
+        block_leaves(&note.children, &mut out);
+    }
+    out
+}
+
+#[test]
+fn native_source_leaves_keep_utf8_entities_escapes_and_code_atoms() {
+    use nsh_core::TextSourceKind::{Literal as L, Replacement as R};
+    let document = Parser::new().markdown_source("A &amp; \\* &#x1F642; ` a🙂 `");
+    assert_eq!(
+        source_leaves(&document),
+        vec![
+            (
+                "A & * 🙂 ".into(),
+                vec![
+                    (0, 2, 0, 2, L),
+                    (2, 3, 2, 7, R),
+                    (3, 4, 7, 8, L),
+                    (4, 5, 8, 10, R),
+                    (5, 6, 10, 11, L),
+                    (6, 8, 11, 20, R),
+                    (8, 9, 20, 21, L)
+                ]
+            ),
+            ("a🙂".into(), vec![(0, 3, 23, 28, L)]),
+        ]
+    );
+    let unicode = Parser::new().markdown_source("你好 **粗体** 👩🏽‍💻 e\u{301}");
+    assert_eq!(
+        source_leaves(&unicode),
+        vec![
+            ("你好 ".into(), vec![(0, 3, 0, 7, L)]),
+            ("粗体".into(), vec![(0, 2, 9, 15, L)]),
+            (" 👩🏽‍💻 e\u{301}".into(), vec![(0, 11, 17, 37, L)]),
+        ]
+    );
+    for original in ["&#00000038;", "&#x0000026;", "&#999999999999999999999999;"] {
+        assert_eq!(
+            Parser::new()
+                .markdown_source(&format!("&amp; {original}"))
+                .plain_text(),
+            format!("& {original}")
+        );
+    }
+}
+
+#[test]
+fn native_sources_compose_crlf_streaming_deletions_and_tex_rewrites() {
+    use nsh_core::TextSourceKind::{Literal as L, Replacement as R};
+    let parser = Parser::new().options(MarkdownOptions {
+        streaming: true,
+        ..options()
+    });
+    assert_eq!(
+        source_leaves(&parser.markdown_source("a\r\nb")),
+        vec![(
+            "a b".into(),
+            vec![(0, 1, 0, 1, L), (1, 2, 1, 3, R), (2, 3, 3, 4, L)]
+        )]
+    );
+    assert_eq!(
+        source_leaves(&parser.markdown_source("dup [dup](http")),
+        vec![("dup dup".into(), vec![(0, 4, 0, 4, L), (4, 7, 5, 8, L)])]
+    );
+    assert_eq!(
+        source_leaves(&parser.markdown_source("同🙂\r\n\r\n[同🙂](x)\r\n\r\n**同🙂")),
+        vec![
+            ("同🙂".into(), vec![(0, 3, 0, 7, L)]),
+            ("同🙂".into(), vec![(0, 3, 12, 19, L)]),
+            ("同🙂".into(), vec![(0, 3, 29, 36, L)]),
+        ]
+    );
+    assert_eq!(
+        source_leaves(&parser.markdown_source("A \\(x\\) B")),
+        vec![
+            ("A ".into(), vec![(0, 2, 0, 2, L)]),
+            ("x".into(), vec![(0, 1, 2, 7, R)]),
+            (" B".into(), vec![(0, 2, 7, 9, L)]),
+        ]
+    );
+}
+
+#[test]
+fn native_source_positions_survive_alert_container_and_definition_reading() {
+    use nsh_core::TextSourceKind::{Literal as L, Replacement as R};
+    let parser = Parser::new().extension(MarkdownExtension::container("note", "note"));
+    assert_eq!(
+        source_leaves(&parser.markdown_source("> [!NOTE]\n> Useful **info**.")),
+        vec![
+            ("Useful ".into(), vec![(0, 7, 12, 19, L)]),
+            ("info".into(), vec![(0, 4, 21, 25, L)]),
+            (".".into(), vec![(0, 1, 27, 28, L)]),
+        ]
+    );
+    let source = "before [x][id]\n\n:::note\ninside **x**\n:::\n\n[id]: target\n";
+    let document = parser.markdown_source(source);
+    assert_eq!(
+        source_leaves(&document),
+        vec![
+            ("before ".into(), vec![(0, 7, 0, 7, L)]),
+            ("x".into(), vec![(0, 1, 8, 9, L)]),
+            ("inside ".into(), vec![(0, 7, 24, 31, L)]),
+            ("x".into(), vec![(0, 1, 33, 34, L)]),
+        ]
+    );
+    let footnote = Parser::new().markdown_source("word[^n]\n\n[^n]: note &amp;\n");
+    assert_eq!(
+        source_leaves(&footnote).last().unwrap(),
+        &("note &".into(), vec![(0, 5, 16, 21, L), (5, 6, 21, 26, R)])
+    );
+    let formula = Parser::new().markdown_source("$$\na\nb\n$$");
+    let Block::Math {
+        tex,
+        source: mappings,
+    } = &formula.blocks[0]
+    else {
+        panic!("formula")
+    };
+    assert_eq!(tex, "a\nb");
+    assert_eq!(
+        mappings
+            .iter()
+            .map(|s| (s.start, s.end, s.source_start, s.source_end, s.kind))
+            .collect::<Vec<_>>(),
+        vec![(0, 3, 3, 6, L)]
+    );
+    assert_eq!(
+        source_leaves(&Parser::new().markdown_source("<div>A &amp; B</div>")),
+        vec![("A & B".into(), vec![(0, 5, 0, 20, R)])]
+    );
+    assert_eq!(
+        source_leaves(
+            &Parser::new()
+                .options(MarkdownOptions {
+                    html: false,
+                    ..options()
+                })
+                .markdown_source("<div>A &amp; B</div>")
+        ),
+        vec![("<div>A &amp; B</div>".into(), vec![(0, 20, 0, 20, L)])]
+    );
+    // JS custom renderers receive content, never native provenance wrappers.
+    assert_eq!(
+        serde_json::to_value(document).unwrap(),
+        serde_json::to_value(parser.markdown(source)).unwrap()
+    );
+}
+
+#[test]
+fn native_code_source_preserves_tabs_blank_lines_and_indentation() {
+    use nsh_core::TextSourceKind::Literal as L;
+    let parser = Parser::new();
+    let document = parser
+        .markdown_source("```rust\n  let 你好 = \"👩🏽‍💻 e\u{301}\";  \n\tprintln!(\"完成\");\n\n```");
+    let Block::CodeBlock(code) = &document.blocks[0] else {
+        panic!("native code block")
+    };
+    assert_eq!(
+        code.code,
+        "  let 你好 = \"👩🏽‍💻 e\u{301}\";  \n\tprintln!(\"完成\");\n"
+    );
+    let indented = parser.markdown_source("    ```\n    x\n    ```");
+    let Block::CodeBlock(code) = &indented.blocks[0] else {
+        panic!("indented code block")
+    };
+    assert_eq!(code.code, "```\nx\n```");
+    assert_eq!(
+        code.source
+            .iter()
+            .map(|s| (s.start, s.end, s.source_start, s.source_end, s.kind))
+            .collect::<Vec<_>>(),
+        vec![(0, 4, 4, 8, L), (4, 6, 12, 14, L), (6, 9, 18, 21, L)]
+    );
+}
+
+#[test]
+fn native_images_tables_and_references_retain_their_own_source_atoms() {
+    use nsh_core::TextSourceKind::{Literal as L, Replacement as R};
+    let parser = Parser::new();
+    let document = parser.markdown_source(
+        "中🙂 ![图](a.png) [![图](b.png)](file.txt)\n\n| x | y |\n|---|---|\n| x | `y` |",
+    );
+    assert_eq!(
+        source_leaves(&document),
+        vec![
+            ("中🙂 ".into(), vec![(0, 4, 0, 8, L)]),
+            ("\u{fffc}".into(), vec![(0, 1, 8, 21, R)]),
+            (" ".into(), vec![(0, 1, 21, 22, L)]),
+            ("\u{fffc}".into(), vec![(0, 1, 23, 36, R)]),
+            ("x".into(), vec![(0, 1, 51, 52, L)]),
+            ("y".into(), vec![(0, 1, 55, 56, L)]),
+            ("x".into(), vec![(0, 1, 71, 72, L)]),
+            ("y".into(), vec![(0, 1, 76, 77, L)]),
+        ]
+    );
+    let unresolved = "same [late][r]";
+    assert_eq!(
+        parser.markdown_source(unresolved).plain_text(),
+        "same [late][r]"
+    );
+    let resolved = parser.markdown_source("same [late][r]\n\n[r]: file.txt");
+    let Block::Paragraph { content } = &resolved.blocks[0] else {
+        panic!("paragraph")
+    };
+    assert!(matches!(&content[1],Inline::Link {url,..} if url=="file.txt"));
 }

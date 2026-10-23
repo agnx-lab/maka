@@ -12,11 +12,14 @@
 
 mod container;
 mod latex;
+mod mapped;
+pub(super) mod source;
 mod streaming;
 #[cfg(test)]
 mod tests;
 
-use std::{borrow::Cow, collections::HashMap};
+use self::mapped::Source;
+use std::collections::HashMap;
 
 use markdown::{
     ParseOptions,
@@ -24,7 +27,6 @@ use markdown::{
 };
 
 use self::container::Segment;
-pub(crate) use self::streaming::repair_streaming;
 use super::{
     Parser,
     common::{self, Slugger},
@@ -40,41 +42,22 @@ use super::{
 const MAX_DEPTH: usize = 32;
 
 /// Markdown `source` read with `parser`'s options, extensions and plugins.
-pub(crate) fn parse(parser: &Parser, source: &str) -> Document {
-    let mut source = if source.contains('\r') {
-        Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
-    } else {
-        Cow::Borrowed(source)
-    };
+pub(crate) fn parse(parser: &Parser, source: &str, mapped: bool) -> Document {
+    let mut source = Source::original(source).normalize();
     if parser.options.streaming {
-        let repaired = match repair_streaming(&source) {
-            Cow::Owned(repaired) => Some(repaired),
-            Cow::Borrowed(_) => None,
-        };
-        if let Some(repaired) = repaired {
-            source = Cow::Owned(repaired);
-        }
+        source = streaming::repair_mapped(source);
     }
     if parser.options.math {
-        let rewritten = match latex::rewrite(&source) {
-            Cow::Owned(rewritten) => Some(rewritten),
-            Cow::Borrowed(_) => None,
-        };
-        if let Some(rewritten) = rewritten {
-            source = Cow::Owned(rewritten);
-        }
+        source = latex::rewrite_mapped(source);
     }
-    let source = source.as_ref();
 
     let segments = if parser.extensions.iter().any(|e| e.container.is_some()) {
-        container::split(source, &parser.extensions)
+        container::split(&source, &parser.extensions)
     } else {
         vec![Segment::Markdown(0..source.len())]
     };
-    // Declared before the trees, which may borrow them.
-    let with_definitions: Vec<String>;
     let mut trees = Vec::new();
-    parse_trees(parser, source, &segments, &mut trees);
+    parse_trees(parser, &source, &segments, &mut trees);
     // `markdown-rs` resolves a reference only to a definition of the same
     // parse: parts a container cut apart are read again with the
     // document's definitions after them.
@@ -83,19 +66,22 @@ pub(crate) fn parse(parser: &Parser, source: &str) -> Document {
         if !definitions.is_empty() {
             let mut ranges = Vec::new();
             markdown_ranges(&segments, &mut ranges);
-            with_definitions = ranges
+            trees = ranges
                 .iter()
-                .map(|r| format!("{}\n\n{definitions}", &source[r.clone()]))
-                .collect();
-            trees = with_definitions
-                .iter()
-                .zip(&ranges)
-                .map(|(text, r)| tree(parser, text, r.start == 0))
+                .map(|r| {
+                    let mut text = source.slice(r.clone());
+                    text.push("\n\n");
+                    text.append(&definitions);
+                    tree(parser, text, r.start == 0)
+                })
                 .collect();
         }
     }
 
-    let mut converter = Converter::new(parser, &trees);
+    if trees.is_empty() {
+        trees.push(tree(parser, Source::default(), true));
+    }
+    let mut converter = Converter::new(parser, &trees, mapped);
     let mut blocks = Vec::new();
     let mut next = 0;
     converter.segments(&segments, &trees, &mut next, &mut blocks);
@@ -104,31 +90,25 @@ pub(crate) fn parse(parser: &Parser, source: &str) -> Document {
 }
 
 /// A Markdown part of the source and its syntax tree.
-struct Tree<'s> {
-    source: Cow<'s, str>,
+struct Tree {
+    source: Source,
     root: Node,
 }
 
-fn parse_trees<'s>(
-    parser: &Parser,
-    source: &'s str,
-    segments: &[Segment],
-    out: &mut Vec<Tree<'s>>,
-) {
+fn parse_trees(parser: &Parser, source: &Source, segments: &[Segment], out: &mut Vec<Tree>) {
     for segment in segments {
         match segment {
             Segment::Markdown(range) => {
                 // Front matter is only the document's first lines.
-                out.push(tree(parser, &source[range.clone()], range.start == 0));
+                out.push(tree(parser, source.slice(range.clone()), range.start == 0));
             }
-            Segment::Container(container) => parse_trees(parser, source, &container.children, out),
+            Segment::Container(container) => parse_trees(parser, &source, &container.children, out),
         }
     }
 }
 
 /// Markdown `text` parsed (`first`: the document's start).
-fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
-    let mut source = Cow::Borrowed(text);
+fn tree(parser: &Parser, mut source: Source, first: bool) -> Tree {
     let mut root = parse_tree(parser, &source, first);
     if parser.options.math {
         // Pairs of `$` that are prose: their opening `$` escaped, the text
@@ -140,16 +120,16 @@ fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
             if opens.is_empty() {
                 break;
             }
-            let mut escaped = String::with_capacity(source.len() + opens.len());
+            let mut escaped = source.writer();
             let mut at = 0;
             for open in opens {
-                escaped.push_str(&source[at..open]);
+                escaped.copy(&source[at..open]);
                 escaped.push('\\');
                 at = open;
             }
-            escaped.push_str(&source[at..]);
-            root = parse_tree(parser, &escaped, first);
-            source = Cow::Owned(escaped);
+            escaped.copy(&source[at..]);
+            source = escaped.finish();
+            root = parse_tree(parser, &source, first);
         }
     }
     Tree { source, root }
@@ -167,8 +147,8 @@ fn markdown_ranges(segments: &[Segment], out: &mut Vec<std::ops::Range<usize>>) 
 
 /// The source of the link and footnote definitions of `trees` (their top
 /// level), each on lines of its own.
-fn definitions(trees: &[Tree<'_>]) -> String {
-    let mut out = String::new();
+fn definitions(trees: &[Tree]) -> Source {
+    let mut out = Source::default();
     for tree in trees {
         let Some(children) = tree.root.children() else {
             continue;
@@ -176,10 +156,10 @@ fn definitions(trees: &[Tree<'_>]) -> String {
         for node in children {
             if matches!(node, Node::Definition(_) | Node::FootnoteDefinition(_))
                 && let Some(p) = node.position()
-                && let Some(text) = tree.source.get(p.start.offset..p.end.offset)
+                && tree.source.get(p.start.offset..p.end.offset).is_some()
             {
-                out.push_str(text);
-                out.push_str("\n\n");
+                out.append(&tree.source.slice(p.start.offset..p.end.offset));
+                out.push("\n\n");
             }
         }
     }
@@ -281,11 +261,13 @@ fn is_prose(source: &str, tex: &str, start: usize, end: usize) -> bool {
 struct Converter<'a> {
     parser: &'a Parser,
     /// The source of the tree being read.
-    source: &'a str,
+    source: &'a Source,
+    mapped: bool,
+    quote: u32,
     /// Link and image definitions by identifier.
     definitions: HashMap<&'a str, &'a mdast::Definition>,
     /// Footnote definitions by identifier, with the source of their tree.
-    footnote_definitions: HashMap<&'a str, (&'a str, &'a mdast::FootnoteDefinition)>,
+    footnote_definitions: HashMap<&'a str, (&'a Source, &'a mdast::FootnoteDefinition)>,
     /// Identifiers of the footnotes referred to, in the order of their
     /// first reference.
     footnote_order: Vec<&'a str>,
@@ -296,10 +278,12 @@ struct Converter<'a> {
 }
 
 impl<'a> Converter<'a> {
-    fn new(parser: &'a Parser, trees: &'a [Tree<'a>]) -> Self {
+    fn new(parser: &'a Parser, trees: &'a [Tree], mapped: bool) -> Self {
         let mut converter = Self {
             parser,
-            source: "",
+            source: &trees[0].source,
+            mapped,
+            quote: 0,
             definitions: HashMap::new(),
             footnote_definitions: HashMap::new(),
             footnote_order: Vec::new(),
@@ -314,11 +298,11 @@ impl<'a> Converter<'a> {
     }
 
     /// Collects the definitions under `node` (the first of a name wins).
-    fn collect(&mut self, source: &'a str, node: &'a Node) {
+    fn collect(&mut self, source: &'a Source, node: &'a Node) {
         self.collect_at(source, node, 0);
     }
 
-    fn collect_at(&mut self, source: &'a str, node: &'a Node, depth: usize) {
+    fn collect_at(&mut self, source: &'a Source, node: &'a Node, depth: usize) {
         if depth >= MAX_DEPTH {
             return;
         }
@@ -350,7 +334,7 @@ impl<'a> Converter<'a> {
     fn segments(
         &mut self,
         segments: &[Segment],
-        trees: &'a [Tree<'a>],
+        trees: &'a [Tree],
         next: &mut usize,
         out: &mut Vec<Block>,
     ) {
@@ -487,11 +471,12 @@ impl<'a> Converter<'a> {
                 });
             }
             Node::Blockquote(quote) => {
+                self.quote += 1;
                 let alert = self
                     .parser
                     .options
                     .alerts
-                    .then(|| alert(&quote.children))
+                    .then(|| alert(&quote.children, self.source, self.quote))
                     .flatten();
                 let mut children = Vec::new();
                 let alert = match alert {
@@ -507,6 +492,7 @@ impl<'a> Converter<'a> {
                         None
                     }
                 };
+                self.quote -= 1;
                 out.push(Block::Blockquote { children, alert });
             }
             Node::List(list) => {
@@ -537,13 +523,20 @@ impl<'a> Converter<'a> {
             Node::Code(code) => out.push(self.code(code)),
             Node::Math(math) => out.push(Block::Math {
                 tex: math.value.clone(),
+                source: self.formula_source(node, &math.value),
             }),
             Node::Html(h) => {
                 if self.parser.options.html {
-                    out.extend(html::blocks(self.parser, &h.value));
+                    let mut blocks = html::blocks(self.parser, &h.value);
+                    self.html_blocks(&mut blocks, node_range(node));
+                    out.extend(blocks);
                 } else {
                     out.push(Block::Paragraph {
-                        content: literal_lines(&h.value),
+                        content: self.source_content(
+                            literal_lines(&h.value),
+                            node_range(node),
+                            &h.value,
+                        ),
                     });
                 }
             }
@@ -605,6 +598,7 @@ impl<'a> Converter<'a> {
             if self.parser.options.math && lang.eq_ignore_ascii_case("math") {
                 return Block::Math {
                     tex: code.value.clone(),
+                    source: self.code_source(&Node::Code(code.clone()), &code.value),
                 };
             }
         }
@@ -612,6 +606,7 @@ impl<'a> Converter<'a> {
             language: code.lang.clone(),
             meta: code.meta.clone(),
             code: code.value.clone(),
+            source: self.code_source(&Node::Code(code.clone()), &code.value),
         })
     }
 
@@ -674,6 +669,7 @@ impl<'a> Converter<'a> {
             self.parser,
             &format!("{}\n{}", open.value, close_node.value.trim()),
         );
+        self.html_blocks(&mut element, node_range(&nodes[at]));
         let children = match element.last_mut() {
             Some(Block::Details { children, .. })
             | Some(Block::Blockquote { children, .. })
@@ -690,6 +686,156 @@ impl<'a> Converter<'a> {
         }
         out.extend(element);
         Some(close)
+    }
+
+    fn formula_source(&self, node: &Node, text: &str) -> Vec<nsh_core::TextSourceSegment> {
+        let range = node_range(node);
+        let raw = self.source.get(range.clone()).unwrap_or_default();
+        // A formula with fences on their own lines keeps its body exactly as
+        // code does. Same-line math is one lexical delimiter replacement.
+        if raw.contains('\n')
+            && raw
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim_matches(['$', ' ', '\t', '\r'])
+                .is_empty()
+        {
+            self.code_source(node, text)
+        } else {
+            self.source_segments(range, text, false)
+        }
+    }
+
+    fn code_source(&self, node: &Node, text: &str) -> Vec<nsh_core::TextSourceSegment> {
+        if !self.mapped {
+            return Vec::new();
+        }
+        self.source.project(
+            text,
+            source::code(self.source, node, text).expect("Markdown code/formula provenance"),
+        )
+    }
+
+    /// A literal source range is exact only when its visible bytes agree.
+    /// HTML's decoded/collapsed text is an explicit atomic replacement of
+    /// the originating HTML node, never a guessed substring address.
+    fn source_segments(
+        &self,
+        range: std::ops::Range<usize>,
+        text: &str,
+        literal: bool,
+    ) -> Vec<nsh_core::TextSourceSegment> {
+        if !self.mapped || text.is_empty() {
+            return Vec::new();
+        }
+        let segments = if literal && self.source.get(range.clone()) == Some(text) {
+            source::literal(range.start, text)
+        } else {
+            vec![nsh_core::TextSourceSegment {
+                start: 0,
+                end: text.encode_utf16().count() as u32,
+                source_start: range.start as u64,
+                source_end: range.end as u64,
+                kind: nsh_core::TextSourceKind::Replacement,
+            }]
+        };
+        self.source.project(text, segments)
+    }
+
+    fn source_content(
+        &self,
+        content: Vec<Inline>,
+        range: std::ops::Range<usize>,
+        text: &str,
+    ) -> Vec<Inline> {
+        if !self.mapped {
+            return content;
+        }
+        vec![Inline::Source {
+            content,
+            segments: self.source_segments(range, text, true),
+        }]
+    }
+
+    fn html_inlines(&self, content: &mut [Inline], range: std::ops::Range<usize>) {
+        if !self.mapped {
+            return;
+        }
+        for inline in content {
+            match inline {
+                Inline::Source { .. } => {}
+                Inline::Strong { content }
+                | Inline::Emphasis { content }
+                | Inline::Strikethrough { content }
+                | Inline::Underline { content }
+                | Inline::Highlight { content, .. }
+                | Inline::Superscript { content }
+                | Inline::Subscript { content }
+                | Inline::Small { content }
+                | Inline::Link { content, .. } => self.html_inlines(content, range.clone()),
+                Inline::Custom(node) => {
+                    self.html_blocks(&mut node.children, range.clone());
+                    self.html_inlines(&mut node.content, range.clone());
+                    node.source = self.source_segments(range.clone(), &node.text, false);
+                }
+                leaf => {
+                    let text = match &*leaf {
+                        Inline::Image(_) => "\u{fffc}".into(),
+                        Inline::FootnoteReference { index, .. } => index.to_string(),
+                        leaf => leaf.plain_text(),
+                    };
+                    let segments = self.source_segments(range.clone(), &text, false);
+                    let original = std::mem::replace(leaf, Inline::text(""));
+                    *leaf = Inline::Source {
+                        content: vec![original],
+                        segments,
+                    };
+                }
+            }
+        }
+    }
+
+    fn html_blocks(&self, blocks: &mut [Block], range: std::ops::Range<usize>) {
+        if !self.mapped {
+            return;
+        }
+        for block in blocks {
+            match block {
+                Block::Paragraph { content } | Block::Heading { content, .. } => {
+                    self.html_inlines(content, range.clone())
+                }
+                Block::Blockquote { children, .. } => self.html_blocks(children, range.clone()),
+                Block::List { items, .. } => {
+                    for item in items {
+                        self.html_blocks(&mut item.children, range.clone());
+                    }
+                }
+                Block::CodeBlock(code) => {
+                    code.source = self.source_segments(range.clone(), &code.code, false)
+                }
+                Block::Math { tex, source } => {
+                    *source = self.source_segments(range.clone(), tex, false)
+                }
+                Block::Table(table) => {
+                    for cell in table.head.iter_mut().chain(table.rows.iter_mut().flatten()) {
+                        self.html_inlines(&mut cell.content, range.clone());
+                    }
+                }
+                Block::Details {
+                    summary, children, ..
+                } => {
+                    self.html_inlines(summary, range.clone());
+                    self.html_blocks(children, range.clone());
+                }
+                Block::Custom(node) => {
+                    self.html_inlines(&mut node.content, range.clone());
+                    self.html_blocks(&mut node.children, range.clone());
+                    node.source = self.source_segments(range.clone(), &node.text, false);
+                }
+                Block::Rule => {}
+            }
+        }
     }
 
     // --- Inline content -----------------------------------------------------
@@ -721,7 +867,12 @@ impl<'a> Converter<'a> {
             } else if let Some((close, fragment)) = self.inline_element(nodes, i) {
                 match self.formatting_element(nodes, i, close) {
                     Some(inline) => out.push(inline),
-                    None => extend(&mut out, html::inlines(self.parser, fragment)),
+                    None => {
+                        let mut content = html::inlines(self.parser, fragment);
+                        let range = node_range(&nodes[i]).start..node_range(&nodes[close]).end;
+                        self.html_inlines(&mut content, range);
+                        extend(&mut out, content);
+                    }
                 }
                 i = close;
             } else {
@@ -790,9 +941,17 @@ impl<'a> Converter<'a> {
     }
 
     fn convert_inline(&mut self, node: &Node, out: &mut Vec<Inline>) {
+        let begin = out.len();
         match node {
             // A soft line break is a space: the paragraph flows.
-            Node::Text(text) => push_text(out, &text.value.replace('\n', " ")),
+            Node::Text(text) => {
+                let text = text.value.replace('\n', " ");
+                if self.mapped {
+                    out.push(Inline::text(text));
+                } else {
+                    push_text(out, &text);
+                }
+            }
             Node::Emphasis(e) => out.push(Inline::Emphasis {
                 content: self.inlines(&e.children),
             }),
@@ -866,9 +1025,17 @@ impl<'a> Converter<'a> {
             }
             Node::Html(h) => {
                 if self.parser.options.html {
-                    extend(out, html::inlines(self.parser, &h.value));
+                    let mut content = html::inlines(self.parser, &h.value);
+                    self.html_inlines(&mut content, node_range(node));
+                    extend(out, content);
                 } else {
-                    push_text(out, &h.value.replace('\n', " "));
+                    let text = h.value.replace('\n', " ");
+                    let content = self.source_content(
+                        vec![Inline::text(text.clone())],
+                        node_range(node),
+                        &text,
+                    );
+                    extend(out, content);
                 }
             }
             Node::MdxJsxTextElement(el) => {
@@ -893,6 +1060,45 @@ impl<'a> Converter<'a> {
                     extend(out, content);
                 }
             }
+        }
+        if self.mapped
+            && matches!(
+                node,
+                Node::Text(_)
+                    | Node::InlineCode(_)
+                    | Node::InlineMath(_)
+                    | Node::Break(_)
+                    | Node::Image(_)
+                    | Node::ImageReference(_)
+            )
+            && out.len() > begin
+        {
+            let content = out.split_off(begin);
+            let image = matches!(content.as_slice(), [Inline::Image(_)]);
+            let rendered = if image {
+                "\u{fffc}".to_owned()
+            } else {
+                inlines_text(&content)
+            };
+            let segments = match node {
+                Node::Text(_) => source::text(self.source, node, &rendered, self.quote),
+                Node::InlineCode(_) => {
+                    source::inline_code(self.source, node, &rendered, self.quote)
+                }
+                Node::Break(_) => Ok(source::line_break(self.source, node)),
+                _ => Ok(vec![nsh_core::TextSourceSegment {
+                    start: 0,
+                    end: rendered.encode_utf16().count() as u32,
+                    source_start: node.position().map_or(0, |p| p.start.offset) as u64,
+                    source_end: node.position().map_or(0, |p| p.end.offset) as u64,
+                    kind: nsh_core::TextSourceKind::Replacement,
+                }]),
+            }
+            .expect("Markdown inline provenance");
+            out.push(Inline::Source {
+                content,
+                segments: self.source.project(&rendered, segments),
+            });
         }
     }
 
@@ -943,10 +1149,15 @@ impl ReadChildren for Converter<'_> {
     }
 }
 
+fn node_range(node: &Node) -> std::ops::Range<usize> {
+    node.position()
+        .map_or(0..0, |position| position.start.offset..position.end.offset)
+}
+
 /// The alert a quote's blocks make (GitHub's: the first line of its first
 /// paragraph is `[!NOTE]`, ...), and that paragraph without it (`None`
 /// when nothing else was in it).
-fn alert(children: &[Node]) -> Option<(Alert, Option<Node>)> {
+fn alert(children: &[Node], source: &Source, quote: u32) -> Option<(Alert, Option<Node>)> {
     let Some(Node::Paragraph(paragraph)) = children.first() else {
         return None;
     };
@@ -981,6 +1192,16 @@ fn alert(children: &[Node]) -> Option<(Alert, Option<Node>)> {
         let rest = rest.strip_prefix('\n')?;
         if let Some(Node::Text(text)) = first.children.first_mut() {
             text.value = rest.to_owned();
+            // The alert marker was removed lexically. Advance the cloned
+            // leaf's position past its line and its continuation prefix too.
+            if let Some(position) = text.position.as_mut() {
+                let raw = &source[position.start.offset..position.end.offset];
+                let newline = raw.find('\n')? + 1;
+                let prefix = source::continuation_length(&raw[newline..], quote);
+                position.start.offset += newline + prefix;
+                position.start.line += 1;
+                position.start.column = prefix + 1;
+            }
         }
     }
     let first = (!first.children.is_empty()).then_some(Node::Paragraph(first));

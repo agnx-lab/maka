@@ -9613,7 +9613,6 @@ dependencies = [
  "maka-settings-native",
  "maka-ui-runtime",
  "maka-workspace-api",
- "markdown",
  "nsh-base",
  "nsh-bundler",
  "nsh-core",

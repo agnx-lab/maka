@@ -798,11 +798,7 @@ impl Fixture {
         let mut view = AppView::new(AppOptions {
             size: evidence_size(),
             data_dir: Some(self.directory.path().join("nsh")),
-            ui_sets: Some(vec![
-                nsh_base::registry(),
-                registry,
-                maka_terminal_shell::markdown::registry(),
-            ]),
+            ui_sets: Some(vec![nsh_base::registry(), registry]),
             ..Default::default()
         });
         load_application(&mut view);

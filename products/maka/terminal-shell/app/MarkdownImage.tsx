@@ -20,12 +20,12 @@
 import { cleanup, inputAction, signal, Text, View, Image } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
-import type { MarkdownImage } from 'maka/markdown';
+import type { TextViewImage } from 'nsh/base';
 import { host } from './host';
 import { ImageViewer } from './ImageViewer';
 import { createText, errorText, UiError } from './text';
 import { tr } from './locale';
-import { C, bodyTextStyle, captionTextStyle, controlFocusStyle } from './ui';
+import { C, captionTextStyle, controlFocusStyle } from './ui';
 
 type Reading = { stream: Awaited<ReturnType<typeof openFile>> | null };
 const openFile = (sessionId: string, path: { bytesBase64: string }) =>
@@ -39,12 +39,13 @@ const close = async (reading: Reading | null) => {
 // One real native inline attachment remains mounted through loading and failure.
 // Its source atom and paragraph layout are owned by the surrounding Text.
 export function MarkdownImageView(props: {
-  image(): MarkdownImage;
+  image(): TextViewImage;
   sessionId: string;
-  width?(): number;
   linked: boolean;
+  flow: 'block' | 'inline';
+  lineHeight: number;
 }) {
-  const target = props.image().target;
+  const target = props.image().src;
   const sessionId = props.sessionId;
   const source = signal<{ uri: string } | null>(null);
   const dimensions = signal<{ width: number; height: number } | null>(null);
@@ -53,7 +54,7 @@ export function MarkdownImageView(props: {
   let reading: Reading | null = null;
   let button: YNode | undefined;
   let alive = true;
-  const owns = () => alive && props.sessionId === sessionId && props.image().target === target;
+  const owns = () => alive && props.sessionId === sessionId && props.image().src === target;
   const read = () => {
     if (!owns()) return;
     const previous = reading;
@@ -99,14 +100,10 @@ export function MarkdownImageView(props: {
   });
   read();
   const name = () => props.image().alt || target;
-  const width = () => {
-    const intrinsic = dimensions()?.width;
-    const available = props.width?.();
-    return intrinsic === undefined ? available : Math.min(available ?? intrinsic, intrinsic);
-  };
-  const height = () => {
+  const width = () => dimensions()?.width;
+  const aspectRatio = () => {
     const size = dimensions();
-    return size ? ((width() ?? size.width) * size.height) / size.width : bodyTextStyle.lineHeight;
+    return size ? size.width / size.height : undefined;
   };
   const activate = (selected: { sessionId: string; target: string }) => {
     if (!owns() || selected.sessionId !== sessionId || selected.target !== target) return;
@@ -114,13 +111,9 @@ export function MarkdownImageView(props: {
     else if (source() && dimensions()) viewing.set(true);
   };
   const content = () => (
-    <View style={{ gap: 4, width: width() }}>
+    <View style={{ gap: 4, width: width(), maxWidth: '100%' }}>
       <Each
-        of={
-          source() && !error() && (props.width === undefined || props.width() > 0)
-            ? [source()!]
-            : []
-        }
+        of={source() && !error() ? [source()!] : []}
         key={(image) => image.uri}
       >
         {(image) => {
@@ -146,7 +139,13 @@ export function MarkdownImageView(props: {
                   error.set(reason.message);
                 }
               }}
-              style={{ width: width(), height: height(), flexShrink: 0 }}
+              style={{
+                width: width() === undefined ? undefined : '100%',
+                maxWidth: '100%',
+                height: dimensions() ? undefined : props.lineHeight,
+                aspectRatio: aspectRatio(),
+                flexShrink: 0,
+              }}
             />
           );
         }}
@@ -164,7 +163,10 @@ export function MarkdownImageView(props: {
     </View>
   );
   return (
-    <View pointerEvents={props.linked ? 'none' : undefined}>
+    <View
+      pointerEvents={props.linked ? 'none' : undefined}
+      style={{ width: props.flow === 'block' ? '100%' : undefined, maxWidth: '100%' }}
+    >
       <If when={!props.linked} else={content()}>
         <Button
           ref={(node) => {

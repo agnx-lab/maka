@@ -85,6 +85,7 @@ pub use crate::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
         TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
         TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath, TextViewPart,
+        TextViewImageContext, TextViewImageFlow, TextViewLabels, TextViewLinkTarget,
         TextViewParts, TextViewProps, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
@@ -130,6 +131,7 @@ pub fn registry() -> Registry {
         .register::<Toast>()
         .register::<ToastStack>()
         .class::<toast::ToastManagerClass>()
+        .class::<text_view::TextViewLinkTarget>()
         .module::<AlertDialog>()
         .module::<Keyboard>()
         .module::<TextView>()

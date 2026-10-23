@@ -132,8 +132,9 @@ impl Default for MarkdownOptions {
 /// to [`Self::block`], inline nodes to [`Self::inline`]); the first plugin
 /// that returns `Some` wins. Give a view's plugins with
 /// [`MarkdownPlugins`] (`provide_context`): every [`super::TextView`]
-/// below it reads with them.
-pub trait MarkdownPlugin: 'static {
+/// below it reads with them. Parsing hooks run on the CPU worker and must
+/// be `Send + Sync`; `render` runs on the component's UI owner.
+pub trait MarkdownPlugin: Send + Sync + 'static {
     /// Its name (for logs).
     fn name(&self) -> &str;
 
@@ -290,7 +291,13 @@ impl Parser {
 
     /// Markdown `source` read.
     pub fn markdown(&self, source: &str) -> Document {
-        super::markdown::parse(self, source)
+        super::markdown::parse(self, source, false)
+    }
+
+    /// Markdown with canonical UTF-8 provenance for a rendered document.
+    /// This uses the same parser and converter as `markdown`.
+    pub(crate) fn markdown_source(&self, source: &str) -> Document {
+        super::markdown::parse(self, source, true)
     }
 
     /// HTML `source` read (a fragment or a whole page: its body).

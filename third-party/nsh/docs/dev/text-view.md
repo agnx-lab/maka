@@ -19,9 +19,19 @@ colored with the theme's tokens; the app restyles each part over it.
 
 ## How it works
 
-- **Parsed in Rust, once per change.** One `computed` reads `markdown`, else `html`, else `document`, with `options`,
-  `extensions` and the `MarkdownPlugins` of the context, into a `Document`. JS only passes strings (or the `document`
-  JSON); parsing never runs in QuickJS. The `Parser` is public, so Rust code reads documents without a view.
+- **Parsed in Rust by one component-owned worker.** Source changes replace its latest request. One `blocking`
+  parse finishes before the worker starts the newest request; it constructs the parser and plugin options on that
+  thread. A completed Markdown prefix may be published while a compatible append is pending. A replacement,
+  source identity, input mode or parser configuration change rejects that result. Disposing the component cancels
+  publication. Before the first result, and after a parser failure (`onParseError`), the full current input is shown
+  literally. The same parser is public for Rust callers and the static parsing functions.
+- **Canonical source positions.** `sourceId` names the original Markdown document for reading anchors. Native
+  source wrappers on inline leaves, code blocks and formulas carry Core's `TextSourceSegment`s onto the actual Text owners;
+  UTF-8 addresses are projected through line-ending normalization, streaming repair, TeX rewriting, container slices
+  and reference definitions. Synthetic repair syntax has no original address. These wrappers stay native; JSON
+  renderer payloads contain their displayed content. HTML text with decoding or whitespace collapse is an explicit
+  replacement of its originating Markdown HTML node; its processed offsets never stand in for original addresses.
+  Selection continues to use the real selectable texts.
 - **Blocks are rows of an `Each`, keyed by position and kind** (`(index, block.kind())`). A streamed reply grows at its
   end: the blocks before it parse to equal values and keep their nodes, the block being written keeps its row (same
   position, same kind) and only that row is made again. A block that changes kind mid-stream (a paragraph becoming a
@@ -62,10 +72,19 @@ colored with the theme's tokens; the app restyles each part over it.
   in and fades back after 1.6 s); a press reports `onCodeBlockAction`. Each render has a key of the block's position (`code:3`,
   `math:2.0.1`, ...); content rendered for a key stays while the value is equal, so a streamed reply renders the app's
   code blocks again only while they are being written.
-- **Links report presses**: `onLinkPress({ url })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
+- **Links report presses**: `onLinkPress({ url, target })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
   footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
   (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::ui::open_url`,
-  under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
+  under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`. `target` is the original native Link's focus capability;
+  `target.focus()` accepts a restoration request while that Link lives, then applies it natively in order with the
+  caller's earlier UI changes. Source replacements and removed/replaced links expire the old capability.
+- **Code controls retain their owners.** Native `codeBlockActions` supports `copy` and `wrap`. Adding `wrap`
+  initially wraps the code; its selected state and native control survive further stream appends, including code
+  inside containers. `renderCodeBlockAction` supplies app content and `labels` supplies table names/copy feedback.
+  Code and table scroll intent is reported as `onScrollIntent`.
+- **Image rendering context.** `renderImage` receives `TextViewImageContext` (`image`, `linked`, `flow`,
+  `lineHeight`). The app owns standalone image activation and loading; linked inline images use their enclosing
+  Link, and linked block images use one native Link wrapper.
 
 ## Parts and their default styles
 
@@ -210,9 +229,9 @@ role `checkbox` with their checked state, a disclosure's summary role `button` w
 
 ## Performance
 
-- The whole text is parsed again on each change (one `computed`); parsing is Rust and linear, and the rows that did
-  not change make no mount items. A streamed reply of N chunks costs N parses of a growing text (no incremental
-  parse); a baseline belongs in `performance.md` once measured.
+- The worker parses the whole newest source, including late reference definitions; pending changes coalesce while
+  one parse runs. There is no incremental AST or content cap. Matched workload measurements belong in
+  `performance.md` once measured.
 - Rows are made again only when their value changes (`Each` with the position and kind as the key, the block as the
   value), and render functions only when their value changes.
 - A disclosure makes its content only while open.
@@ -230,7 +249,7 @@ role `checkbox` with their checked state, a disclosure's summary role `button` w
 | Table actions | `renderTableActions` |
 | `MarkdownPlugin` | `MarkdownPlugin` (Rust) and `MarkdownExtension` (declared, from TS too) |
 | `image_source` / image loading | `renderImage`; the default loads the URL with the runtime's image loader |
-| Link clicks | `onLinkPress({ url })` |
+| Link clicks | `onLinkPress({ url, target })` |
 | Streaming fade / motion | The app's: the blocks are views it styles and animates (`nsh/animated`, layout animation) |
 
 ## Limits
