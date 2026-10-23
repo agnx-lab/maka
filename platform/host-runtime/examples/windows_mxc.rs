@@ -1099,21 +1099,35 @@ mod native {
         let direct = tokio::net::TcpListener::bind((native_ip, 0)).await?;
         let direct_address = direct.local_addr()?;
         drop(tokio::net::TcpStream::connect(direct_address).await?);
-        let remote = ("example.com", 443)
+        // Like TcpStream::connect(hostname), try every resolved address: a
+        // CDN can return an unreachable address alongside a working one.
+        let mut reachable = None;
+        let mut failures = Vec::new();
+        for remote in ("example.com", 443)
             .to_socket_addrs()?
-            .find(SocketAddr::is_ipv4)
-            .ok_or("example.com has no IPv4 address for the public TCP control")?;
-        assert!(
-            !remote.ip().is_loopback() && !remote.ip().is_unspecified() && remote.ip() != native_ip,
-            "public TCP control resolved to a local address: {remote}"
-        );
-        drop(
-            TcpStream::connect_timeout(&remote, Duration::from_secs(10)).map_err(|error| {
-                io::Error::other(format!(
-                    "public TCP positive control {remote} is unavailable: {error}"
-                ))
-            })?,
-        );
+            .filter(SocketAddr::is_ipv4)
+        {
+            assert!(
+                !remote.ip().is_loopback()
+                    && !remote.ip().is_unspecified()
+                    && remote.ip() != native_ip,
+                "public TCP positive control resolved to a local address: {remote}"
+            );
+            match TcpStream::connect_timeout(&remote, Duration::from_secs(10)) {
+                Ok(stream) => {
+                    drop(stream);
+                    reachable = Some(remote);
+                    break;
+                }
+                Err(error) => failures.push(format!("{remote}: {error}")),
+            }
+        }
+        let remote = reachable.ok_or_else(|| {
+            io::Error::other(format!(
+                "public TCP positive control example.com:443 has no reachable IPv4 address: {}",
+                failures.join(", ")
+            ))
+        })?;
         let mut denied = fixture.command("network-denied", Network::Denied)?;
         denied.args(addresses.map(|address| address.to_string()));
         denied.arg(direct_address.to_string());
