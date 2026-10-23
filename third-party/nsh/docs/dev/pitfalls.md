@@ -227,6 +227,15 @@ Things that were found the hard way. Read the section of the area you change bef
   edit, connection call and batch end, since keyboards start and end it in many ways (`setComposingRegion` included); a
   value JS sets meanwhile waits for its end (`setText` restarts the keyboard, which commits the pre-edit text), and is
   never applied from inside the text watcher.
+- **Android, input selection after attachment**: a navigation screen can be measured while detached. `TextView` then
+  caches disabled cursor controllers because its root has no window parameters; attachment alone does not refresh
+  them, and another `requestLayout` may reuse the text layout. `InputBox` reapplies the current break strategy on
+  attachment when a text layout already exists, discarding it so the next measure refreshes the controllers with a
+  valid window. Keep this on every attachment, including reattachment. Do not replace the text or enable
+  `textIsSelectable` to force a refresh: those affect selection, input-method state or focus/keyboard behavior.
+  Regression checks must cold-start the Android host and long-press a four-line input inside `NavStack`, with explicit
+  `lineHeight` and height updated by `onContentSizeChange` ([reproduction](https://github.com/longbridge/nsh/issues/409));
+  hot reload can hide the failure. Also check removal/reattachment, editing and the native selection menu.
 - **Android, keyboard avoidance**: the keyboard's height becomes bottom padding of the scroll around the focused input, and
   `ScrollBox.reveal` scrolls it into view; `requestRectangleOnScreen` cannot, as ScrollView ignores its padding when it decides
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft

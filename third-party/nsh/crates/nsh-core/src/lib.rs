@@ -8,6 +8,8 @@
 //! Everything here is single-threaded and allocation-conscious: the core runs
 //! on the engine thread, between the JS host and the platform backend.
 
+mod byte_size;
+pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
 pub mod canvas;
@@ -79,12 +81,12 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HoverEvent,
-        IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
-        KeyboardTaps, KeyboardType, ListContentStyle, ListViewport, ModalAnimation,
-        ModalPresentation, ModalProp, NativeProp, NodeId, Op, OverlayProp, PayloadValue,
-        PressEvent, Prop, ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp,
-        ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HeaderSystemItem,
+        HoverEvent, IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance,
+        KeyboardDismissMode, KeyboardTaps, KeyboardType, ListContentStyle, ListViewport,
+        ModalAnimation, ModalPresentation, ModalProp, NativeProp, NodeId, Op, OverlayProp,
+        PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation,
+        ScreenProp, ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
         SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, Viewability, WebSource,
     },
     props::{
