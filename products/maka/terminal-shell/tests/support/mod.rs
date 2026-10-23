@@ -37,7 +37,6 @@ use maka_plugin_core::{
     operation::{OperationOutcome, Receipt, receipt_reader_contract},
     runtime::Published,
 };
-use nsh_engine::Bundle;
 use nsh_platform_tui::{AppOptions, AppView};
 use serde_json::{Value, json};
 use std::{
@@ -67,7 +66,7 @@ fn frame_time() -> f64 {
 }
 
 pub fn load_application(view: &mut AppView) {
-    view.load(Bundle::source(maka_terminal_shell::APPLICATION.into()).into())
+    view.load(maka_terminal_shell::entry::application_bundle().into())
         .unwrap();
     // load resets Surface; seed its clock before poll can apply an animation.
     view.surface_mut().tick(frame_time());

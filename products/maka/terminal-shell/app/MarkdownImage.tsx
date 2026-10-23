@@ -22,16 +22,15 @@ import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { Image } from 'nsh/image';
 import type { MarkdownImage } from 'maka/markdown';
-import { host, type FileView } from './host';
+import { host } from './host';
 import { ImageViewer } from './ImageViewer';
 import { createText, errorText, UiError } from './text';
 import { tr } from './locale';
 import { C, bodyTextStyle, captionTextStyle, controlFocusStyle } from './ui';
 
-type ImageFile = Extract<FileView, { kind: 'image' }>;
 type Reading = { stream: Awaited<ReturnType<typeof openFile>> | null };
-const openFile = (sessionId: string, target: string) =>
-  host.subscribe('agent', 'readFile', { sessionId, path: host.workspaceImagePath(target) });
+const openFile = (sessionId: string, path: { bytesBase64: string }) =>
+  host.subscribe('agent', 'readFile', { sessionId, path });
 const close = async (reading: Reading | null) => {
   const stream = reading?.stream;
   if (reading) reading.stream = null;
@@ -48,7 +47,7 @@ export function MarkdownImageView(props: {
 }) {
   const target = props.image().target;
   const sessionId = props.sessionId;
-  const file = signal<ImageFile | null>(null);
+  const source = signal<{ uri: string } | null>(null);
   const dimensions = signal<{ width: number; height: number } | null>(null);
   const error = createText();
   const viewing = signal(false);
@@ -62,12 +61,17 @@ export function MarkdownImageView(props: {
     const request: Reading = { stream: null };
     reading = request;
     error.set('');
-    file.set(null);
+    source.set(null);
     dimensions.set(null);
     void (async () => {
       await close(previous);
       if (!owns() || reading !== request) return;
-      const stream = await openFile(sessionId, target);
+      const selected = host.markdownImageSource(target);
+      if (selected.kind === 'remote') {
+        source.set({ uri: selected.uri });
+        return;
+      }
+      const stream = await openFile(sessionId, selected.path);
       if (!owns() || reading !== request) {
         await stream.close();
         return;
@@ -82,7 +86,7 @@ export function MarkdownImageView(props: {
             'This file changed while it was being read. Refresh to capture it again.',
           );
         if (captured.kind !== 'image') throw new UiError('This file is not a supported image.');
-        file.set(captured);
+        source.set({ uri: captured.uri });
       } finally {
         await close(request);
       }
@@ -108,12 +112,12 @@ export function MarkdownImageView(props: {
   const activate = (selected: { sessionId: string; target: string }) => {
     if (!owns() || selected.sessionId !== sessionId || selected.target !== target) return;
     if (error()) read();
-    else if (file() && dimensions()) viewing.set(true);
+    else if (source() && dimensions()) viewing.set(true);
   };
   const content = () => (
     <View style={{ gap: 4, width: width() }}>
       <Each
-        of={file() && !error() && (props.width === undefined || props.width() > 0) ? [file()!] : []}
+        of={source() && !error() && (props.width === undefined || props.width() > 0) ? [source()!] : []}
         key={(image) => image.uri}
       >
         {(image) => {
@@ -122,7 +126,7 @@ export function MarkdownImageView(props: {
           cleanup(() => {
             mounted = false;
           });
-          const current = () => owns() && mounted && file() === captured;
+          const current = () => owns() && mounted && source() === captured;
           return (
             <Image
               src={captured.uri}
@@ -174,9 +178,9 @@ export function MarkdownImageView(props: {
           {content()}
         </Button>
       </If>
-      <If when={viewing() && file() && dimensions()}>
+      <If when={viewing() && source() && dimensions()}>
         <ImageViewer
-          image={{ uri: file()!.uri, ...dimensions()!, title: name() }}
+          image={{ uri: source()!.uri, ...dimensions()!, title: name() }}
           close={() => {
             viewing.set(false);
             if (owns()) button?.focus();

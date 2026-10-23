@@ -82,7 +82,7 @@ Grouped activity has independent native scrolling, capped at half the reading vi
 
 Assistant responses format headings, emphasis, lists, quotes, tables and code. Each code block has its own **Copy code** action. **Show message source** switches to the exact selectable text; **Show formatted message** restores formatting. Partial history stays literal until its opening is loaded.
 
-Relative Markdown image references are read from the conversation's workspace and render inline. Activate an unlinked image to view it full screen; linked images open their link target. Source mode and message copy preserve the original Markdown.
+Markdown images render inline from the conversation's workspace or an HTTP(S) URL. Workspace images use the existing Host file reader; network images load on the client through NSH's native image loader and cache. The application grants HTTP(S) GET, including the same permission check on each redirect. Activate an unlinked image to view it full screen, then close or press Escape to return to that image without changing the draft; linked images keep their original link target. Loading and failures have explicit captions, with retry available on an unlinked failed image. Source mode and message copy preserve the original Markdown.
 
 **Todo** sits above the composer and displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
 

@@ -196,10 +196,10 @@ fn require_contract(endpoint: &str, method: &str, actual: &Contract) -> Result<(
 
 #[class]
 impl ApplicationHost {
-    /// Resolve only an exact workspace-relative image selector. Actual access
-    /// and immutable image bytes remain with the existing Host file service.
-    pub fn workspace_image_path(&self, target: String) -> Result<links::WorkspaceLink, String> {
-        links::workspace_image(&target)
+    /// Resolve the original Markdown target once. Workspace bytes remain with
+    /// the Host; HTTP(S) images use NSH's native loader and bundle permissions.
+    pub fn markdown_image_source(&self, target: String) -> Result<links::MarkdownImageSource, String> {
+        links::markdown_image(&target)
     }
 
     /// Hand an HTTP(S) link to this client's system browser, or return an exact
