@@ -21,7 +21,7 @@
 //! belong to the caller; this store owns their durable, atomic publication.
 
 use crate::{ConfigError, ConfigurationStore, Result, TransactionMode, catalog};
-use serde_json::Value;
+pub use maka_agent_facts::public_catalog::PublicCatalogBody;
 use std::collections::BTreeMap;
 
 type CachedCatalogRow = (String, String, Option<String>, Option<String>, i64);
@@ -49,16 +49,26 @@ impl PublicCatalogSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicCatalogRecord {
-    pub body: Value,
+    pub body: PublicCatalogBody,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     /// Successful fetch or conditional revalidation time, in Unix milliseconds.
     pub checked_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl PublicCatalogRecord {
+    /// Compare the complete durable record during uncertain-write reconciliation.
+    pub fn same_content(&self, other: &Self) -> std::result::Result<bool, serde_json::Error> {
+        Ok(self.body.same_content(&other.body)?
+            && self.etag == other.etag
+            && self.last_modified == other.last_modified
+            && self.checked_at == other.checked_at)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PublicCatalogSnapshot {
     pub catalog_revision: u64,
     pub sources: BTreeMap<PublicCatalogSource, PublicCatalogRecord>,
@@ -83,7 +93,7 @@ impl ConfigurationStore {
                     sources.insert(
                         PublicCatalogSource::from_key(&source)?,
                         PublicCatalogRecord {
-                            body: serde_json::from_str(&body)?,
+                            body: PublicCatalogBody::from_json(body)?,
                             etag,
                             last_modified,
                             checked_at,
@@ -113,9 +123,11 @@ impl ConfigurationStore {
                         .bind(source.key())
                         .fetch_optional(&mut *tx)
                         .await?;
-                let previous: Option<Value> =
-                    previous.as_deref().map(serde_json::from_str).transpose()?;
-                let changed = previous.as_ref() != Some(&record.body);
+                let previous = previous.map(PublicCatalogBody::from_json).transpose()?;
+                let changed = match previous {
+                    Some(previous) => !previous.same_content(&record.body)?,
+                    None => true,
+                };
                 sqlx::query(
                     "INSERT INTO public_catalog(source, body, etag, last_modified, checked_at)
                      VALUES(?, ?, ?, ?, ?)
@@ -124,7 +136,7 @@ impl ConfigurationStore {
                      checked_at = excluded.checked_at",
                 )
                 .bind(source.key())
-                .bind(serde_json::to_string(&record.body)?)
+                .bind(record.body.as_raw().get())
                 .bind(record.etag)
                 .bind(record.last_modified)
                 .bind(record.checked_at)

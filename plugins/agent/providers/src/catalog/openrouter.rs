@@ -20,18 +20,25 @@
 use super::{ModelInfo, text, token_limit};
 use maka_agent_facts::configuration::{ModelCapabilities, ModelModality};
 use maka_agent_facts::execution::ThinkingLevel;
-use serde_json::Value;
-use std::collections::HashSet;
+use maka_agent_facts::public_catalog::PublicCatalogBody;
+use serde_json::{Value, value::RawValue};
+use std::collections::{BTreeMap, HashSet};
 
-pub(super) fn parse(root: &Value) -> Result<Vec<ModelInfo>, String> {
-    let rows = root
+pub(super) fn parse(root: &PublicCatalogBody) -> Result<Vec<ModelInfo>, String> {
+    let fields: BTreeMap<String, &RawValue> =
+        serde_json::from_str(root.as_raw().get()).map_err(|_| "invalid OpenRouter catalog")?;
+    let rows: Vec<&RawValue> = fields
         .get("data")
-        .and_then(Value::as_array)
-        .ok_or("invalid OpenRouter catalog")?;
+        .ok_or("invalid OpenRouter catalog")
+        .and_then(|data| {
+            serde_json::from_str(data.get()).map_err(|_| "invalid OpenRouter catalog")
+        })?;
     let mut seen = HashSet::new();
-    rows.iter()
-        .map(|row| {
-            let model = model(row)?;
+    rows.into_iter()
+        .map(|raw| {
+            let row: Value =
+                serde_json::from_str(raw.get()).map_err(|_| "invalid OpenRouter model")?;
+            let model = model(&row)?;
             if !seen.insert(model.id.clone()) {
                 return Err("duplicate OpenRouter model ID".into());
             }

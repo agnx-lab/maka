@@ -17,11 +17,11 @@
  * under the License.
  */
 
-use maka_agent_facts::configuration::*;
+use maka_agent_facts::{configuration::*, public_catalog::PublicCatalogBody};
 use maka_config::{
     ConfigurationStore,
     model_fetch::ModelFetchPreparation,
-    public_catalog::{PublicCatalogRecord, PublicCatalogSource},
+    public_catalog::{PublicCatalogRecord, PublicCatalogSnapshot, PublicCatalogSource},
 };
 use maka_event_log::root::{RootNamespaces, RootOwner};
 use serde_json::{Value, json};
@@ -42,10 +42,21 @@ fn root(path: &Path) -> Arc<RootOwner> {
 
 fn record(body: Value, checked_at: i64) -> PublicCatalogRecord {
     PublicCatalogRecord {
-        body,
+        body: PublicCatalogBody::from_json(body.to_string()).unwrap(),
         etag: Some("\"original\"".into()),
         last_modified: None,
         checked_at,
+    }
+}
+
+fn assert_snapshot_eq(actual: &PublicCatalogSnapshot, expected: &PublicCatalogSnapshot) {
+    assert_eq!(actual.catalog_revision, expected.catalog_revision);
+    assert_eq!(
+        actual.sources.keys().collect::<Vec<_>>(),
+        expected.sources.keys().collect::<Vec<_>>()
+    );
+    for (source, record) in &actual.sources {
+        assert!(record.same_content(&expected.sources[source]).unwrap());
     }
 }
 
@@ -143,8 +154,8 @@ async fn sources_revalidate_independently_and_survive_restart_without_changing_u
     );
     // JSON whitespace/key order and conditional-response headers are not model changes.
     let revalidated = PublicCatalogRecord {
-        body: serde_json::from_str(
-            "{ \"native\" : { \"models\" : { \"selected\" : { \"name\" : \"Initial\" } }, \"name\" : \"Native\" } }",
+        body: PublicCatalogBody::from_json(
+            "{ \"native\" : { \"models\" : { \"selected\" : { \"name\" : \"Initial\" } }, \"name\" : \"Native\" } }".into(),
         )
         .unwrap(),
         etag: None,
@@ -159,7 +170,9 @@ async fn sources_revalidate_independently_and_survive_restart_without_changing_u
         original.revision + 2
     );
     let mut changed = revalidated;
-    changed.body["native"]["models"]["selected"]["name"] = json!("Current");
+    let mut changed_body: Value = serde_json::from_str(changed.body.as_raw().get()).unwrap();
+    changed_body["native"]["models"]["selected"]["name"] = json!("Current");
+    changed.body = PublicCatalogBody::from_json(changed_body.to_string()).unwrap();
     changed.checked_at = 300;
     assert_eq!(
         store
@@ -171,8 +184,16 @@ async fn sources_revalidate_independently_and_survive_restart_without_changing_u
     let snapshot = store.public_catalog().await.unwrap();
     assert_eq!(snapshot.catalog_revision, original.revision + 3);
     assert_eq!(snapshot.sources.len(), 2);
-    assert_eq!(snapshot.sources[&PublicCatalogSource::ModelsDev], changed);
-    assert_eq!(snapshot.sources[&PublicCatalogSource::OpenRouter], router);
+    assert!(
+        snapshot.sources[&PublicCatalogSource::ModelsDev]
+            .same_content(&changed)
+            .unwrap()
+    );
+    assert!(
+        snapshot.sources[&PublicCatalogSource::OpenRouter]
+            .same_content(&router)
+            .unwrap()
+    );
     let current = store.catalog().await.unwrap();
     assert_eq!(current.revision, snapshot.catalog_revision);
     assert_eq!(current.connections, original.connections);
@@ -201,7 +222,7 @@ async fn sources_revalidate_independently_and_survive_restart_without_changing_u
     ))
     .await
     .unwrap();
-    assert_eq!(reopened.public_catalog().await.unwrap(), snapshot);
+    assert_snapshot_eq(&reopened.public_catalog().await.unwrap(), &snapshot);
     assert_eq!(reopened.catalog().await.unwrap(), current);
     assert_eq!(
         reopened.credential_status(locator).await.unwrap(),
@@ -244,7 +265,7 @@ async fn failed_publication_rolls_back_the_body_and_http_metadata_with_its_revis
             .await
             .is_err()
     );
-    assert_eq!(store.public_catalog().await.unwrap(), original);
+    assert_snapshot_eq(&store.public_catalog().await.unwrap(), &original);
     assert_eq!(store.catalog().await.unwrap().revision, 1);
     let revalidated = PublicCatalogRecord {
         checked_at: 300,
@@ -258,9 +279,10 @@ async fn failed_publication_rolls_back_the_body_and_http_metadata_with_its_revis
             .unwrap(),
         1
     );
-    assert_eq!(
-        store.public_catalog().await.unwrap().sources[&PublicCatalogSource::ModelsDev],
-        revalidated
+    assert!(
+        store.public_catalog().await.unwrap().sources[&PublicCatalogSource::ModelsDev]
+            .same_content(&revalidated)
+            .unwrap()
     );
     drop(database);
     store.close().await.unwrap();
@@ -410,4 +432,94 @@ fn migration_retires_only_observed_models_and_preserves_typed_connection_and_sec
             .unwrap(),
         9
     );
+}
+
+#[test]
+fn uncertain_record_comparison_includes_all_http_metadata_and_check_time() {
+    let original = record(json!({"unknown":1}), 10);
+    let mut candidate = original.clone();
+    candidate.body =
+        PublicCatalogBody::from_json(r#"{ "unknown": 0, "\u0075nknown": 1 }"#.into()).unwrap();
+    assert!(original.same_content(&candidate).unwrap());
+    candidate.etag = None;
+    assert!(!original.same_content(&candidate).unwrap());
+    candidate = original.clone();
+    candidate.last_modified = Some("changed".into());
+    assert!(!original.same_content(&candidate).unwrap());
+    candidate = original.clone();
+    candidate.checked_at += 1;
+    assert!(!original.same_content(&candidate).unwrap());
+    candidate = original.clone();
+    candidate.body = PublicCatalogBody::from_json(r#"{"unknown":2}"#.into()).unwrap();
+    assert!(!original.same_content(&candidate).unwrap());
+}
+
+#[tokio::test]
+async fn raw_body_semantics_preserve_revisions_unknown_fields_and_original_json_value() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = root(temp.path());
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let raw = r#"{"unknown":1,"data":null,"data":[],"future":{"b":2,"a":1}}"#;
+    let mut row = record(json!(null), 10);
+    row.body = PublicCatalogBody::from_json(raw.into()).unwrap();
+    assert_eq!(
+        store
+            .put_public_catalog(PublicCatalogSource::OpenRouter, row.clone())
+            .await
+            .unwrap(),
+        1
+    );
+    let db = rusqlite::Connection::open(owner.canonical_path().join("configuration-rust.sqlite"))
+        .unwrap();
+    let stored: String = db
+        .query_row("SELECT body FROM public_catalog", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(stored, raw);
+    row.body =
+        PublicCatalogBody::from_json(r#"{"future":{"a":1,"b":2},"data":[],"unknown":1}"#.into())
+            .unwrap();
+    row.checked_at = 20;
+    assert_eq!(
+        store
+            .put_public_catalog(PublicCatalogSource::OpenRouter, row.clone())
+            .await
+            .unwrap(),
+        1
+    );
+    row.body =
+        PublicCatalogBody::from_json(r#"{"future":{"a":1,"b":2},"data":[],"unknown":1.0}"#.into())
+            .unwrap();
+    assert_eq!(
+        store
+            .put_public_catalog(PublicCatalogSource::OpenRouter, row.clone())
+            .await
+            .unwrap(),
+        2
+    );
+    row.body =
+        PublicCatalogBody::from_json(r#"{"future":{"a":1,"b":2},"data":[],"unknown":2}"#.into())
+            .unwrap();
+    assert_eq!(
+        store
+            .put_public_catalog(PublicCatalogSource::OpenRouter, row.clone())
+            .await
+            .unwrap(),
+        3
+    );
+    // SQLite json_valid can accept numeric overflow even though Value cannot.
+    db.execute(
+        "UPDATE public_catalog SET body = ?",
+        [r#"{"unknown":1e400,"unknown":null}"#],
+    )
+    .unwrap();
+    assert!(store.public_catalog().await.is_err());
+    assert!(
+        store
+            .put_public_catalog(PublicCatalogSource::OpenRouter, row)
+            .await
+            .is_err()
+    );
+    assert_eq!(store.catalog().await.unwrap().revision, 3);
+    drop(db);
+    store.close().await.unwrap();
 }

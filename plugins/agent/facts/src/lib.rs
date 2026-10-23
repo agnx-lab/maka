@@ -43,6 +43,7 @@ pub mod model;
 pub mod oauth;
 pub mod pricing;
 pub mod provider;
+pub mod public_catalog;
 pub mod read;
 pub mod session;
 pub mod shell_result;

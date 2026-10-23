@@ -23,10 +23,9 @@ use maka_agent_ports::model::Transport;
 use maka_capabilities::http;
 use maka_config::{
     ConfigurationStore,
-    public_catalog::{PublicCatalogRecord, PublicCatalogSource},
+    public_catalog::{PublicCatalogBody, PublicCatalogRecord, PublicCatalogSource},
 };
 pub use maka_providers::catalog::{Catalog, Snapshot};
-use serde_json::Value;
 use std::{
     collections::BTreeMap,
     sync::Arc,
@@ -313,10 +312,17 @@ impl Owner {
                         // consumer can pair an old snapshot with a new revision.
                         let durable = self.configuration.public_catalog().await
                             .map_err(|_| "public catalog state unavailable after uncertain write".to_owned())
-                            .and_then(|durable| snapshot(&durable.sources).map(|next| (durable.sources, next)));
+                            .and_then(|durable| {
+                                let next = snapshot(&durable.sources)?;
+                                let applied = match (durable.sources.get(&source), candidate.get(&source)) {
+                                    (Some(durable), Some(candidate)) => durable.same_content(candidate),
+                                    (None, None) => Ok(true),
+                                    _ => Ok(false),
+                                }.map_err(|_| "public catalog comparison failed after uncertain write".to_owned())?;
+                                Ok((durable.sources, next, applied))
+                            });
                         match durable {
-                            Ok((durable, next)) => {
-                                let applied = durable.get(&source) == candidate.get(&source);
+                            Ok((durable, next, applied)) => {
                                 *publication = Ok(Arc::new(next));
                                 sources = durable;
                                 if applied { Ok(()) } else { Err("public catalog update was not committed".into()) }
@@ -409,7 +415,7 @@ async fn fetch(
                     let Some(chunk) = next else { break; };
                     bytes.extend_from_slice(&chunk);
                 }
-                PublicCatalogRecord { body: serde_json::from_slice::<Value>(&bytes).map_err(|_| "public catalog response is not valid JSON")?, etag: None, last_modified: None, checked_at: 0 }
+                PublicCatalogRecord { body: PublicCatalogBody::from_json(String::from_utf8(bytes).map_err(|_| "public catalog response is not valid JSON")?).map_err(|_| "public catalog response is not valid JSON")?, etag: None, last_modified: None, checked_at: 0 }
             }
             _ => return Err("public catalog HTTP request was not successful".into()),
         };

@@ -20,7 +20,9 @@
 use super::{ModelInfo, text, token_limit};
 use maka_agent_facts::configuration::ModelCapabilities;
 use maka_agent_facts::execution::ThinkingLevel;
-use serde_json::Value;
+use maka_agent_facts::public_catalog::PublicCatalogBody;
+use serde_json::{Value, value::RawValue};
+use std::collections::BTreeMap;
 
 pub(super) struct Entry {
     pub provider: String,
@@ -28,18 +30,28 @@ pub(super) struct Entry {
     pub canonical: Option<String>,
 }
 
-pub(super) fn parse(root: &Value) -> Result<Vec<Entry>, String> {
-    let providers = root.as_object().ok_or("invalid models.dev catalog")?;
+pub(super) fn parse(root: &PublicCatalogBody) -> Result<Vec<Entry>, String> {
+    let providers: BTreeMap<String, &RawValue> =
+        serde_json::from_str(root.as_raw().get()).map_err(|_| "invalid models.dev catalog")?;
     let mut entries = vec![];
-    for (provider, row) in providers {
-        if row.get("id").and_then(Value::as_str) != Some(provider.as_str()) {
+    for (provider, raw) in providers {
+        let fields: BTreeMap<String, &RawValue> = serde_json::from_str(raw.get())
+            .map_err(|_| "models.dev provider ID differs from its catalog key")?;
+        let provider_id: Option<String> = fields
+            .get("id")
+            .and_then(|id| serde_json::from_str(id.get()).ok());
+        if provider_id.as_deref() != Some(provider.as_str()) {
             return Err("models.dev provider ID differs from its catalog key".into());
         }
-        let models = row
+        let models: BTreeMap<String, &RawValue> = fields
             .get("models")
-            .and_then(Value::as_object)
-            .ok_or("invalid models.dev models")?;
-        for (id, row) in models {
+            .ok_or("invalid models.dev models")
+            .and_then(|models| {
+                serde_json::from_str(models.get()).map_err(|_| "invalid models.dev models")
+            })?;
+        for (id, raw) in models {
+            let row: Value =
+                serde_json::from_str(raw.get()).map_err(|_| "invalid models.dev model")?;
             if row.get("id").and_then(Value::as_str) != Some(id.as_str()) {
                 return Err("models.dev model ID differs from its catalog key".into());
             }
@@ -49,7 +61,7 @@ pub(super) fn parse(root: &Value) -> Result<Vec<Entry>, String> {
             }
             entries.push(Entry {
                 provider: provider.clone(),
-                model: model(provider, row)?,
+                model: model(&provider, &row)?,
                 canonical,
             });
         }
