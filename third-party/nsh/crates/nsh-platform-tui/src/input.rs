@@ -725,7 +725,7 @@ impl Surface {
                 else {
                     return false;
                 };
-                self.edit_input(id, |editor, config| editor.replace(&text, config));
+                self.paste_input(id, text);
                 true
             }
             Event::FocusLost => {
@@ -1009,6 +1009,28 @@ impl Surface {
                 ("end", PayloadValue::Number(end as f64)),
             ]),
         );
+    }
+
+    /// A native paste reports its original text before any edit; the
+    /// mounted policy decides insertion without waiting for app code.
+    pub(crate) fn paste_input(&mut self, id: NodeId, text: String) {
+        let Some(node) = self.node(id) else {
+            return;
+        };
+        if node.kind != ViewKind::Input || !node.input.editable {
+            return;
+        }
+        let insert = node.input.paste_behavior == nsh_core::PasteBehavior::Insert;
+        if node.events.contains(EventKind::Paste) {
+            self.emit(
+                id,
+                EventKind::Paste,
+                EventPayload::Paste(Box::new(nsh_core::PasteEvent::new(text.clone()))),
+            );
+        }
+        if insert {
+            self.edit_input(id, |editor, config| editor.replace(&text, config));
+        }
     }
 
     pub(crate) fn edit_input(
@@ -2917,6 +2939,147 @@ mod tests {
 
     fn key(surface: &mut Surface, code: KeyCode, modifiers: KeyModifiers) {
         surface.handle_event(Event::Key(KeyEvent::new(code, modifiers)));
+    }
+
+    #[test]
+    fn paste_behavior_reports_before_inserting_or_preserves_text() {
+        use nsh_core::{InputConfig, MountBatch, MountItem, PasteBehavior};
+
+        use crate::services::ClipboardContent;
+
+        for asynchronous in [false, true] {
+            for behavior in [PasteBehavior::Report, PasteBehavior::Insert] {
+                let mut surface = form();
+                let config = InputConfig {
+                    multiline: true,
+                    paste_behavior: behavior,
+                    ..Default::default()
+                };
+                surface.apply(MountBatch {
+                    items: vec![
+                        MountItem::Input {
+                            id: 2,
+                            config: Box::new(config),
+                        },
+                        MountItem::InputValue {
+                            id: 2,
+                            text: "abc".into(),
+                            count: 0,
+                        },
+                        MountItem::Events {
+                            id: 2,
+                            events: mask(&[EventKind::Paste, EventKind::ChangeText]),
+                        },
+                    ],
+                });
+                surface.set_focus(Some(2));
+                surface.selection(2, 1, 2);
+                let before = surface.input_context().unwrap();
+                surface.events.clear();
+                let text = "X\r\nY\t";
+                if asynchronous {
+                    let edit = InputEdit {
+                        node: 2,
+                        expected_event_count: before.event_count,
+                        selection: before.selection.clone(),
+                        replacement: String::new(),
+                    };
+                    surface.complete_paste(edit, Ok(ClipboardContent::Text(text.into())));
+                } else {
+                    assert!(surface.handle_event(Event::Paste(text.into())));
+                }
+                let after = surface.input_context().unwrap();
+                if behavior == PasteBehavior::Report {
+                    assert_eq!(after.text.as_deref(), Some("abc"));
+                    assert_eq!(after.selection, before.selection);
+                    assert_eq!(after.event_count, before.event_count);
+                } else {
+                    assert_eq!(after.text, Some(format!("a{text}c")));
+                    assert_eq!(after.event_count, before.event_count + 1);
+                }
+                let events: Vec<_> = surface
+                    .events
+                    .iter()
+                    .filter_map(|event| {
+                        if let SurfaceEvent::Event(2, kind, payload) = event {
+                            Some((*kind, payload))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert!(
+                    matches!(events.first(), Some((EventKind::Paste, EventPayload::Paste(paste))) if paste.text == text && paste.files.is_empty() && paste.uris.is_empty())
+                );
+                let kinds: Vec<_> = events.iter().map(|(kind, _)| *kind).collect();
+                assert_eq!(
+                    kinds,
+                    if behavior == PasteBehavior::Report {
+                        vec![EventKind::Paste]
+                    } else {
+                        vec![EventKind::Paste, EventKind::ChangeText]
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn paste_reporting_keeps_async_admission_and_readonly_boundaries() {
+        use nsh_core::{
+            MountBatch, MountItem,
+            access::{Access, Capabilities},
+        };
+
+        use crate::services::ClipboardContent;
+
+        for boundary in 0..5 {
+            let mut surface = form();
+            surface.apply(MountBatch {
+                items: vec![
+                    MountItem::InputValue {
+                        id: 2,
+                        text: "abc".into(),
+                        count: 0,
+                    },
+                    MountItem::Events {
+                        id: 2,
+                        events: mask(&[EventKind::Paste]),
+                    },
+                ],
+            });
+            surface.set_focus(Some(2));
+            surface.selection(2, 1, 2);
+            let context = surface.input_context().unwrap();
+            let edit = InputEdit {
+                node: 2,
+                expected_event_count: context.event_count,
+                selection: context.selection,
+                replacement: String::new(),
+            };
+            match boundary {
+                0 => surface.node_mut(2).unwrap().input.editable = false,
+                1 => surface.selection(2, 0, 1),
+                2 => surface.set_focus(None),
+                3 => surface.set_access(Access {
+                    declared: Capabilities::from_json(&serde_json::json!({})).unwrap(),
+                    granted: None,
+                }),
+                _ => {
+                    surface.edit_input(2, |editor, config| editor.replace("updated", config));
+                }
+            }
+            surface.events.clear();
+            let before = surface.node(2).unwrap().editor.text().to_owned();
+            surface.complete_paste(edit, Ok(ClipboardContent::Text("late".into())));
+            assert_eq!(surface.node(2).unwrap().editor.text(), before);
+            assert!(surface.events.is_empty());
+            if boundary == 0 {
+                assert!(surface.handle_event(Event::Paste("readonly".into())));
+                assert_eq!(surface.node(2).unwrap().editor.text(), before);
+                assert!(surface.events.is_empty());
+            }
+        }
     }
 
     #[test]
