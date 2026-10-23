@@ -56,6 +56,7 @@ members = [
     "plugins/workspace/workspace-jev/engine",
     "platform/js-runtime",
     "platform/code-runtime",
+    "platform/python-runtime",
     "plugins/agent/model",
     "plugins/agent/provider-protocol",
     "platform/network",
@@ -90,6 +91,7 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+maka-python-runtime = { path = "platform/python-runtime" }
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }
