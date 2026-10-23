@@ -30,6 +30,8 @@
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod host;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+mod placement;
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod window;
 
 use std::{path::PathBuf, process::ExitCode};

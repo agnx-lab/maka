@@ -8789,6 +8789,8 @@ dependencies = [
  "maka-workbench",
  "nsh-engine",
  "nsh-platform-gpui",
+ "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]

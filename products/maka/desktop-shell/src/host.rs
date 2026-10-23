@@ -39,10 +39,11 @@ const RECHECK_AFTER: Duration = Duration::from_millis(500);
 const STATUS_LIMIT: Duration = Duration::from_secs(2);
 
 /// The workbench on one Host: its bindings, the engine configuration made
-/// from them, and the Host they reach.
+/// from them, the Root's client directory, and the Host they reach.
 pub struct Connection {
     pub bindings: Bindings,
     pub config: EngineConfig,
+    pub directory: PathBuf,
     pub endpoint: PathBuf,
     pub epoch: Uuid,
 }
@@ -60,11 +61,12 @@ impl Connection {
         let (client, directory) = maka_workbench::host::admit(host, root, "desktop").await?;
         let bindings = Bindings::new(client, runtime.clone());
         let mut config = maka_workbench::configuration(bindings.registry(None), runtime);
-        config.data_dir = Some(directory);
+        config.data_dir = Some(directory.clone());
         config.assets = Some(bindings.assets());
         Ok(Self {
             bindings,
             config,
+            directory,
             endpoint,
             epoch,
         })
