@@ -1,0 +1,766 @@
+---
+// The landing page. Structure and rules follow gpui-kit.com (DESIGN.md):
+// one container per band, hairline separators, restraint, verifiable
+// specifics. The hero runs the gallery's AI chat live (demos/home-chat.tsx
+// on the web runtime) in a frame of the site's design.
+import { BASE, url, type Lang } from '../lib/site';
+import { hasPlayer } from '../lib/demo.js';
+import HeroField from './HeroField.astro';
+
+export interface Props { lang?: Lang }
+const { lang = 'en' } = Astro.props;
+const zh = lang === 'zh-CN';
+const link = (path: string) => url(zh ? `zh-CN/${path}` : path);
+const player = hasPlayer();
+const chatSrc = `${BASE}play/index.html?theme=dark#home-chat`;
+
+const copy = zh
+  ? {
+      eyebrow: '为 AI 生成界面而设计',
+      title: ['NSH：一份代码，', '每个平台都原生'],
+      lead: 'NSH 在 iOS、Android、macOS、Windows、Linux、GPUI 和 Web 上运行用 Rust 或 TSX 编写的原生界面，用每个平台自己的界面技术绘制。用 Rust 编写的应用编译成原生代码，不带 JavaScript 虚拟机；TSX 模块——由模型或你的团队编写——可以嵌入你已经发布的应用：经过签名校验，运行在宿主配置的沙箱里。',
+      start: '阅读简介',
+      try: '在线试用',
+      gallery: '打开示例应用',
+      meta: [
+        ['gauge', '120 FPS · 低 CPU 占用'],
+        ['scale', '开源 · Apache-2.0'],
+        ['building', '由长桥（Longbridge）构建'],
+      ],
+      runsOn: '一个模块，手机和桌面都能运行',
+      snippetLang: 'CLI',
+      demo: {
+        title: 'Chat.tsx',
+        badge: '运行中',
+        frame: '在线示例：AI 聊天',
+        caption: '示例应用里的 AI 聊天，用 TSX 编写，在这里由 Native Shell 的 Web 运行时在浏览器中实时运行。回复是本地脚本模拟的流式输出；可以点建议或用 + 重放场景。',
+        pending: '在线预览尚未构建：运行 bun run dev（或 cargo xtask web）。',
+      },
+      replay: '重播',
+      capKicker: 'AI 友好',
+      capTitle: '为模型编写、为宿主把关而设计',
+      capLead: '生成的界面要是真正的原生界面、跑得流畅，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。NSH 的每一层都围绕这几点设计。',
+      langKicker: 'Rust 优先',
+      langTitle: '用 Rust 或 TSX 编写',
+      langLead: '两种语言运行在同一个引擎上，使用同样的基础元素、基础组件和 signal。Rust 应用拥有类型化的样式、编译期检查和 crates.io，不带 JavaScript 虚拟机；TSX 用于热更新和运行时下发的模块。两者也可以结合：TSX 页面导入你的 Rust 组件。',
+      langCta: '用 Rust 开发',
+      usesKicker: '三种用法',
+      usesTitle: '同一个模块，三种用法',
+      usesLead: '首要用途是 AI 生成的界面；同一套机制也让原生应用可以扩展，或者直接组成一个独立应用。',
+      howKicker: '工作原理',
+      howTitle: '在服务器上生成，在设备上被信任',
+      howLead: '服务器负责生成、检查和签名；设备负责校验、隔离和渲染。信任边界清清楚楚。',
+      platKicker: '平台',
+      platTitle: '每个平台，都用它自己的界面',
+      platLead: '同一个 bundle 和同一个 Rust 运行时：在每个平台上，模块都可以嵌入已有的应用、借助热更新开发，也可以打包成可安装的应用。GPUI 后端用一套渲染覆盖三个桌面平台，并能嵌入 GPUI 与 GPUI Kit 应用；Web 平台把应用渲染成网页里的 HTML。',
+      principleKicker: '原则',
+      principle: ['模型负责编写界面，', '宿主决定它能做什么'],
+      principleBody: '模块只能看到宿主授予的能力，只占用宿主允许的资源，只在签名校验通过后运行。剩下的——文本、输入、无障碍、动画——交给系统的原生视图。',
+      principleCta: '在线试用',
+    }
+  : {
+      eyebrow: 'Built for AI-generated UI',
+      title: ['NSH: one module,', 'native everywhere.'],
+      lead: 'NSH runs native UI written in Rust or TSX on iOS, Android, macOS, Windows, Linux, GPUI and the web, drawn with each platform’s own UI. Apps written in Rust compile to native code with no JavaScript VM; TSX modules — by a model or by your team — load into the apps you already ship, signature-checked and sandboxed by rules the host sets.',
+      start: 'Read the introduction',
+      try: 'Try the playground',
+      gallery: 'Open the gallery',
+      meta: [
+        ['gauge', '120 FPS · low CPU use'],
+        ['scale', 'Open source · Apache-2.0'],
+        ['building', 'Built at Longbridge'],
+      ],
+      runsOn: 'One module, on phones and desktops',
+      snippetLang: 'CLI',
+      demo: {
+        title: 'Chat.tsx',
+        badge: 'Live',
+        frame: 'Live demo: AI chat',
+        caption: 'The gallery’s AI chat, written in TSX and running live here in your browser on Native Shell’s web runtime. Replies are scripted and streamed locally; tap a suggestion or + to replay a scenario.',
+        pending: 'The live preview is not built yet: run bun run dev (or cargo xtask web).',
+      },
+      replay: 'Replay',
+      capKicker: 'AI friendly',
+      capTitle: 'Designed for models to write and hosts to trust.',
+      capLead: 'Generated UI has to be truly native and smooth, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of NSH is built around that.',
+      langKicker: 'Rust first',
+      langTitle: 'Write it in Rust or TSX.',
+      langLead: 'Both run on the same engine, with the same primitives, base components and signals. A Rust app gets typed styles, compile-time checks and crates.io, with no JavaScript VM; TSX brings hot updates and modules delivered at run time. Combine them, and TSX screens import your Rust components.',
+      langCta: 'Building with Rust',
+      usesKicker: 'Three uses',
+      usesTitle: 'One module, three ways to use it.',
+      usesLead: 'AI-generated UI is what NSH is designed for. The same mechanism makes native apps extensible, or becomes a whole app.',
+      howKicker: 'How it works',
+      howTitle: 'Generated on the server, trusted on the device.',
+      howLead: 'The server generates, checks and signs; the device verifies, confines and renders. The trust boundary stays explicit.',
+      platKicker: 'Platforms',
+      platTitle: 'Every platform, in its own UI.',
+      platLead: 'One bundle and one Rust runtime: on each platform, modules embed in an existing app, develop with hot reload, and can also be packaged as an installable app. The GPUI backend covers the three desktops with one renderer and embeds in GPUI and GPUI Kit apps; the web platform renders apps as HTML in a page.',
+      principleKicker: 'Principle',
+      principle: ['Models write the interface.', 'The host decides what it may do.'],
+      principleBody: 'A module sees only the capabilities the host grants, uses only the resources it allows, and runs only after its signature checks out. Everything else — text, input, accessibility, animation — belongs to the system’s native views.',
+      principleCta: 'Try the playground',
+    };
+
+const caps = zh
+  ? [
+      { id: 'fast', icon: 'gauge', title: '高性能：120 FPS，低 CPU', body: '在 iOS 与 macOS 的 ProMotion 屏幕上，滚动和动画稳定在 120 FPS，CPU 占用很低。响应式图、渲染器、布局和每个模块都是 Rust，JS 只运行应用自己的代码；每一帧只有一次跨线程的批量提交，原生动画不经过 JS 逐帧计算。', chips: ['120 FPS', 'Rust', 'Taffy', 'QuickJS'] },
+      { id: 'native', icon: 'devices', title: '真正的原生界面', body: '模块在手机上由 UIKit 与 Android 视图组成，在桌面上由 AppKit、GTK 4 以及用 Direct2D 绘制的 Win32 窗口呈现，在 GPUI 应用里由 GPUI 绘制，在浏览器里是网页的 HTML。地图、网页视图这类原生组件可以直接嵌入，与界面自然叠放；系统的文本、输入法和无障碍都原样可用。', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D', 'GPUI', 'HTML'] },
+      { id: 'plugin', icon: 'plug', title: '插件，或独立应用', body: '在已有应用的任意页面放一个 NshAppView（iOS）、NshView（Android）、AppView（桌面，以及作为 GPUI 视图放进 GPUI 应用），或在网页里用 createPlayer 加载，运行时动态加载模块，新功能随时上线；同样的模块也能用 nsh package 打成独立应用或静态网站。', chips: ['NshAppView', 'NshView', 'AppView', 'createPlayer', 'nsh package'] },
+      { id: 'tsx', icon: 'spark', title: 'AI 友好：TSX + Tailwind', body: '一个模块就是一个 TSX 文件：组件、信号和 Tailwind 类，正是模型最擅长写的格式。每个元素、属性和模块都有从 Rust 源码生成的 TypeScript 声明，文档以 llms.txt 提供给模型。', chips: ['TSX', 'Tailwind', 'llms.txt'] },
+      { id: 'check', icon: 'check', title: '在服务器上就能验证', body: 'nsh test 无界面地运行模块、执行操作并报告错误；编译器还能在进程内或浏览器里运行。生成、检查、重试。', chips: ['nsh test', 'compile_module'] },
+      { id: 'sandbox', icon: 'lock', title: '不可信，也能安全运行', body: '每个视图一个 QuickJS 虚拟机，内存、调用时长和节点数都有上限，只能使用宿主授予的能力。', chips: ['NshLimits', 'grantCapabilities'] },
+      { id: 'signed', icon: 'shield', title: '签名下发，可吊销', body: '模块以 Ed25519 签名的 .nshpkg 到达；发布密钥由离线根密钥认证，设备端检查吊销列表。', chips: ['nsh publish', 'NshTrust'] },
+    ]
+  : [
+      { id: 'fast', icon: 'gauge', title: 'Fast: 120 FPS, low CPU', body: 'Scrolling and animations hold 120 FPS on ProMotion displays on iOS and macOS, with little CPU. The reactive graph, the renderer, layout and every module are Rust, and JS only runs the app’s own code; each frame crosses threads once, as one batch, and native animations never call into JS per frame.', chips: ['120 FPS', 'Rust', 'Taffy', 'QuickJS'] },
+      { id: 'native', icon: 'devices', title: 'Real native UI', body: 'Modules are UIKit and Android views on phones, AppKit views, GTK 4 widgets and Win32 windows drawn with Direct2D on the desktop, GPUI elements in GPUI apps, and HTML in a web page. Native components such as maps and web views layer in naturally, and the system’s text, input and accessibility just work.', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D', 'GPUI', 'HTML'] },
+      { id: 'plugin', icon: 'plug', title: 'Plugins, or standalone apps', body: 'Put an NshAppView (iOS), NshView (Android) or AppView (desktop, and as a GPUI view in GPUI apps) on any screen of an existing app, or createPlayer in a web page, and load modules into it at run time: features ship on your own schedule. The same modules also package into standalone apps and static sites with nsh package.', chips: ['NshAppView', 'NshView', 'AppView', 'createPlayer', 'nsh package'] },
+      { id: 'tsx', icon: 'spark', title: 'AI-friendly: TSX + Tailwind', body: 'A module is one TSX file of components, signals and Tailwind classes: the format models write best. Every element, prop and module has TypeScript declarations generated from the Rust sources, and the docs are served to models as llms.txt.', chips: ['TSX', 'Tailwind', 'llms.txt'] },
+      { id: 'check', icon: 'check', title: 'Checked on the server', body: 'nsh test runs a module headless, takes steps on it and reports errors; the compiler also runs in-process or in a browser. Generate, check, retry.', chips: ['nsh test', 'compile_module'] },
+      { id: 'sandbox', icon: 'lock', title: 'Untrusted, and contained', body: 'One QuickJS VM per view, with memory, call-time and node limits, reaching only the capabilities the host grants.', chips: ['NshLimits', 'grantCapabilities'] },
+      { id: 'signed', icon: 'shield', title: 'Signed, revocable delivery', body: 'Modules arrive as Ed25519-signed .nshpkg files; release keys are certified by an offline root and revocations are checked on device.', chips: ['nsh publish', 'NshTrust'] },
+    ];
+
+const uses = zh
+  ? [
+      { tag: '设计初衷', label: 'AI 生成的界面', title: '用界面而不是文字回答', body: '模型为每次请求写一个模块，服务器检查并签名，应用在沙箱里原生地显示它。', code: 'ai', checks: ['每个回答一个 TSX 文件', '下发前完成类型检查与 trace', '只拥有宿主授予的能力'], cta: '为什么做 NSH', href: 'docs' },
+      { tag: '', label: '原生应用插件', title: '发布之后再扩展应用', body: '在任意页面嵌入 NshAppView（iOS）、NshView（Android）、AppView（macOS、Windows、Linux 与 GPUI 应用）或在网页里用 createPlayer，承载团队、合作方或用户之后编写的功能。', code: 'host', checks: ['一个页面可以放多个模块', '宿主注册自己的原生组件', '更新随时下发'], cta: '各平台的嵌入方式', href: 'docs/platforms' },
+      { tag: '', label: '独立应用', title: '也能组成完整的应用', body: '用 Rust 或 TSX 编写的应用可以用 nsh package 打成可安装的 iOS、Android、macOS、Windows、Linux 应用，用 GPUI 运行的桌面应用，或一个静态网站。', code: 'app', checks: ['Rust 应用不带 JavaScript 虚拟机', '一条命令打出安装包', 'Rust 改动自动重建，TSX 热更新'], cta: '打包', href: 'docs/packaging' },
+    ]
+  : [
+      { tag: 'Designed for', label: 'AI-generated UI', title: 'Answer with an interface', body: 'A model writes a module per request, your server checks and signs it, and the app shows it natively, in a sandbox.', code: 'ai', checks: ['One TSX file per answer', 'Type-checked and traced before it ships', 'Only the capabilities the host grants'], cta: 'Why NSH exists', href: 'docs' },
+      { tag: '', label: 'Plugins for native apps', title: 'Extend the app after release', body: 'Embed an NshAppView (iOS), NshView (Android), AppView (macOS, Windows, Linux and GPUI apps) or createPlayer (a web page) on any screen and host features your team, partners or users write later.', code: 'host', checks: ['Several modules on one screen', 'The host’s own native components', 'Updates delivered whenever you choose'], cta: 'Embedding, per platform', href: 'docs/platforms' },
+      { tag: '', label: 'Standalone apps', title: 'Or a whole app', body: 'Apps written in Rust or TSX become an installable iOS, Android, macOS, Windows or Linux app, a desktop app running on GPUI, or a static website with nsh package.', code: 'app', checks: ['Rust apps with no JavaScript VM', 'One command builds the app', 'Rebuilds for Rust, hot updates for TSX'], cta: 'Packaging', href: 'docs/packaging' },
+    ];
+
+// Platforms in the order the docs list them: phones, desktops, GPUI (all
+// three desktops), then the web.
+const platforms = zh
+  ? [
+      { name: 'iOS', detail: 'UIKit · iOS 15+', cmd: '--target ios', status: '已支持', kind: 'ok' },
+      { name: 'Android', detail: 'Android View · API 28+', cmd: '--target android', status: '已支持', kind: 'ok' },
+      { name: 'macOS', detail: 'AppKit · macOS 14+', cmd: '--target macos', status: '已支持', kind: 'ok' },
+      { name: 'Windows', detail: 'Win32 · Direct2D · Windows 10 1809+', cmd: '--target windows', status: '已支持', kind: 'ok' },
+      { name: 'Linux', detail: 'GTK 4.14+', cmd: '--target linux', status: '已支持', kind: 'ok' },
+      { name: 'GPUI', detail: 'GPUI · macOS / Windows / Linux', cmd: '--target gpui', status: '已支持', kind: 'ok' },
+      { name: 'Web', detail: 'HTML · 现代浏览器', cmd: '--target web', status: '已支持', kind: 'ok' },
+    ]
+  : [
+      { name: 'iOS', detail: 'UIKit · iOS 15+', cmd: '--target ios', status: 'Supported', kind: 'ok' },
+      { name: 'Android', detail: 'Android View · API 28+', cmd: '--target android', status: 'Supported', kind: 'ok' },
+      { name: 'macOS', detail: 'AppKit · macOS 14+', cmd: '--target macos', status: 'Supported', kind: 'ok' },
+      { name: 'Windows', detail: 'Win32 · Direct2D · Windows 10 1809+', cmd: '--target windows', status: 'Supported', kind: 'ok' },
+      { name: 'Linux', detail: 'GTK 4.14+', cmd: '--target linux', status: 'Supported', kind: 'ok' },
+      { name: 'GPUI', detail: 'GPUI · macOS / Windows / Linux', cmd: '--target gpui', status: 'Supported', kind: 'ok' },
+      { name: 'Web', detail: 'HTML · modern browsers', cmd: '--target web', status: 'Supported', kind: 'ok' },
+    ];
+
+// Hand-colored snippets: real API, coloured with the site's code tokens.
+const k = (s: string) => `<span class="c-k">${s}</span>`;
+const st = (s: string) => `<span class="c-s">${s}</span>`;
+const fn = (s: string) => `<span class="c-f">${s}</span>`;
+const cm = (s: string) => `<span class="c-c">${s}</span>`;
+const ty = (s: string) => `<span class="c-t">${s}</span>`;
+const snippets: Record<string, string> = {
+  ai: [
+    `${k('import')} { mount, signal, View } ${k('from')} ${st('"nsh"')};`,
+    ``,
+    `${k('function')} ${fn('Answer')}() {`,
+    `  ${k('const')} range = ${fn('signal')}(${st('"1W"')});`,
+    `  ${k('return')} &lt;${ty('View')} class=${st('"gap-3 p-4"')}&gt;…&lt;/${ty('View')}&gt;;`,
+    `}`,
+    `${fn('mount')}(Answer);`,
+  ].join('\n'),
+  host: [
+    `${k('let')} app = ${ty('NshAppView')}()`,
+    `${k('try')} app.${fn('grantCapabilities')}(grants)`,
+    `${k('let')} info = ${k('try await')} app`,
+    `  .${fn('loadPackage')}(at: file, trust: trust)`,
+    `${cm('// verified, sandboxed, running')}`,
+    `${cm('// NshView on Android, AppView elsewhere')}`,
+  ].join('\n'),
+  app: [
+    `${cm('$')} nsh init my-app ${k('--template')} ${st('rust')}`,
+    `${cm('$')} nsh run my-app ${k('--target')} macos`,
+    `${cm('$')} nsh package my-app ${k('--target')} windows`,
+    `${cm('# --template ts for TSX')}`,
+    `${cm('# ios · android · macos · windows · linux · gpui · web')}`,
+  ].join('\n'),
+};
+const heroSnippet = `nsh init my-app ${k('--template')} ${st('rust')}`;
+
+// The same counter in both languages, Rust first.
+const langs = [
+  {
+    id: 'rust',
+    label: 'Rust',
+    file: 'src/lib.rs',
+    code: [
+      `${k('use')} nsh_core::ui::prelude::*;`,
+      ``,
+      `#[component]`,
+      `${k('pub fn')} ${fn('App')}() -&gt; ${k('impl')} ${ty('IntoElement')} {`,
+      `    ${k('let')} count = ${fn('signal')}(0);`,
+      `    ${fn('view')}()`,
+      `        .${fn('items_center')}()`,
+      `        .${fn('gap_4')}()`,
+      `        .${fn('child')}(${fn('text')}(${k('move')} || ${fn('format!')}(${st('"Count: {}"')}, count.${fn('get')}())))`,
+      `        .${fn('child')}(`,
+      `            ${fn('view')}()`,
+      `                .${fn('rounded_lg')}().${fn('bg')}(${fn('rgb')}(0x2563eb)).${fn('px_5')}().${fn('py_3')}()`,
+      `                .${fn('on_press')}(${k('move')} || count.${fn('update')}(|n| *n += 1))`,
+      `                .${fn('child')}(${fn('text')}(${st('"Tap"')}).${fn('text_color')}(${fn('white')}())),`,
+      `        )`,
+      `}`,
+    ].join('\n'),
+  },
+  {
+    id: 'tsx',
+    label: 'TSX',
+    file: 'App.tsx',
+    code: [
+      `${k('import')} { mount, signal, Text, View } ${k('from')} ${st('"nsh"')};`,
+      ``,
+      `${k('function')} ${fn('App')}() {`,
+      `  ${k('const')} count = ${fn('signal')}(0);`,
+      `  ${k('return')} (`,
+      `    &lt;${ty('View')} class=${st('"items-center gap-4"')}&gt;`,
+      `      &lt;${ty('Text')}&gt;Count: {${fn('count')}()}&lt;/${ty('Text')}&gt;`,
+      `      &lt;${ty('View')}`,
+      `        class=${st('"rounded-lg bg-blue-600 px-5 py-3"')}`,
+      `        onPress={() =&gt; count.${fn('update')}((n) =&gt; n + 1)}`,
+      `      &gt;`,
+      `        &lt;${ty('Text')} class=${st('"text-white"')}&gt;Tap&lt;/${ty('Text')}&gt;`,
+      `      &lt;/${ty('View')}&gt;`,
+      `    &lt;/${ty('View')}&gt;`,
+      `  );`,
+      `}`,
+      `${fn('mount')}(App);`,
+    ].join('\n'),
+  },
+];
+
+const icons: Record<string, string> = {
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9.5 13l-2 2 2 2M14.5 13l2 2-2 2"/>',
+  braces: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
+  check: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+  devices: '<rect x="2" y="4" width="15" height="11" rx="1.5"/><path d="M6 19h7M9.5 15v4"/><rect x="16" y="9" width="6" height="11" rx="1.5"/>',
+  scale: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
+  building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>',
+  spark: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+};
+const icon = (name: string, size = 16) =>
+  `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
+---
+
+<main class="home" id="main">
+  <!-- Hero ------------------------------------------------------------ -->
+  <section class="hero">
+    <HeroField />
+    <div class="band__inner hero__inner">
+      <div class="hero__copy rise">
+        <span class="eyebrow"><span class="eyebrow__dot" aria-hidden="true"></span>{copy.eyebrow}</span>
+        <h1>{copy.title[0]}<br />{copy.title[1]}</h1>
+        <p class="hero__lead">{copy.lead}</p>
+        <div class="hero__actions">
+          <a href={link('docs')} class="btn btn--primary">{copy.start}<Fragment set:html={icon('arrow')} /></a>
+          <a href={link('gallery')} class="btn">{copy.gallery}</a>
+          <a href={link('playground')} class="btn">{copy.try}</a>
+        </div>
+        <div class="hero__platforms">
+          <span><Fragment set:html={icon('devices', 14)} />{copy.runsOn}</span>
+          <ul>{platforms.filter((p) => p.kind === 'ok').map((p) => <li>{p.name}</li>)}</ul>
+        </div>
+        <ul class="hero__meta">
+          {copy.meta.map(([i, text]) => <li><Fragment set:html={icon(i, 14)} />{text}</li>)}
+        </ul>
+        <div class="hero__snippet"><span>{copy.snippetLang}</span><code set:html={heroSnippet} /></div>
+      </div>
+
+      <figure class="stage rise rise--2" data-stage>
+        <!-- The gallery's AI chat (demos/home-chat.tsx), live, in a frame of
+             the site's design: a slim bar, the app on an inset surface. -->
+        <div class="device">
+          <div class="device__bar">
+            <span class="device__tile" set:html={icon('spark', 13)} />
+            <span class="device__title">{copy.demo.title}</span>
+            <span class="device__badge"><i aria-hidden="true"></i>{copy.demo.badge}</span>
+          </div>
+          <div class="device__screen">
+            {player
+              ? <iframe data-chat allow="clipboard-write" data-player-src={chatSrc} title={copy.demo.frame} loading="eager"></iframe>
+              : <p class="device__pending">{copy.demo.pending}</p>}
+          </div>
+        </div>
+        <figcaption class="legend">
+          <span>{copy.demo.caption}</span>
+          <button type="button" class="legend__replay" data-replay>{copy.replay}</button>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Rust or TSX ----------------------------------------------------- -->
+  <section class="band">
+    <div class="band__inner langs-band">
+      <header class="section-head section-head--side">
+        <span class="kicker">{copy.langKicker}</span>
+        <h2>{copy.langTitle}</h2>
+        <p>{copy.langLead}</p>
+        <a class="use__cta" href={link('docs/rust')}>{copy.langCta}<Fragment set:html={icon('arrow', 14)} /></a>
+      </header>
+      <div class="langs" data-langs>
+        <div class="langs__tabs" role="tablist">
+          {langs.map((l, i) => (
+            <button type="button" role="tab" id={`lang-tab-${l.id}`} aria-controls={`lang-panel-${l.id}`} aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? 0 : -1}>{l.label}</button>
+          ))}
+          <span class="langs__file" data-lang-file>{langs[0].file}</span>
+        </div>
+        {langs.map((l, i) => (
+          <pre class="langs__code" role="tabpanel" id={`lang-panel-${l.id}`} aria-labelledby={`lang-tab-${l.id}`} data-file={l.file} hidden={i !== 0}><code set:html={l.code} /></pre>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- AI friendly ----------------------------------------------------- -->
+  <section class="band">
+    <div class="band__inner">
+      <header class="section-head">
+        <span class="kicker">{copy.capKicker}</span>
+        <h2>{copy.capTitle}</h2>
+        <p>{copy.capLead}</p>
+      </header>
+      <div class="caps">
+        {caps.map((c) => (
+          <article class={`cap cap--${c.id}`}>
+            <h3><Fragment set:html={icon(c.icon)} />{c.title}</h3>
+            <p>{c.body}</p>
+            <ul class="chips">{c.chips.map((x) => <li>{x}</li>)}</ul>
+            <div class={`mini mini--${c.id}`} aria-hidden="true">
+              {c.id === 'tsx' && (
+                <div class="mini-code">
+                  <span class="mini-file">answer.tsx</span>
+                  <i style="--w:46%;--c:var(--code-keyword)"></i>
+                  <i style="--w:28%;--c:var(--code-fn);--x:12px"></i>
+                  <i style="--w:62%;--c:var(--code-string);--x:24px"></i>
+                  <i style="--w:38%;--c:var(--code-type);--x:24px"></i>
+                  <i style="--w:20%;--c:var(--code-fn);--x:12px"></i>
+                </div>
+              )}
+              {c.id === 'plugin' && (
+                <div class="mini-plugin">
+                  <div class="app">
+                    <i style="--w:44%"></i>
+                    <div class="slot"><code>.nshpkg</code><span set:html={icon('arrow', 12)} /><code>NshAppView</code></div>
+                    <i style="--w:62%"></i>
+                  </div>
+                </div>
+              )}
+              {c.id === 'fast' && (
+                <div class="mini-fast">
+                  <div class="frames">
+                    {[42, 55, 38, 61, 47, 52, 36, 58, 44, 50, 40, 63, 46, 39, 54, 48, 57, 41, 49, 45].map((h) => <i style={`--h:${h}%`}></i>)}
+                    <span class="budget"><code>8.3 ms</code></span>
+                  </div>
+                  <div class="fps"><strong>120</strong><code>FPS</code></div>
+                </div>
+              )}
+              {c.id === 'check' && (
+                <ul class="mini-checks">
+                  <li><span set:html={icon('check', 12)} /><code>build</code><i style="--w:72%"></i></li>
+                  <li><span set:html={icon('check', 12)} /><code>trace</code><i style="--w:88%"></i></li>
+                  <li><span set:html={icon('check', 12)} /><code>tap</code><i style="--w:54%"></i></li>
+                </ul>
+              )}
+              {c.id === 'sandbox' && (
+                <div class="mini-sandbox">
+                  <div class="meters">
+                    <span><code>memory</code><i style="--w:38%"></i></span>
+                    <span><code>call</code><i style="--w:16%"></i></span>
+                    <span><code>nodes</code><i style="--w:24%"></i></span>
+                  </div>
+                  <div class="grants">
+                    <span class="grant grant--ok">api.example.com</span>
+                    <span class="grant grant--no">statusBar</span>
+                  </div>
+                </div>
+              )}
+              {c.id === 'signed' && (
+                <div class="mini-signed">
+                  <span class="node">.nshpkg</span>
+                  <span class="dash"></span>
+                  <span class="node node--key">Ed25519</span>
+                  <span class="dash"></span>
+                  <span class="node node--ok"><Fragment set:html={icon('shield', 13)} />verified</span>
+                </div>
+              )}
+              {c.id === 'native' && (
+                <div class="mini-native">
+                  <div class="menu">
+                    {(zh ? ['拷贝', '分享', '翻译', '查询'] : ['Copy', 'Share', 'Translate', 'Look Up']).map((m) => <span>{m}</span>)}
+                  </div>
+                  <p>{zh ? <>英伟达本周上涨 <mark>8.6%</mark>，苹果 4.4%</> : <>NVDA gained <mark>8.6% this week</mark>, AAPL 4.4%</>}</p>
+                </div>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- Three uses ------------------------------------------------------ -->
+  <section class="band">
+    <div class="band__inner">
+      <header class="section-head">
+        <span class="kicker">{copy.usesKicker}</span>
+        <h2>{copy.usesTitle}</h2>
+        <p>{copy.usesLead}</p>
+      </header>
+      <div class="uses">
+        {uses.map((u, i) => (
+          <article class:list={['use', { 'use--primary': i === 0 }]}>
+            <div class="use__label">
+              <span>{u.label}</span>
+              {u.tag && <span class="use__tag">{u.tag}</span>}
+            </div>
+            <h3>{u.title}</h3>
+            <p>{u.body}</p>
+            <pre class="use__code"><code set:html={snippets[u.code]} /></pre>
+            <ul class="use__checks">{u.checks.map((c) => <li><Fragment set:html={icon('check', 13)} />{c}</li>)}</ul>
+            <a class="use__cta" href={link(u.href)}>{u.cta}<Fragment set:html={icon('arrow', 14)} /></a>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works ---------------------------------------------------- -->
+  <section class="band band--tinted">
+    <div class="band__inner">
+      <header class="section-head">
+        <span class="kicker">{copy.howKicker}</span>
+        <h2>{copy.howTitle}</h2>
+        <p>{copy.howLead}</p>
+      </header>
+      <div class="diagram">
+        <img class="diagram--light" src={`${BASE}diagrams/ai-flow-light.svg`} alt={copy.howTitle} loading="lazy" />
+        <img class="diagram--dark" src={`${BASE}diagrams/ai-flow-dark.svg`} alt={copy.howTitle} loading="lazy" />
+      </div>
+    </div>
+  </section>
+
+  <!-- Platforms ------------------------------------------------------- -->
+  <section class="band">
+    <div class="band__inner platforms-band">
+      <header class="section-head section-head--side">
+        <span class="kicker">{copy.platKicker}</span>
+        <h2>{copy.platTitle}</h2>
+        <p>{copy.platLead}</p>
+      </header>
+      <ul class="platforms">
+        {platforms.map((p) => (
+          <li class={`platform platform--${p.kind}`}>
+            <span class="platform__name">{p.name}</span>
+            <span class="platform__detail">{p.detail}</span>
+            <code class="platform__cmd">{p.cmd}</code>
+            <span class="platform__status"><i></i>{p.status}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <!-- Principle ------------------------------------------------------- -->
+  <section class="band band--tinted principle">
+    <div class="principle__grid" aria-hidden="true"></div>
+    <div class="band__inner principle__inner">
+      <div>
+        <span class="kicker">{copy.principleKicker}</span>
+        <h2>{copy.principle[0]}<br />{copy.principle[1]}</h2>
+      </div>
+      <div>
+        <p>{copy.principleBody}</p>
+        <a href={link('playground')} class="btn btn--primary">{copy.principleCta}<Fragment set:html={icon('arrow')} /></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  // The language panel: Rust first, TSX beside it, as the docs' code tabs.
+  for (const langs of document.querySelectorAll<HTMLElement>('[data-langs]')) {
+    const tabs = [...langs.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const file = langs.querySelector<HTMLElement>('[data-lang-file]');
+    const select = (tab: HTMLButtonElement) => {
+      for (const t of tabs) {
+        const on = t === tab;
+        t.setAttribute('aria-selected', String(on));
+        t.tabIndex = on ? 0 : -1;
+        const panel = document.getElementById(t.getAttribute('aria-controls') ?? '');
+        if (panel) {
+          panel.hidden = !on;
+          if (on && file) file.textContent = panel.dataset.file ?? '';
+        }
+      }
+    };
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+        const next = tabs[(tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+        select(next);
+        next.focus();
+      });
+    }
+  }
+  // The hero's chat follows the page's theme: the player's `?theme=` when
+  // it loads, a message when the theme changes. Replay reloads it, which
+  // plays the scenario again.
+  for (const stage of document.querySelectorAll<HTMLElement>('[data-stage]')) {
+    const frame = stage.querySelector<HTMLIFrameElement>('[data-chat]');
+    if (!frame) continue;
+    const theme = () => (document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    const themed = (src: string) => src.replace(/theme=(dark|light)/, `theme=${theme()}`);
+    // The URL waits in `data-player-src` until the theme is known, so the
+    // chat loads once, in the page's theme.
+    frame.src = themed(frame.dataset.playerSrc!);
+    new MutationObserver(() => frame.contentWindow?.postMessage({ theme: theme() }, '*')).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    stage.querySelector('[data-replay]')?.addEventListener('click', () => (frame.src = themed(frame.src)));
+  }
+</script>
+
+<style>
+  /* Layout: one container per band (gpui-kit DESIGN.md). */
+  .home { --section-gap: 6rem; }
+  section { position: relative; border-top: 1px solid var(--line); }
+  section:first-child { border-top: 0; }
+  /* Same left edge and width as the nav and the footer (x=80, w=1280 at 1440px). */
+  .band__inner {
+    position: relative;
+    width: min(1280px, calc(100% - 3rem));
+    margin: 0 auto;
+    padding: var(--section-gap) 0;
+  }
+  .band--tinted { background: var(--band-tinted); }
+  .section-head { max-width: 44rem; margin-bottom: 3rem; }
+  h1, h2 { text-wrap: balance; }
+  .kicker { display: block; color: var(--citrus); font: 600 0.68rem/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; }
+  html[lang^="zh"] .kicker { letter-spacing: 0.06em; }
+  .section-head h2, .principle h2 { margin: 0.9rem 0 0; font-size: clamp(1.9rem, 3.6vw, 2.75rem); line-height: 1.08; letter-spacing: -0.03em; font-weight: 700; }
+  html[lang^="zh"] .section-head h2, html[lang^="zh"] .principle h2 { letter-spacing: 0; line-height: 1.2; }
+  .section-head p { margin: 1rem 0 0; color: var(--muted-foreground); font-size: 1.02rem; line-height: 1.6; }
+
+  /* Buttons as in the gallery: dark raised secondary, light primary. */
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; height: 2.5rem; padding: 0 1.05rem; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--finish-raised-bg); box-shadow: var(--finish-raised); color: var(--foreground); font-size: 0.9rem; font-weight: 600; text-decoration: none; transition: border-color .15s, filter .15s; }
+  .btn:hover { border-color: var(--border-hover); filter: brightness(1.08); }
+  .btn--primary { border-color: transparent; background: var(--finish-primary-bg); box-shadow: var(--finish-primary); color: var(--brand-contrast); }
+  .btn--primary:hover { border-color: transparent; background: var(--finish-primary-hover-bg); filter: none; }
+
+  /* Hero */
+  .hero { overflow: hidden; }
+  /* The accent's glow behind the device, as behind the app icon's mark. */
+  .hero__inner { z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4rem; padding-top: 4.5rem; padding-bottom: 4.5rem; }
+  .hero__copy { min-width: 0; max-width: 36rem; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.7rem; border: 1px solid color-mix(in srgb, var(--citrus) 28%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--citrus) 9%, transparent); color: var(--citrus); font-size: 0.78rem; font-weight: 600; }
+  .eyebrow__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--citrus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--citrus) 20%, transparent); }
+  h1 { margin: 1.25rem 0 0; font-size: clamp(2.6rem, 5.2vw, 4.1rem); line-height: 1.02; letter-spacing: -0.045em; font-weight: 750; }
+  html[lang^="zh"] h1 { letter-spacing: -0.01em; line-height: 1.16; font-size: clamp(1.9rem, 4.2vw, 2.9rem); }
+  .hero__lead { margin: 1.25rem 0 0; color: var(--muted-foreground); font-size: 1.1rem; line-height: 1.6; }
+  .hero__actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
+  .hero__platforms { display: grid; gap: 0.6rem; margin-top: 1.75rem; }
+  .hero__platforms > span { display: flex; align-items: center; gap: 0.55rem; color: var(--muted-foreground); font-size: 0.85rem; }
+  .hero__platforms > span :global(svg) { flex-shrink: 0; color: var(--faint); }
+  .hero__platforms ul { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
+  .hero__platforms li { padding: 0.25rem 0.65rem; border: 1px solid var(--border); border-radius: 999px; background: var(--finish-raised-bg); box-shadow: var(--finish-raised); font-size: 0.8rem; font-weight: 600; }
+  .hero__meta { display: grid; gap: 0.45rem; margin: 1.25rem 0 0; padding: 0; list-style: none; color: var(--muted-foreground); font-size: 0.85rem; }
+  .hero__meta li { display: flex; align-items: center; gap: 0.55rem; }
+  .hero__meta :global(svg) { flex-shrink: 0; color: var(--faint); }
+  .hero__snippet { display: inline-flex; align-items: stretch; margin-top: 1.5rem; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--code-bg); box-shadow: var(--finish-inset); font: 0.78rem/1 var(--font-mono); overflow: hidden; max-width: 100%; }
+  .hero__snippet span { padding: 0.55rem 0.65rem; border-right: 1px solid var(--line); color: var(--faint); }
+  .hero__snippet code { padding: 0.55rem 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--code-fg); }
+
+  /* The live chat in a card frame of the site's design (the card finish),
+     a slim bar with the file and a live badge, the app on an inset surface;
+     phone width, so the app lays out as on a phone. */
+  .stage { --w: 392px; margin: 0; display: flex; flex-direction: column; align-items: center; gap: 1.1rem; }
+  .device {
+    width: var(--w); padding: 0 8px 8px; border: 1px solid var(--border); border-radius: 20px;
+    background: var(--card) var(--finish-card-bg); box-shadow: var(--finish-card), var(--shadow-window);
+  }
+  .device__bar { display: flex; align-items: center; gap: 8px; height: 40px; margin: 0 -8px; padding: 0 14px; border-radius: 20px 20px 0 0; background: linear-gradient(180deg, color-mix(in srgb, var(--foreground) 3%, transparent), transparent); }
+  .device__tile { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--accent-border); border-radius: 7px; background: var(--finish-accent-bg); box-shadow: var(--finish-accent); color: var(--on-citrus); }
+  .device__title { color: var(--muted-foreground); font: 0.75rem/1 var(--font-mono); }
+  .device__badge { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--success) 14%, transparent); box-shadow: inset 0 1px 0 var(--highlight), inset 0 0 0 1px color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); font-size: 11px; font-weight: 600; }
+  .device__badge i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .device__screen {
+    position: relative; height: 600px; border-radius: 14px; overflow: hidden;
+    background: var(--inset); box-shadow: 0 0 0 1px var(--line);
+  }
+  .device__screen::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: var(--finish-inset); pointer-events: none; }
+  .device__screen iframe { display: block; width: 100%; height: 100%; border: 0; }
+  .device__pending { display: grid; place-items: center; height: 100%; margin: 0; padding: 2rem; color: var(--muted-foreground); font-size: 0.85rem; text-align: center; }
+
+  .legend { display: grid; gap: 8px; justify-items: start; max-width: var(--w); font-size: 0.8rem; line-height: 1.5; color: var(--muted-foreground); }
+  .legend__replay { padding: 0; border: 0; background: none; color: var(--foreground); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--brand-line); }
+
+  /* Capability grid: hairline cells, one diagram box each. */
+  .caps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+  .cap { display: flex; flex-direction: column; padding: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--finish-card-bg); box-shadow: var(--finish-card); }
+  .cap--fast { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 2.5rem; }
+  .cap--fast > :not(.mini) { grid-column: 1; }
+  .cap--fast > .mini { grid-column: 2; grid-row: 1 / span 3; margin-top: 0; }
+  .cap h3 { display: flex; align-items: center; gap: 0.55rem; margin: 0; font-size: 1rem; font-weight: 650; letter-spacing: -0.01em; }
+  .cap h3 :global(svg) { flex-shrink: 0; color: var(--citrus); }
+  .cap p { margin: 0.6rem 0 0; color: var(--muted-foreground); font-size: 0.9rem; line-height: 1.6; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 1rem 0 1.25rem; padding: 0; list-style: none; }
+  .chips li { padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--raised); color: var(--muted-foreground); font: 0.7rem/1.4 var(--font-mono); }
+  .mini { margin-top: auto; height: 104px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--inset); box-shadow: var(--finish-inset); overflow: hidden; }
+
+  .mini-code { position: relative; display: grid; gap: 7px; padding-top: 22px; }
+  .mini-file { position: absolute; top: 0; left: 0; font: 600 10px/1 var(--font-mono); color: var(--muted-foreground); }
+  .mini-code i { display: block; height: 6px; width: var(--w); margin-left: var(--x, 0); border-radius: 3px; background: color-mix(in srgb, var(--c) 55%, transparent); }
+  .mini-plugin { display: grid; place-items: center; height: 100%; }
+  .mini-plugin .app { display: grid; gap: 8px; width: 100%; max-width: 240px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--finish-raised-bg); box-shadow: var(--finish-raised); }
+  .mini-plugin .app i { display: block; height: 5px; width: var(--w); border-radius: 3px; background: color-mix(in srgb, var(--foreground) 18%, transparent); }
+  .mini-plugin .slot { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 8px; border: 1.5px dashed color-mix(in srgb, var(--data-3) 55%, transparent); border-radius: 7px; color: var(--data-3); font: 600 10.5px/1 var(--font-mono); white-space: nowrap; }
+  .mini-plugin .slot code { font: inherit; }
+  .mini-plugin .slot span { display: grid; place-items: center; }
+  .mini-fast { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 14px; height: 100%; }
+  .mini-fast .frames { position: relative; display: flex; align-items: flex-end; gap: 4px; height: 64px; }
+  .mini-fast .frames i { flex: 1; height: var(--h); border-radius: 2px 2px 0 0; background: color-mix(in srgb, var(--citrus) 55%, transparent); }
+  .mini-fast .budget { position: absolute; left: 0; right: 0; top: 18%; border-top: 1px dashed color-mix(in srgb, var(--muted-foreground) 60%, transparent); }
+  .mini-fast .budget code { position: absolute; right: 0; top: -16px; font: 10px var(--font-mono); color: var(--muted-foreground); }
+  .mini-fast .fps { display: grid; justify-items: end; line-height: 1; }
+  .mini-fast .fps strong { font-size: 28px; font-weight: 700; color: var(--citrus); }
+  .mini-fast .fps code { font: 11px var(--font-mono); color: var(--muted-foreground); }
+  .mini-checks { display: grid; gap: 10px; margin: 6px 0 0; padding: 0; list-style: none; }
+  .mini-checks li { display: grid; grid-template-columns: 14px 44px 1fr; align-items: center; gap: 8px; }
+  .mini-checks span { display: grid; place-items: center; color: var(--success); }
+  .mini-checks code { font: 11px var(--font-mono); color: var(--muted-foreground); }
+  .mini-checks i { display: block; height: 5px; width: var(--w); border-radius: 3px; background: color-mix(in srgb, var(--success) 40%, transparent); }
+  .mini-sandbox { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; height: 100%; }
+  .meters { display: grid; gap: 9px; }
+  .meters span { display: grid; grid-template-columns: 48px 1fr; align-items: center; gap: 8px; }
+  .meters code { font: 10.5px var(--font-mono); color: var(--muted-foreground); }
+  .meters i { position: relative; display: block; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--foreground) 8%, transparent); overflow: hidden; }
+  .meters i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w); border-radius: 3px; background: var(--citrus); }
+  .grants { display: grid; gap: 6px; }
+  .grant { padding: 3px 7px; border-radius: 4px; font: 10.5px/1.3 var(--font-mono); white-space: nowrap; }
+  .grant--ok { background: color-mix(in srgb, var(--success) 12%, transparent); color: color-mix(in srgb, var(--success) 85%, var(--foreground)); }
+  .grant--no { background: color-mix(in srgb, var(--foreground) 6%, transparent); color: var(--muted-foreground); text-decoration: line-through; }
+  .mini-signed { display: flex; align-items: center; justify-content: center; height: 100%; gap: 8px; }
+  .mini-signed .node { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--finish-raised-bg); box-shadow: var(--finish-raised); font: 600 10.5px/1 var(--font-mono); white-space: nowrap; }
+  .mini-signed .node--key { color: var(--data-3); border-color: color-mix(in srgb, var(--data-3) 35%, var(--border)); }
+  .mini-signed .node--ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+  .mini-signed .dash { flex: 1; max-width: 26px; border-top: 1.5px dashed color-mix(in srgb, var(--foreground) 30%, transparent); }
+  .mini-native { position: relative; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; height: 100%; gap: 8px; }
+  .mini-native .menu { display: inline-flex; border-radius: 8px; background: #1c1c1e; color: #fff; font-size: 11px; box-shadow: 0 4px 12px rgb(0 0 0 / 18%); overflow: hidden; }
+  .mini-native .menu span { padding: 5px 8px; border-right: 0.5px solid rgb(255 255 255 / 18%); }
+  .mini-native .menu span:last-child { border-right: 0; }
+  .mini-native p { margin: 0; font-size: 12.5px; color: var(--foreground); }
+  .mini-native mark { background: color-mix(in srgb, var(--selection) 30%, transparent); color: inherit; border-radius: 2px; box-shadow: -1px 0 0 var(--selection), 1px 0 0 var(--selection); }
+
+  /* Rust or TSX: one panel, a tab per language. */
+  .langs-band { display: grid; grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); gap: 3rem; align-items: start; }
+  .langs-band .use__cta { padding-top: 1.25rem; }
+  .langs { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--code-bg); box-shadow: var(--finish-inset); overflow: hidden; }
+  .langs__tabs { display: flex; align-items: center; gap: 0.25rem; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line); }
+  .langs__tabs button { padding: 0.35rem 0.75rem; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted-foreground); font: 600 0.78rem/1 var(--font-mono); cursor: pointer; }
+  .langs__tabs button[aria-selected="true"] { border-color: var(--border); background: var(--finish-raised-bg); box-shadow: var(--finish-raised); color: var(--foreground); }
+  .langs__file { margin-left: auto; padding-right: 0.4rem; color: var(--faint); font: 0.72rem/1 var(--font-mono); }
+  .langs__code { margin: 0; padding: 1rem 1.1rem; font: 0.78rem/1.65 var(--font-mono); color: var(--code-fg); overflow-x: auto; white-space: pre; }
+  /* Three uses */
+  .uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+  .use { display: flex; flex-direction: column; padding: 1.75rem; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--finish-card-bg); box-shadow: var(--finish-card); }
+  .use--primary { border-color: color-mix(in srgb, var(--citrus) 40%, var(--border)); }
+  .use__label { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font: 600 0.72rem/1 var(--font-mono); color: var(--muted-foreground); }
+  .use__tag { padding: 3px 8px; border-radius: 999px; background: color-mix(in srgb, var(--citrus) 14%, transparent); color: var(--citrus); font-size: 0.66rem; letter-spacing: 0.02em; }
+  .use h3 { margin: 1.1rem 0 0; font-size: 1.2rem; font-weight: 650; letter-spacing: -0.015em; }
+  .use p { margin: 0.6rem 0 0; color: var(--muted-foreground); font-size: 0.9rem; line-height: 1.6; min-height: 4.3em; }
+  .use__code { margin: 1.25rem 0 0; padding: 0.9rem 1rem; height: 9.2rem; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--code-bg); box-shadow: var(--finish-inset); font: 0.74rem/1.65 var(--font-mono); color: var(--code-fg); overflow: hidden; white-space: pre; }
+  .use__checks { display: grid; gap: 0.55rem; margin: 1.25rem 0 0; padding: 0; list-style: none; font-size: 0.85rem; color: var(--muted-foreground); }
+  .use__checks li { display: flex; align-items: center; gap: 0.55rem; }
+  .use__checks :global(svg) { color: var(--success); flex-shrink: 0; }
+  .use__cta { display: inline-flex; align-items: center; gap: 0.4rem; margin-top: auto; padding-top: 1.75rem; color: var(--foreground); font-size: 0.88rem; font-weight: 600; text-decoration: none; }
+  .use__cta:hover { color: var(--citrus); }
+  :global(.c-k) { color: var(--code-keyword); }
+  :global(.c-s) { color: var(--code-string); }
+  :global(.c-f) { color: var(--code-fn); }
+  :global(.c-t) { color: var(--code-type); }
+  :global(.c-c) { color: var(--code-comment); }
+
+  /* How it works */
+  .diagram { padding: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--finish-card-bg); box-shadow: var(--finish-card); }
+  /* At its natural size at most (never upscaled), centred. */
+  .diagram img { display: block; width: 100%; max-width: 880px; height: auto; margin-inline: auto; }
+  .diagram--dark { display: none !important; }
+  :global(.dark) .diagram--light { display: none !important; }
+  :global(.dark) .diagram--dark { display: block !important; }
+
+  /* Platforms */
+  .platforms-band { display: grid; grid-template-columns: minmax(0, 18rem) minmax(0, 1fr); gap: 3rem; align-items: start; }
+  .section-head--side { margin-bottom: 0; }
+  .platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--radius-surface); overflow: hidden; background: var(--finish-card-bg); box-shadow: var(--finish-card); }
+  .platform { display: grid; align-content: start; gap: 0.35rem; padding: 1.25rem 1.25rem 1.4rem; border-right: 1px solid var(--line); }
+  .platform:nth-child(3n) { border-right: 0; }
+  .platform:not(:last-child) { border-bottom: 1px solid var(--line); }
+  /* A last platform alone in its row spans it, as the web does after the six apps. */
+  .platform:last-child { grid-column: 1 / -1; border-right: 0; }
+  .platform__name { font-size: 1.05rem; font-weight: 650; }
+  .platform__detail { font: 0.75rem/1.4 var(--font-mono); color: var(--muted-foreground); }
+  .platform__cmd { font: 0.72rem/1.4 var(--font-mono); color: var(--faint); }
+  .platform__status { display: inline-flex; align-items: center; justify-self: start; gap: 0.45rem; margin-top: 0.6rem; padding: 0.2rem 0.55rem; border-radius: 999px; background: color-mix(in srgb, var(--tone, var(--faint)) 13%, transparent); color: var(--tone, var(--muted-foreground)); font-size: 0.75rem; font-weight: 600; }
+  .platform--ok { --tone: var(--success); }
+  .platform--wip { --tone: var(--warning); }
+  .platform__status i { width: 7px; height: 7px; border-radius: 50%; }
+  .platform--ok .platform__status i { background: var(--success); }
+  .platform--wip .platform__status i { background: transparent; border: 1.5px solid var(--warning); }
+  .platform--demo .platform__status i { background: color-mix(in srgb, var(--foreground) 25%, transparent); }
+  .platform--wip, .platform--demo { background: color-mix(in srgb, var(--inset) 60%, transparent); }
+  .platform--wip .platform__name, .platform--demo .platform__name { color: var(--muted-foreground); }
+
+  /* Principle */
+  .principle { overflow: hidden; }
+  .principle__grid { position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(to right, color-mix(in srgb, var(--foreground) 5%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--foreground) 5%, transparent) 1px, transparent 1px); background-size: 64px 64px; mask-image: radial-gradient(60% 90% at 85% 50%, black 10%, transparent 70%); }
+  .principle__inner { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 3rem; align-items: center; }
+  .principle p { margin: 0 0 1.5rem; color: var(--muted-foreground); line-height: 1.65; }
+
+  /* Motion: entrances only, short (DESIGN.md). */
+  @media (prefers-reduced-motion: no-preference) {
+    .rise { animation: rise .62s cubic-bezier(.16, 1, .3, 1) both; }
+    .rise--2 { animation-delay: .07s; }
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+  @media (max-width: 1080px) {
+    .hero__inner { grid-template-columns: minmax(0, 1fr); gap: 3rem; }
+    .stage { justify-self: center; }
+    .caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .uses { grid-template-columns: minmax(0, 1fr); }
+    .use p { min-height: 0; }
+    .platforms-band, .principle__inner, .langs-band { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+  }
+  @media (max-width: 680px) {
+    .home { --section-gap: 4rem; }
+    .band__inner { width: calc(100% - 2rem); }
+    .caps { grid-template-columns: minmax(0, 1fr); }
+    .cap--fast { display: flex; }
+    .cap--fast > .mini { margin-top: 1.25rem; }
+    .platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .platform:nth-child(n) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .platform:nth-child(2n) { border-right: 0; }
+    .platform:last-child { border-bottom: 0; }
+    .stage { --w: min(392px, calc(100vw - 2rem)); }
+  }
+</style>
