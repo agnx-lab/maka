@@ -91,6 +91,15 @@ impl Handler for Agent {
                         context.emit(encode(page)?).await?;
                     }
                 }
+                "projectMcp" => encode(owner.project_mcp(decode(input)?, context.scope()).await?),
+                "trustProjectMcp" => {
+                    context.operation().ok_or("agent_mutation_required")?;
+                    encode(
+                        owner
+                            .trust_project_mcp(decode(input)?, context.scope())
+                            .await?,
+                    )
+                }
                 "globalInstructions" => {
                     let _: GlobalInstructionsRead = decode(input)?;
                     encode(owner.global_instructions(context.scope()).await?)
@@ -1172,6 +1181,9 @@ fn delivery(event: StoreStreamEvent) -> Delivery {
 impl maka_host_runtime::application::NativeOwner for Agent {
     fn activated(&self) {
         self.0.activated();
+    }
+    fn retiring(&self) {
+        self.0.retiring();
     }
     fn prepare_retirement(
         &self,

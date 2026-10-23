@@ -47,8 +47,9 @@ use uuid::Uuid;
 
 pub type Result<T> = std::result::Result<T, String>;
 
-const CONTROL_METHODS: [&str; 8] = [
+const CONTROL_METHODS: [&str; 9] = [
     "create",
+    "trustProjectMcp",
     "selectBackend",
     "stop",
     "respond",

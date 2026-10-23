@@ -49,6 +49,7 @@ maka-event-log.workspace = true
 maka-fs-tools.workspace = true
 maka-js-runtime.workspace = true
 maka-model.workspace = true
+maka-mcp.workspace = true
 maka-network.workspace = true
 maka-plugin-core.workspace = true
 maka-presentation.workspace = true

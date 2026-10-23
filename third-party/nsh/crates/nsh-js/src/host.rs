@@ -1184,10 +1184,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
         }
+        // The core answers picks; JS never gets their files this way.
+        EventPayload::Picked { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;
         }
+        EventPayload::Json(value) => return json_value(cx, value),
         EventPayload::TextLayout(lines) => {
             let list = rquickjs::Array::new(cx.clone())?;
             for (i, l) in lines.iter().enumerate() {

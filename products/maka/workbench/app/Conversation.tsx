@@ -46,6 +46,7 @@ import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import { FinalActions } from './FinalActions';
 import type { SessionAction } from './sessionLifecycle';
+import { createProjectMcp } from './projectMcp';
 import { createSessionPermissions } from './sessionPermissions';
 import { TurnPanel, TurnSummary, ActivityStatus, turnOutcome } from './TurnPanel';
 import type { GroupViewState, LiveActivity, TurnViewState } from './TurnPanel';
@@ -170,6 +171,7 @@ export function Conversation(props: ConversationProps) {
   const stopping = () => invocation() !== null && stoppingRun() === invocation();
   const workspace = signal('');
   const permissions = createSessionPermissions(sessionId, props.control);
+  const projectMcp = createProjectMcp(sessionId, props.control);
   const runTurn = signal<string | null>(null);
   const backend = signal<any>(null);
   const interactions = signal<AgentPendingInteractions>({ revision: -1, entries: [] });
@@ -1320,6 +1322,7 @@ export function Conversation(props: ConversationProps) {
     try {
       const model = await selection(expectedBackend);
       if (!alive || model === null) return;
+      if (!(await projectMcp.check()) || !alive) return;
       await flushDraft();
       if (!alive) return;
       if (savingFailed()) throw new UiError('The draft could not be saved; it has not been sent.');
@@ -1484,6 +1487,7 @@ export function Conversation(props: ConversationProps) {
     modelDetails,
     refreshModel,
     permissions,
+    projectMcp,
     workspace,
     empty: () =>
       ready() &&

@@ -109,6 +109,8 @@ mod queue;
 #[path = "tests/large_messages.rs"]
 mod large_messages;
 
+#[path = "tests/mcp.rs"]
+mod mcp;
 #[path = "tests/selection.rs"]
 mod selection;
 
@@ -604,6 +606,7 @@ impl Fixture {
             maka_config::oauth::enrollment::LoginCompletion::Committed(_)
         ));
         let mut settings = Configuration {
+            mcp_servers: vec![],
             locale: String::new(),
             tool_discovery: false,
             isolated_workspaces: false,

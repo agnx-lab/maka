@@ -197,5 +197,7 @@ pub struct BindingRequest {
     pub cwd: String,
     /// Effective catalog, already restricted by the Host's tool ceiling.
     pub tools: BTreeSet<String>,
+    /// Complete frozen tool ceiling before individual binding groups project it.
+    pub available_tools: BTreeSet<String>,
     pub cancellation: tokio_util::sync::CancellationToken,
 }

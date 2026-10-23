@@ -28,6 +28,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+#[path = "contract_mcp.rs"]
+mod mcp;
+pub use mcp::*;
 #[path = "contract_context.rs"]
 mod context;
 pub use context::*;
@@ -83,6 +86,9 @@ pub use permissions::*;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentConfiguration")]
 pub struct Configuration {
+    /// Explicitly trusted MCP servers. Catalogs are captured on Agent activation.
+    #[serde(default)]
+    pub mcp_servers: Vec<maka_agent_facts::configuration::mcp::ServerConfiguration>,
     /// Deployment locale fallback; saved Root preference takes precedence.
     #[serde(default)]
     pub locale: String,
@@ -1505,6 +1511,8 @@ pub fn contract() -> Contract {
         transport: Transport::Remote,
         interface: Interface::Service {
             methods: BTreeMap::from([
+                ("projectMcp".into(), method::<McpRead, McpView>(MethodMode::Query)),
+                ("trustProjectMcp".into(), method::<McpTrust, McpTrustResult>(MethodMode::Mutation)),
                 (
                     "globalInstructions".into(),
                     method::<GlobalInstructionsRead, GlobalInstructionsView>(MethodMode::Query),

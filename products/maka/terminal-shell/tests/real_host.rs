@@ -31,6 +31,8 @@ mod interactions;
 mod keyboard;
 #[path = "real_host/markdown_links.rs"]
 mod markdown_links;
+#[path = "real_host/mcp.rs"]
+mod mcp;
 #[path = "real_host/oauth.rs"]
 mod oauth;
 #[path = "real_host/plugin_settings.rs"]

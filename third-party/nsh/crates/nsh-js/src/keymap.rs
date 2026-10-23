@@ -341,8 +341,8 @@ pub(crate) const TYPES: &str = r#"export interface KeyBindingOptions {
   within?: YNode;
 }
 
-/** The app's keyboard shortcuts (desktop and terminal backends).
- * A keystroke is modifiers and a key joined by
+/** The app's keyboard shortcuts: on desktop and terminal backends, the web,
+ * and iOS and Android with a hardware keyboard. A keystroke is modifiers and a key joined by
  * `+`, in any case (lowercase is the recommended style; a capital letter is
  * the same key, not Shift): `"mod+k"`, `"ctrl+shift+p"`, `"alt+enter"`, `"escape"`,
  * `"f5"`, `"mod+plus"`. Modifiers: `mod` (`cmdorctrl`): Command on Apple

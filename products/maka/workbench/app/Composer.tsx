@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { ProjectMcp } from './ProjectMcpConsent';
+import type { ProjectMcp as ProjectMcpOwner } from './projectMcp';
 import { tr } from './locale';
 import { cleanup, effect, Input, inputAction, signal, Text, View } from 'nsh';
 import type { JSX, YNode } from 'nsh';
@@ -57,6 +59,7 @@ export type ComposerSession = {
   modelDetails(): ModelDetails;
   refreshModel(): Promise<void>;
   permissions: SessionPermissions;
+  projectMcp: ProjectMcpOwner;
   workspace(): string;
   empty(): boolean;
   error(): string;
@@ -219,6 +222,7 @@ export function Composer(props: {
             const owner = session();
             return (
               <View>
+                <ProjectMcp owner={owner.projectMcp} />
                 <Checklist sessionId={owner.sessionId} />
                 <QueueDock session={owner.queue} />
                 <If when={owner.recoverable()}>
