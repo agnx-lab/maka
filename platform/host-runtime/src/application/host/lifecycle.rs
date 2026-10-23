@@ -62,7 +62,10 @@ impl Host {
                         && !snapshot.initialization_failures.is_empty()
                         && !snapshot.closing
                         && snapshot.cleanup_error.is_none()
-                        && snapshot.instances.iter().all(|instance| instance.calls == 0)
+                        && snapshot
+                            .instances
+                            .iter()
+                            .all(|instance| instance.calls == 0)
                         && (snapshot.starting
                             || snapshot.instances.iter().any(|instance| {
                                 instance.phase == Phase::Retiring

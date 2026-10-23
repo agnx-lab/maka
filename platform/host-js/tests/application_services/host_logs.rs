@@ -418,7 +418,10 @@ async fn failed_startup_retirement_waits_for_cleanup_without_blocking_session_ad
         let store = Arc::try_unwrap(store)
             .unwrap_or_else(|_| panic!("Host cleanup retained the original EventLog"));
         store.close().await.unwrap();
-        assert_eq!(RootOwner::open(&root, &namespaces).unwrap().root_id(), root_id);
+        assert_eq!(
+            RootOwner::open(&root, &namespaces).unwrap().root_id(),
+            root_id
+        );
     })
     .await
     .unwrap();
