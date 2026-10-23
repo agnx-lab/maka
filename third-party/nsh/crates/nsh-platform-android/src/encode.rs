@@ -80,6 +80,9 @@ pub(crate) struct Encoded {
     pub(crate) objects: Vec<Obj>,
     /// Items for the UI-thread animator, in order.
     pub(crate) animation: Vec<MountItem>,
+    /// The app's keyboard shortcuts, when the batch changed them: matched
+    /// natively (`crate::keymap`), never sent to Java.
+    pub(crate) keymap: Option<std::sync::Arc<nsh_core::keymap::Keymap>>,
 }
 
 impl Encoded {
@@ -306,8 +309,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(LAYOUT_DIRECTION);
                 e.bool(rtl);
             }
-            // Keyboard shortcuts are not matched on Android yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => e.keymap = Some(keymap),
             MountItem::Appearance { appearance } => {
                 e.int(APPEARANCE);
                 e.int(appearance as i32);
@@ -604,7 +606,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
-                    | Command::Desktop(_) => e.int(-1),
+                    | Command::Desktop(_)
+                    // No host answers `nsh/host` here (`Environment::host`):
+                    // the core rejects the calls first.
+                    | Command::HostCall { .. } => e.int(-1),
                 }
             }
         }

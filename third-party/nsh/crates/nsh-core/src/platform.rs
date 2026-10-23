@@ -192,6 +192,9 @@ pub struct Environment {
     pub terminal_keyboard: bool,
     /// The user's locale (number and date formats: `Intl`'s default).
     pub locale: Locale,
+    /// The app embedding NSH answers `nsh/host`'s calls
+    /// ([`crate::Command::HostCall`]); without it, they reject at once.
+    pub host: bool,
 }
 
 impl Environment {
@@ -235,6 +238,7 @@ impl Default for Environment {
             apple_keyboard: false,
             terminal_keyboard: false,
             locale: Locale::EN_US,
+            host: false,
         }
     }
 }

@@ -47,6 +47,9 @@ pub struct Environment {
     pub apple_keyboard: bool,
     /// The host receives terminal key sequences, even with graphical rendering.
     pub terminal_keyboard: bool,
+    /// The embedding app answers `nsh/host`'s calls
+    /// ([`crate::platform::Environment::host`]).
+    pub host: bool,
 }
 
 impl Default for Environment {
@@ -70,6 +73,7 @@ impl Default for Environment {
             locale: Locale::EN_US,
             apple_keyboard: false,
             terminal_keyboard: false,
+            host: false,
         }
     }
 }

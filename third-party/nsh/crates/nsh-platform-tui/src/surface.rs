@@ -2117,6 +2117,7 @@ mod tests {
                 }
                 let mut binds = Vec::new();
                 core.take_list_binds(&mut binds);
+                core.take_paced_list_binds(usize::MAX, &mut binds);
                 if binds.is_empty() {
                     return;
                 }
