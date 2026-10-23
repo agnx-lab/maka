@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "appId": "maka",
+  "ensureId": "ensure-maka-desktop-window",
+  "reused": false,
+  "desktopPid": 60591,
+  "launchKind": "electron-dist-main",
+  "desktopRoot": "/Users/apple/.agnx-dev/apps/maka/apps/desktop",
+  "host": "MacBook-Pro",
+  "stateFile": "maka-desktop-window.json",
+  "message": "已拉起 Maka Desktop 独立窗",
+  "sidecar": {
+    "supervised": true,
+    "stateFile": "maka-desktop-window.json"
+  }
+}

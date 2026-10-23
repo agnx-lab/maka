@@ -1,0 +1,26 @@
+{
+  "name": "@agnx-vendor-glue/desktop-panel-stub",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=neutral --format=cjs --jsx=automatic --outfile=dist/index.js --loader:.tsx=tsx --external:@agnx-lab/app-sdk --external:react --external:react/jsx-runtime --external:react-native --external:react-native-unistyles",
+    "dev": "npm run build -- --watch=forever"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  },
+  "peerDependencies": {
+    "@agnx-lab/app-sdk": "*",
+    "react": "*",
+    "react-native": "*",
+    "react-native-unistyles": "*"
+  },
+  "peerDependenciesMeta": {
+    "@agnx-lab/app-sdk": {
+      "optional": true
+    }
+  }
+}

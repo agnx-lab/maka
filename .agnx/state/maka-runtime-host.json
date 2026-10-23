@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "hostReady": true,
+  "rootPath": "/Users/apple/.agnx-dev/state/maka-runtime-host",
+  "hostEpoch": "b712db26-5edb-49b1-884d-aa573f6fb208",
+  "rootId": "5b6b7cda32dccf270433ea0d9fa46abed437ae49d3cafcea1132d583a05bb61c",
+  "socketPath": "/var/folders/6b/d2pydbj90tng3ptyq9v3hmwr0000gn/T/m-501-W2t82jLczycEM-oN-1jco-C4KPhu/h.sock",
+  "supervisePid": 71195,
+  "heartbeatAt": "2026-10-06T04:27:38.816Z"
+}
