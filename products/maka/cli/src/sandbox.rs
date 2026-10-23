@@ -21,7 +21,7 @@ use maka_agent_facts::shell_run::PipeStream;
 use maka_host_runtime::HostError;
 use maka_process::{PipeEvent, ProcessOutcome, ShellExecutor, Termination};
 use maka_sandbox::Sandbox;
-use std::{io::Read, path::PathBuf, process::ExitCode, time::Duration};
+use std::{path::PathBuf, process::ExitCode, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
@@ -29,10 +29,10 @@ use tokio_util::sync::CancellationToken;
 pub(super) enum Command {
     /// Diagnose a command using the production shell and sandbox.
     Run(Args),
-    /// Inspect Windows setup without changing accounts or requesting elevation.
+    /// Inspect Windows isolation; MXC needs no account setup or elevation.
     #[cfg(windows)]
     Status(crate::args::Root),
-    /// Configure Windows isolation; requests administrator consent when needed.
+    /// Configure Windows account isolation for systems or policies without MXC.
     #[cfg(windows)]
     Setup(crate::args::Root),
     /// Remove Windows isolation after accepted work drains; requests consent.
@@ -47,7 +47,7 @@ impl Command {
             #[cfg(windows)]
             Self::Status(args) => {
                 let status = tokio::task::spawn_blocking(move || {
-                    maka_host_runtime::sandbox::windows::Installation::new(&args.root).status()
+                    maka_host_runtime::sandbox::windows::status(&args.root)
                 })
                 .await??;
                 println!("{}", serde_json::to_string(&status)?);
@@ -61,7 +61,9 @@ impl Command {
                     timeout_ms,
                 )
                 .await?;
-                println!("Windows sandbox accounts configured");
+                println!(
+                    "Windows account sandbox configured; used when MXC cannot enforce the requested policy"
+                );
                 Ok(ExitCode::SUCCESS)
             }
             #[cfg(windows)]
@@ -126,13 +128,7 @@ pub(super) struct Args {
 impl Args {
     pub(super) async fn run(self, timeout_ms: Option<u64>) -> Result<ExitCode, HostError> {
         let plan = tokio::task::spawn_blocking(move || -> Result<_, HostError> {
-            let mut bytes = Vec::new();
-            std::fs::File::open(self.policy)?
-                .take(128 * 1024 + 1)
-                .read_to_end(&mut bytes)?;
-            if bytes.len() > 128 * 1024 {
-                return Err("sandbox policy exceeds 128 KiB".into());
-            }
+            let bytes = std::fs::read(self.policy)?;
             let policy: Sandbox = serde_json::from_slice(&bytes)?;
             if matches!(policy, Sandbox::External { .. }) {
                 return Err("external isolation must be established by an executor".into());

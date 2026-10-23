@@ -23,9 +23,15 @@
 
 Prepares authorized commands for operating-system isolation. The Host decides permission and owns execution records; this crate applies filesystem and network restrictions. Process I/O and lifetime belong to [maka-process](../process/README.md).
 
-macOS uses Seatbelt, Linux uses bubblewrap and network namespaces, and Windows uses provisioned low-privilege accounts, WFP rules and Jobs. Linux requires bubblewrap 0.11 or newer at `/usr/bin/bwrap`. Unsupported policies fail before execution. Windows setup is explicit through `maka sandbox setup --root PATH`; the Host remains unelevated.
+macOS uses Seatbelt; Linux uses bubblewrap and network namespaces. Linux requires bubblewrap 0.11 or newer at `/usr/bin/bwrap`. Unsupported policies fail before execution.
+
+Windows prefers [Microsoft MXC](https://github.com/microsoft/mxc), using a native process security environment for each command tree. Maka probes actual creation and startup support, then checks the filesystem policy's requirements. Supported commands need no UAC prompt, dedicated account, host ACL mutation or `sandbox setup`. The execution owner retains isolation after the root process exits, until its background processes are settled. Read-only, workspace-write and disabled sandbox choices retain their existing meaning.
+
+Only unsupported capabilities or policies select the existing low-privilege-account backend, which requires explicit `maka sandbox setup --root PATH` and uses WFP rules and Jobs. A failed MXC launch or cleanup is reported; it never retries the command with another backend or without isolation. The Host remains unelevated.
 
 Destination-restricted traffic passes through an execution-owned gateway. Routing and credentials stay with the Host, and redirects need their own destination permission. Linux and Windows expand deny globs before launch; future matching paths are covered on a subsequent launch, not by that existing snapshot.
+
+MXC networking follows Codex: `denied` blocks network access including IPv4/IPv6 loopback. `restricted` allows local clients and servers on `127.0.0.0/8` and `::1`; remote destinations must pass through the execution-owned proxy, which enforces the granted destination host and port. Thus the restricted policy permits access to local services beyond the proxy itself. `allowed` permits normal networking.
 
 To exercise a policy with the production backend:
 
@@ -33,7 +39,7 @@ To exercise a policy with the production backend:
 maka sandbox run --policy policy.json --cwd /absolute/workspace --command 'your command'
 ```
 
-On Windows, also pass the configured `--root`. A read-only policy with no network is:
+On Windows, `--root` selects Host state; a supported MXC policy does not require account setup there. A read-only policy with no network is:
 
 ```json
 {"kind":"managed","filesystem":{"default":"read","rules":[],"denyGlobs":[]},"network":"denied"}
@@ -41,9 +47,26 @@ On Windows, also pass the configured `--root`. A read-only policy with no networ
 
 Use `maka sandbox --help` for setup, status and removal. These controls constrain model-directed effects; trusted native plugin code runs in the host process.
 
+The native Windows acceptance fixture builds the real Host backend and process transports without the CLI's V8 dependency:
+
+```powershell
+cargo build -p maka-host-runtime --example windows_mxc --target x86_64-pc-windows-msvc
+```
+
+Run the resulting `windows_mxc.exe` from a Windows local path as a normal user. It creates and removes its own `LOCALAPPDATA` temporary directory and verifies filesystem restrictions, arguments and environment, pipe and ConPTY I/O, descendant lifetime, cancellation, and networking. Unavailable MXC support is a failure, not a skipped check.
+
 ## Source provenance
 `src/seatbelt/{base,network}.sbpl` are copied unchanged from Codex's
 [base policy](https://github.com/openai/codex/blob/d1e3f9dfe3d5f6105b7e4c3958b9bf2ac6c32818/codex-rs/sandboxing/src/seatbelt_base_policy.sbpl)
 and [network policy](https://github.com/openai/codex/blob/d1e3f9dfe3d5f6105b7e4c3958b9bf2ac6c32818/codex-rs/sandboxing/src/seatbelt_network_policy.sbpl),
 revision `d1e3f9dfe3d5f6105b7e4c3958b9bf2ac6c32818`.
 Copyright OpenAI; Apache-2.0. The upstream source comments are retained.
+
+`src/windows/mxc.rs` and `src/windows/mxc/{availability,policy}.rs` adapt
+native capability probing, networking, filesystem aliases, volume expansion and
+startup handling from Codex's [MXC sandbox adapter](https://github.com/openai/codex/tree/4610b573e59b211bf9430cf6ffb97cfb84623090/codex-rs/mxc-sandbox),
+revision `4610b573e59b211bf9430cf6ffb97cfb84623090`.
+Copyright 2025 OpenAI; Apache-2.0. Maka maps its own filesystem policy, checks
+unsupported rules before execution, preserves its command environment contract,
+and retains the native owner through process settlement. The Microsoft MXC SDK
+is a separate pinned MIT-licensed dependency.

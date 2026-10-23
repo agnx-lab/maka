@@ -69,7 +69,21 @@ pub async fn administrative<Request: Serialize, Response: DeserializeOwned>(
             let _ = sender.send(start(&executable, id));
         })?;
     let process = receiver.await.map_err(io::Error::other)??;
-    let mut connection = endpoint.accept(process.as_handle()).await?;
+    // Unlike command execution, this one-shot privileged helper has no running
+    // execution owner. Preserve its existing initial handoff deadline locally;
+    // an admitted administrative operation itself still owns completion.
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let mut connection = tokio::time::timeout(
+        Duration::from_secs(15),
+        endpoint.accept(process.as_handle(), &cancellation),
+    )
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "sandbox setup helper did not connect",
+        )
+    })??;
     tokio::time::timeout(Duration::from_secs(15), connection.send(request))
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "sandbox setup was not admitted"))??;

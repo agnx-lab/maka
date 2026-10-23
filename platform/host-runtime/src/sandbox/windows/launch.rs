@@ -19,7 +19,11 @@
 
 use super::{Installation, guards::Guards, policy, store};
 use maka_process::bootstrap::{self, Preparation};
-use maka_sandbox::{Network, filesystem::Policy, windows::WriteCapability};
+use maka_sandbox::{
+    Network,
+    filesystem::Policy,
+    windows::{WriteCapability, mxc},
+};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -52,6 +56,53 @@ impl bootstrap::Backend for Backend {
     ) -> Preparation {
         let backend = self.clone();
         Box::pin(async move {
+            let helper = backend.helper.clone();
+            let policy_executable = executable.clone();
+            let policy_cwd = cwd.clone();
+            let policy_network = network.clone();
+            let (filesystem, mxc_unsupported) = tokio::task::spawn_blocking(move || {
+                let filesystem = filesystem
+                    .compile()
+                    .and_then(|policy| policy.process_snapshot())
+                    .map_err(io::Error::other)?;
+                let compiled = filesystem.compile().map_err(io::Error::other)?;
+                if [&helper, &policy_executable, &policy_cwd]
+                    .into_iter()
+                    .any(|path| !compiled.access(path).can_read())
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "sandbox denies its working directory or executable",
+                    ));
+                }
+                let mxc_unsupported =
+                    match mxc::PreparedPolicy::new(&filesystem, &policy_network, &policy_cwd) {
+                        Ok(_) => None,
+                        Err(maka_sandbox::Error::Unsupported(reason)) => Some(reason),
+                        Err(error) => return Err(io::Error::other(error)),
+                    };
+                Ok((filesystem, mxc_unsupported))
+            })
+            .await
+            .map_err(io::Error::other)??;
+            let Some(mxc_unsupported) = mxc_unsupported else {
+                // MXC owns isolation per command tree. Its proxy has no account
+                // slot or installation lifetime and remains with that same tree.
+                let (proxy_address, proxy) = if matches!(network, Network::Restricted { .. }) {
+                    let (address, proxy) =
+                        maka_network::proxy::Proxy::start(network.clone(), route).await?;
+                    (Some(address), Some(Arc::new(proxy)))
+                } else {
+                    (None, None)
+                };
+                return Ok(bootstrap::Launch::Mxc {
+                    executable: backend.helper,
+                    filesystem,
+                    network,
+                    proxy,
+                    proxy_address,
+                });
+            };
             let root = backend.state_root.clone();
             let helper = backend.helper.clone();
             let account_network = network.clone();
@@ -68,10 +119,6 @@ impl bootstrap::Backend for Backend {
                 if installation.status()? != super::Status::Ready {
                     return Err(super::setup_required());
                 }
-                let filesystem = filesystem
-                    .compile()
-                    .and_then(|policy| policy.process_snapshot())
-                    .map_err(io::Error::other)?;
                 let compiled = filesystem.compile().map_err(io::Error::other)?;
                 let guards = Guards::prepare(&compiled)
                     .map_err(|error| context("protect filesystem boundaries", error))?;
@@ -93,7 +140,15 @@ impl bootstrap::Backend for Backend {
                 }
             })
             .await
-            .map_err(cleanup_error)??;
+            .map_err(cleanup_error)?
+            .map_err(|error| {
+                context(
+                    &format!(
+                        "prepare account isolation (Microsoft MXC cannot enforce this policy: {mxc_unsupported})"
+                    ),
+                    error,
+                )
+            })?;
             let id = execution.id;
             let capability = execution.capability;
             let mut guards = Some(guards);
@@ -134,7 +189,7 @@ impl bootstrap::Backend for Backend {
                 let root = backend.state_root.clone();
                 let read_helper = backend.helper.clone();
                 let guards = guards.take().expect("one execution owner");
-                Ok::<_, io::Error>(bootstrap::Launch {
+                Ok::<_, io::Error>(bootstrap::Launch::Account {
                     runner: runner.with_proxy(proxy.take()).with_cleanup(move || {
                         Installation::new(&root).settle(id)?;
                         guards.finish()?;

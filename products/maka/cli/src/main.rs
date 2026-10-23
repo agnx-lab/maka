@@ -131,7 +131,9 @@ fn main() -> std::process::ExitCode {
         let role = std::env::args_os().nth(1);
         let role = role.as_deref().and_then(std::ffi::OsStr::to_str);
         if let Some(
-            role @ (maka_process::bootstrap::RUNNER | maka_process::bootstrap::ELEVATED_SETUP),
+            role @ (maka_process::bootstrap::RUNNER
+            | maka_process::bootstrap::MXC_HELPER
+            | maka_process::bootstrap::ELEVATED_SETUP),
         ) = role
         {
             return match sandbox_helper(role) {
@@ -210,6 +212,9 @@ fn sandbox_helper(role: &str) -> std::io::Result<()> {
         .block_on(async {
             if role == maka_process::bootstrap::RUNNER {
                 return maka_process::bootstrap::serve_runner(endpoint, host).await;
+            }
+            if role == maka_process::bootstrap::MXC_HELPER {
+                return maka_process::bootstrap::serve_mxc(endpoint, host).await;
             }
             let request = maka_process::bootstrap::receive_administrative::<
                 maka_host_runtime::sandbox::windows::Provision,

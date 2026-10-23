@@ -24,7 +24,7 @@ use std::{future::Future, io, path::PathBuf, pin::Pin};
 pub type Preparation = Pin<Box<dyn Future<Output = io::Result<Launch>> + Send>>;
 
 /// The process layer owns native I/O and process lifetime, while the executor
-/// owns account provisioning and recoverable filesystem authority. Preparation
+/// owns backend selection and recoverable filesystem authority. Preparation
 /// is invoked only after durable execution admission, never while capturing a
 /// command or deciding whether an approval is needed.
 pub trait Backend: Send + Sync {
@@ -39,10 +39,82 @@ pub trait Backend: Send + Sync {
 }
 
 /// One already prepared, uniquely owned command tree. There is no fallback to
-/// an unisolated launch if its runner, transport or settlement fails.
-pub struct Launch {
-    pub runner: Runner,
-    pub endpoint: Endpoint,
-    pub capabilities: Vec<uuid::Uuid>,
-    pub proxy_address: Option<std::net::SocketAddr>,
+/// an unisolated launch if backend startup, transport or settlement fails.
+pub enum Launch {
+    Account {
+        runner: Runner,
+        endpoint: Endpoint,
+        capabilities: Vec<uuid::Uuid>,
+        proxy_address: Option<std::net::SocketAddr>,
+    },
+    Mxc {
+        executable: PathBuf,
+        filesystem: Policy,
+        network: Network,
+        proxy: Option<std::sync::Arc<maka_network::proxy::Proxy>>,
+        proxy_address: Option<std::net::SocketAddr>,
+    },
+}
+
+impl Launch {
+    pub(crate) fn proxy_address(&self) -> Option<std::net::SocketAddr> {
+        match self {
+            Self::Account { proxy_address, .. } | Self::Mxc { proxy_address, .. } => *proxy_address,
+        }
+    }
+
+    pub(crate) async fn abort(self) -> io::Result<()> {
+        match self {
+            Self::Account { mut runner, .. } => runner.finish().await,
+            Self::Mxc { proxy, .. } => {
+                if let Some(mut proxy) = proxy.and_then(std::sync::Arc::into_inner) {
+                    proxy.close().await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) async fn pipes(
+        self,
+        command: crate::command::Prepared,
+    ) -> io::Result<crate::pipe::Spawned> {
+        match self {
+            Self::Account {
+                runner,
+                endpoint,
+                capabilities,
+                ..
+            } => runner.pipes(endpoint, command, capabilities).await,
+            Self::Mxc {
+                executable,
+                filesystem,
+                network,
+                proxy,
+                ..
+            } => super::mxc::pipes(executable, filesystem, network, proxy, command).await,
+        }
+    }
+
+    pub(crate) async fn terminal(
+        self,
+        command: crate::command::Prepared,
+        size: maka_agent_facts::terminal::TerminalSize,
+    ) -> io::Result<(crate::pty::PtyChild, crate::pty::PtyIo)> {
+        match self {
+            Self::Account {
+                runner,
+                endpoint,
+                capabilities,
+                ..
+            } => runner.terminal(endpoint, command, capabilities, size).await,
+            Self::Mxc {
+                executable,
+                filesystem,
+                network,
+                proxy,
+                ..
+            } => super::mxc::terminal(executable, filesystem, network, proxy, command, size).await,
+        }
+    }
 }

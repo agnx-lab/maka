@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Windows account runner and one-shot administrative setup.
+//! Windows execution backends and one-shot administrative setup.
 mod background;
 mod channel;
 pub use background::background;
@@ -28,6 +28,8 @@ pub use elevation::{
     AdministrativeRequest, Caller, ELEVATED_SETUP, administrative, receive_administrative,
 };
 mod backend;
+pub(crate) mod mxc;
+pub use mxc::{HELPER as MXC_HELPER, serve as serve_mxc};
 mod logon;
 pub(crate) mod protocol;
 mod runner;

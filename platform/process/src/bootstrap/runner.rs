@@ -67,12 +67,13 @@ impl Runner {
         capabilities: Vec<uuid::Uuid>,
     ) -> io::Result<pipe::Spawned> {
         let _directory = command.directory();
+        let cancellation = command.startup_cancellation();
         let plan = command.runner_plan();
         let result: io::Result<_> = async {
             let (stdin, input_peer) = crate::windows::pipe::input().await?;
             let (stdout, output_peer) = crate::windows::pipe::output().await?;
             let (stderr, error_peer) = crate::windows::pipe::output().await?;
-            let mut channel = endpoint.accept(self.as_handle()).await?;
+            let mut channel = endpoint.accept(self.as_handle(), &cancellation).await?;
             let stdio = [
                 self.copy_file(&input_peer)?,
                 self.copy_file(&output_peer)?,
@@ -86,6 +87,7 @@ impl Runner {
                         capabilities,
                         io: Transport::Pipe { stdio },
                     },
+                    &cancellation,
                 )
                 .await?;
             let job = Job(self.job.0.try_clone()?);
@@ -135,11 +137,12 @@ impl Runner {
         size: TerminalSize,
     ) -> io::Result<(pty::PtyChild, pty::PtyIo)> {
         let _directory = command.directory();
+        let cancellation = command.startup_cancellation();
         let plan = command.runner_plan();
         let result: io::Result<_> = async {
             let (output, output_peer) = crate::windows::pipe::pty_output().await?;
             let (input, input_peer) = crate::windows::pipe::pty_input().await?;
-            let mut channel = endpoint.accept(self.as_handle()).await?;
+            let mut channel = endpoint.accept(self.as_handle(), &cancellation).await?;
             let io = Transport::Terminal {
                 input: self.copy_file(&input_peer)?,
                 output: self.copy_file(&output_peer)?,
@@ -153,6 +156,7 @@ impl Runner {
                         capabilities,
                         io,
                     },
+                    &cancellation,
                 )
                 .await?;
             let job = Job(self.job.0.try_clone()?);
@@ -176,20 +180,25 @@ impl Runner {
         &self,
         channel: &mut Channel,
         request: &Start,
+        cancellation: &tokio_util::sync::CancellationToken,
     ) -> io::Result<(OwnedHandle, u32)> {
-        tokio::time::timeout(Duration::from_secs(15), async {
-            channel.send(request).await?;
-            match channel.receive().await? {
-                Started::Running { process, pid } => {
-                    let process = self.copy_process(process)?;
-                    channel.send(&true).await?;
-                    Ok((process, pid))
+        // Dropping only this transport exchange is safe: the caller still owns
+        // the Runner and always settles its Job, ACLs and proxy on failure.
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(channel::cancelled()),
+            result = async {
+                channel.send(request).await?;
+                match channel.receive().await? {
+                    Started::Running { process, pid } => {
+                        let process = self.copy_process(process)?;
+                        channel.send(&true).await?;
+                        Ok((process, pid))
+                    }
+                    Started::Failed { message } => Err(io::Error::other(message)),
                 }
-                Started::Failed { message } => Err(io::Error::other(message)),
-            }
-        })
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "sandbox launch reply timed out"))?
+            } => result,
+        }
     }
     fn copy_file(&self, file: &File) -> io::Result<usize> {
         let mut target = ptr::null_mut();

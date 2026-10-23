@@ -88,6 +88,8 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+mxc-sdk = { git = "https://github.com/microsoft/mxc", rev = "b21120168d70befe12356411423266bfef168446" }
+flatbuffers = "25"
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }
