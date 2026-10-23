@@ -145,6 +145,26 @@ fn model_menu_closed(view: &AppView) -> bool {
         && model_menu_button(view, "Back to model settings").is_none()
 }
 
+fn model_trigger_caption(view: &AppView, model: &str, effort: &str) -> bool {
+    let Some(trigger) = model_menu_button(view, "Choose model and effort") else {
+        return false;
+    };
+    let nodes = view.accessibility_snapshot();
+    [model, &format!(" · {effort}")].iter().all(|label| {
+        nodes.iter().any(|node| {
+            node.label == *label
+                && node.frame.size.width.0 > 0.0
+                && node.frame.size.height.0 > 0.0
+                && node.frame.origin.x.0 >= trigger.frame.origin.x.0
+                && node.frame.origin.y.0 >= trigger.frame.origin.y.0
+                && node.frame.origin.x.0 + node.frame.size.width.0
+                    <= trigger.frame.origin.x.0 + trigger.frame.size.width.0
+                && node.frame.origin.y.0 + node.frame.size.height.0
+                    <= trigger.frame.origin.y.0 + trigger.frame.size.height.0
+        })
+    })
+}
+
 fn assert_effort_choices(view: &AppView, choice: &Value, selected: Option<&str>) {
     let nodes = view.accessibility_snapshot();
     let mut advertised = choice["thinkingLevels"]
@@ -972,6 +992,36 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         view.handle_event(Event::Paste("Message B uses the selected model".into()));
         support::wait_draft(&client, &created_id, "Message B uses the selected model").await;
 
+        // The remaining footer space belongs to the layout, not the model
+        // trigger. Its actual native frame hugs the caption in both layouts.
+        let viewport = view.surface().viewport();
+        for (columns, rows) in [(160, 40), (80, 24)] {
+            view.resize(columns, rows);
+            wait_view_state(&mut view, |view, _| model_trigger_caption(view, "fixture-model-alt", "high") && model_menu_closed(view)).await;
+            let model = model_menu_button(&view, "Choose model and effort").unwrap().frame;
+            let sandbox = support::wait_enabled_button(&mut view, "Sandbox and approvals").await.frame;
+            let left = sandbox.origin.x.0 + sandbox.size.width.0;
+            let column = ((left + model.origin.x.0) / 16.0).floor() as u16;
+            let row = ((model.origin.y.0 + model.size.height.0 / 2.0) / 16.0).floor() as u16;
+            let center = f32::from(column) * 8.0 + 4.0;
+            assert!(center > left && center < model.origin.x.0, "the model trigger consumed the footer's blank space at {columns} columns");
+            for kind in [MouseEventKind::Down(MouseButton::Left), MouseEventKind::Up(MouseButton::Left)] {
+                view.handle_event(Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }));
+            }
+            let (done, committed) = tokio::sync::oneshot::channel();
+            view.control().unwrap().advance_clock(Duration::ZERO, move || { let _ = done.send(()); });
+            tokio::time::timeout(Duration::from_secs(20), committed).await.unwrap().unwrap();
+            support::tick(&mut view);
+            assert!(model_menu_closed(&view), "blank footer space opened the model chooser at {columns} columns");
+            support::click_button(&mut view, "Choose model and effort").await;
+            wait_view_state(&mut view, |view, _| model_menu_ready(view, "Close model selection")).await;
+            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+            wait_view_state(&mut view, |view, _| model_menu_closed(view)).await;
+        }
+        view.resize((viewport.width.0 / 8.0) as u16, (viewport.height.0 / 16.0) as u16);
+        tab_to_label(&mut view, "Message composer").await;
+        wait_editable_composer(&mut view).await;
+
         let created_editor = view.surface().focused().unwrap();
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
         let caret = view.surface().input_context().unwrap().selection;
@@ -1084,7 +1134,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-unknown") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model-unknown · NSH fixture");
-        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-unknown · Provider controlled") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Provider controlled") && model_trigger_caption(view, "fixture-model-unknown", "Provider controlled") && model_menu_closed(view)).await;
+        let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
+        assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-unknown","thinkingLevel":null}), "choosing the route must preserve its inherited provider-controlled policy");
         support::click_button(&mut view, "Choose model and effort").await;
         support::click_button(&mut view, "Choose reasoning effort").await;
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Use effort high") && model_menu_ready(view, "Back to model settings")).await;
@@ -1099,9 +1151,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Use provider settings") && model_menu_ready(view, "Back to model settings")).await;
         assert_effort_choices(&view, unknown_default, Some("high"));
         support::click_button(&mut view, "Use provider settings").await;
-        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-unknown · Provider controlled") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Provider controlled") && model_trigger_caption(view, "fixture-model-unknown", "Provider controlled") && model_menu_closed(view)).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
-        assert!(observed["session"]["backend"]["thinkingLevel"].is_null(), "resetting provider control must clear the saved override");
+        assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-unknown","thinkingLevel":null}), "resetting provider control must clear the saved override while preserving its route");
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         support::click_button(&mut view, "Choose model and effort").await;
         support::click_button(&mut view, "Choose model").await;

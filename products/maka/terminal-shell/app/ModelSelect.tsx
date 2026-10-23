@@ -95,13 +95,9 @@ export function ModelSelect(props: {
       }
     };
   });
-  const label = () => {
-    const backend = owner.backend();
-    if (!backend) return tr('Choose a model');
-    const model = modelCaption(backend, owner.modelDetails());
-    const effort = effortCaption(backend, owner.modelDetails());
-    return effort ? `${model} · ${effort}` : model;
-  };
+  const model = () => modelCaption(owner.backend(), owner.modelDetails());
+  const effort = () => effortCaption(owner.backend(), owner.modelDetails());
+  const label = () => (effort() ? `${model()} · ${effort()}` : model());
   return (
     <Popover
       open={props.instance() !== null}
@@ -110,7 +106,7 @@ export function ModelSelect(props: {
       align="end"
       offset={8}
       margin={8}
-      style={{ minWidth: 0 }}
+      style={{ minWidth: 0, alignItems: 'flex-end' }}
       popupStyle={{
         width: 420,
         maxWidth: Math.max(0, windowSize().width - 16),
@@ -125,13 +121,14 @@ export function ModelSelect(props: {
       trigger={
         <Button
           accessibilityLabel={tr('Choose model and effort')}
-          tooltip={tr('Choose model and effort · Ctrl+G')}
+          tooltip={`${label()} · ${tr('Choose model and effort · Ctrl+G')}`}
           onPress={inputAction(props.toggle, {
             sessionId: owner.sessionId,
             instance: props.instance(),
           })}
           style={{
             ...controlStyle,
+            maxWidth: '100%',
             minWidth: 0,
             flexDirection: 'row',
             justifyContent: 'flex-end',
@@ -142,17 +139,31 @@ export function ModelSelect(props: {
           focusStyle={{ backgroundColor: C.line }}
           activeStyle={{ backgroundColor: C.surface }}
         >
-          <Text
-            numberOfLines={1}
+          <View
             style={{
-              color: owner.backend() ? C.secondary : C.warning,
-              fontSize: 13,
+              flexDirection: 'row',
+              alignItems: 'center',
               minWidth: 0,
               flexShrink: 1,
             }}
           >
-            {label()}
-          </Text>
+            <Text
+              numberOfLines={1}
+              style={{
+                color: owner.backend() ? C.secondary : C.warning,
+                fontSize: 13,
+                minWidth: 0,
+                flexShrink: 1,
+              }}
+            >
+              {model()}
+            </Text>
+            <If when={effort()}>
+              <Text numberOfLines={1} style={{ color: C.secondary, fontSize: 13, flexShrink: 0 }}>
+                {` · ${effort()}`}
+              </Text>
+            </If>
+          </View>
           <Icon name="down" color={C.secondary} />
         </Button>
       }
