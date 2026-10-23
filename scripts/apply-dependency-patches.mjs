@@ -18,7 +18,7 @@
  * under the License.
  */
 
-// Apply the exact-version provider SDK patches used by native builds.
+// Apply the exact-version dependency patches used by product bundles.
 // Release builds install the complete locked dependency tree. A types-only
 // workspace install may omit the root development tooling.
 import { spawnSync } from 'node:child_process';

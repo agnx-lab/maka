@@ -20,7 +20,7 @@ set positional-arguments
 default:
     @just --list
 
-# Install the build-time provider SDKs and plugin tooling.
+# Install product authoring and plugin tooling.
 setup:
     npm ci --no-audit --no-fund
 

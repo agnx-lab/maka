@@ -30,9 +30,10 @@ use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationOutcome;
 use maka_agent_facts::event::TerminalStatus;
 use maka_agent_facts::event::ToolOutcome;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::{ModelExecutor, ProviderConfig, ProviderKind};
+use maka_tools::CodeExecutor;
 use maka_tools::{
     ToolCatalog, ToolDefinition, ToolHandler, ToolMode, ToolNesting, ToolRegistration,
     ToolSemantics,
@@ -66,7 +67,7 @@ fn input(
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),
-            kind: ProviderKind::OpenaiChat,
+            kind: ProviderKind::OpenaiChatCompletions,
             model: "test".into(),
             base_url: base.into(),
             auth: maka_model::ProviderAuth::ApiKey("fixture-key".into()),
@@ -160,7 +161,8 @@ async fn dropping_caller_keeps_child_session_and_cell_owned_until_drain() {
                     .await,
                 Err(RunError::Busy)
             ));
-            let next = cells.execute("return 7;".into(), effect.clone(), CancellationToken::new());
+            let output = maka_code_runtime::CellContext::new(Default::default(), vec![]);
+            let next = cells.execute_module("text(7);".into(), effect.clone(), CancellationToken::new(), output.clone());
             tokio::pin!(next);
             // Explicitly poll the contender while the cancelled effect remains
             // blocked on release. Cancellation must not free the shared permit.
@@ -170,8 +172,9 @@ async fn dropping_caller_keeps_child_session_and_cell_owned_until_drain() {
             effect.release.notify_one();
             assert_eq!(
                 serde_json::to_value(next.await.unwrap()).unwrap(),
-                json!({"ok":true,"value":7,"toolCalls":[]})
+                json!({"ok":true,"value":null,"toolCalls":[]})
             );
+            assert!(matches!(&output.take_output()[0], maka_code_runtime::CellOutput::Text { text } if text == "7"));
             engine.drain().await;
             let settled = log.prefix(100, 128 * 1024).await.unwrap();
             let state = settled.project_invocation("invocation-aborted");

@@ -20,8 +20,9 @@
 use maka_agent_facts::tools::ToolFuture;
 use maka_agent_facts::{language::Language, tools::ToolExecutor};
 use maka_capabilities::computer::BrowserConnection;
+use maka_code_runtime::{CellContext, CellLimits, CellOutput, CellResult, CellStore};
 use maka_computer_use::{Driver, Session, facade};
-use maka_js_runtime::{CellContext, CellLimits, CellOutput, CellResult, CellStore, repl::Repl};
+use maka_js_runtime::repl::Repl;
 use serde_json::{Value, json};
 use std::{process::Stdio, sync::Arc, time::Duration};
 use tokio::{

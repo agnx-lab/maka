@@ -33,7 +33,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-// Exercise the locked Responses SDKs over loopback, not a live provider.
+// Exercise the native Responses adapter over loopback, not a live provider.
 fn frames(events: &[Value]) -> String {
     events
         .iter()
@@ -293,7 +293,7 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
             assert_eq!(call.input, maka_agent_facts::model::ToolInput::Json(json!({"text":"你好😀"})));
             assert!(!call.provider_executed);
             assert_eq!(call.provider_options.as_ref().unwrap()["openai"]["itemId"], "fc_item_1");
-            // Project accepted parts into the next SDK request. Engine persistence
+            // Project accepted parts into the next adapter request. Engine persistence
             // and tool execution are deliberately outside this adapter test.
             let content: Vec<Value> = step.parts.iter().map(|part| match part {
                 ModelPart::Text { text_kind, text, provider_options } => json!({"type":if *text_kind == TextKind::Thinking { "reasoning" } else { "text" },"text":text,"providerOptions":provider_options}),
@@ -325,7 +325,7 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
         assert_eq!(history[1]["encrypted_content"], "opaque-reasoning");
         assert_eq!(history[2]["content"][0]["text"], "Checking 😀");
         assert_eq!(history[3]["type"], "function_call");
-        // SDK deliberately omits the item ID on replayed client function calls;
+        // adapter deliberately omits the item ID on replayed client function calls;
         // call_id pairs the call with its output, while Rust retains item metadata.
         assert!(history[3].get("id").is_none());
         assert_eq!(history[3]["call_id"], "call_raw_1");

@@ -438,9 +438,7 @@ fn epoch(cell: &Cell) -> Option<u64> {
             match value.parse::<f64>() {
                 Ok(number) => number,
                 Err(_) => {
-                    let timestamp = chrono::DateTime::parse_from_rfc3339(value)
-                        .ok()?
-                        .timestamp_millis();
+                    let timestamp = value.parse::<jiff::Timestamp>().ok()?.as_millisecond();
                     return u64::try_from(timestamp).ok();
                 }
             }

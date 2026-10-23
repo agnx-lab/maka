@@ -79,7 +79,7 @@ fn check_headers(actual: &reqwest::header::HeaderMap, expected: &Value) {
         );
     }
     assert_eq!(actual["proxy-authorization"], "Basic dXNlcjpzZWNyZXQ=");
-    // Native Responses identifies itself without an AI SDK runtime suffix.
+    // Native Responses identifies itself without an AI adapter runtime suffix.
     assert_eq!(actual["user-agent"], "codex_cli_rs/0.0.0 (Maka)");
 }
 

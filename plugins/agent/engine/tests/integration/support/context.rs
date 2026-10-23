@@ -24,9 +24,10 @@ use maka_agent_engine::{Engine, RunInput, RunWork};
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::execution::ModelBinding;
 use maka_agent_facts::execution::ToolMode;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::{ModelExecutor, ProviderConfig, ProviderKind};
+use maka_tools::CodeExecutor;
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
@@ -69,7 +70,7 @@ pub fn input(base: &str, id: &str, compact: bool) -> RunInput {
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),
-            kind: ProviderKind::OpenaiChat,
+            kind: ProviderKind::OpenaiChatCompletions,
             model: "test".into(),
             base_url: base.into(),
             auth: maka_model::ProviderAuth::ApiKey("fixture".into()),

@@ -200,7 +200,11 @@ async fn resolved_openai_routes_preserve_explicit_effort_and_parallel_policy() {
         ("xai", "grok-4.5", ApiProtocol::OpenaiResponses),
         ("opencode", "gpt-5.2", ApiProtocol::OpenaiResponses),
         ("opencode", "custom-model", ApiProtocol::OpenaiResponses),
-        ("zenmux", "openai/gpt-5.2", ApiProtocol::OpenaiChat),
+        (
+            "zenmux",
+            "openai/gpt-5.2",
+            ApiProtocol::OpenaiChatCompletions,
+        ),
     ] {
         let binding = binding(provider);
         let mut input = request(
@@ -225,8 +229,11 @@ async fn resolved_openai_routes_preserve_explicit_effort_and_parallel_policy() {
                 assert!(matches!(model.protocol, ProviderKind::OpenaiResponses));
                 assert_eq!(model.adapter, "responses");
             }
-            ApiProtocol::OpenaiChat => {
-                assert!(matches!(model.protocol, ProviderKind::OpenaiChat));
+            ApiProtocol::OpenaiChatCompletions => {
+                assert!(matches!(
+                    model.protocol,
+                    ProviderKind::OpenaiChatCompletions
+                ));
                 assert_eq!(model.adapter, "chat-completions");
             }
             ApiProtocol::AnthropicMessages => unreachable!(),
@@ -284,7 +291,7 @@ async fn supported_options_do_not_enable_unsupported_execution_contracts() {
             ApiProtocol::AnthropicMessages,
         ),
         ("zenmux", "openai/gpt-5.2", ApiProtocol::OpenaiResponses),
-        ("kimi-coding-plan", "k3", ApiProtocol::OpenaiChat),
+        ("kimi-coding-plan", "k3", ApiProtocol::OpenaiChatCompletions),
         (
             "anthropic-compatible",
             "custom-model",

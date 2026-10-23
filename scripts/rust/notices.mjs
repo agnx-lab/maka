@@ -40,7 +40,6 @@ async function inputs(root) {
     'package-lock.json',
     'scripts/apply-dependency-patches.mjs',
     'scripts/rust/notices.mjs',
-    'scripts/rust/bundle-providers.mjs',
     'products/maka/bundle/scripts/build.mjs',
     'products/maka/bundle/package.json',
     'products/maka/cli/build.rs',
@@ -63,7 +62,6 @@ async function inputs(root) {
       'plugins/**/Cargo.toml',
       'products/**/Cargo.toml',
       'tools/**/Cargo.toml',
-      'platform/js-runtime/trusted/*.js',
       'platform/js-runtime/third-party/**/*',
       'products/maka/bundle/src/**/*.ts',
       'products/maka/desktop-shell/app/**/*',
@@ -219,7 +217,7 @@ export async function generateNotices(root = repository) {
     );
     const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
     const catalog = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
-    const pending = ['maka-cli', 'maka-desktop-shell'].map(
+    const pending = ['maka-cli', 'maka-desktop-shell', 'maka-python-runtime'].map(
       (name) => metadata.packages.find((pkg) => pkg.name === name).id,
     );
     const seen = new Set();
@@ -306,8 +304,6 @@ export async function generateNotices(root = repository) {
   if (failures.length) throw new Error(failures.join('\n'));
   const stage = await mkdtemp(join(tmpdir(), 'maka-notices-'));
   try {
-    const meta = join(stage, 'inputs.json');
-    run(process.execPath, ['scripts/rust/bundle-providers.mjs', stage, meta], root);
     const product = join(stage, 'product');
     run(process.execPath, ['products/maka/bundle/scripts/build.mjs', '--output', product], root);
     const bundled = new Set();
@@ -315,7 +311,6 @@ export async function generateNotices(root = repository) {
       // Standalone validators contain Ajv-generated code without importing its
       // compiler at runtime. Preserve that code's notice as well as imports.
       fileURLToPath(import.meta.resolve('ajv/dist/standalone/index.js')),
-      ...Object.keys(JSON.parse(await readFile(meta, 'utf8')).inputs),
       ...JSON.parse(await readFile(join(product, 'bundle-inputs.json'), 'utf8')),
     ];
     for (const input of inputs) {

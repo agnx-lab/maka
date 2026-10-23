@@ -144,9 +144,9 @@ async fn responses_unexpected_http_body_preserves_diagnostics_without_replaying(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn http_and_sse_failures_preserve_typed_evidence_across_sdk_families() {
+async fn http_and_sse_failures_preserve_typed_evidence_across_native_families() {
     tokio::time::timeout(Duration::from_secs(30), async {
-        for kind in [ProviderKind::OpenaiChat, ProviderKind::OpenaiResponses,
+        for kind in [ProviderKind::OpenaiChatCompletions, ProviderKind::OpenaiResponses,
             ProviderKind::OpenaiCompatible { name: "fixture".into() }, ProviderKind::Anthropic] {
             let anthropic = matches!(kind, ProviderKind::Anthropic);
             let error = if anthropic {
@@ -164,7 +164,7 @@ async fn http_and_sse_failures_preserve_typed_evidence_across_sdk_families() {
                 ModelError::ContextOverflow { observed_output: false }));
         }
         for body in [json!({"error":{"message":"context length rejected"}}).to_string(), String::new()] {
-            assert!(matches!(failure(ProviderKind::OpenaiChat,413,"application/json",body).await,ModelError::Http { status: 413 }));
+            assert!(matches!(failure(ProviderKind::OpenaiChatCompletions,413,"application/json",body).await,ModelError::Http { status: 413 }));
         }
         for (status, header, reason) in [
             (503, None, Some(maka_model::ProviderFailureReason::ProviderUnavailable)),
@@ -174,7 +174,7 @@ async fn http_and_sse_failures_preserve_typed_evidence_across_sdk_families() {
             (401, Some("0.01"), None),
         ] {
             let headers: Vec<_> = header.map(|value| ("Retry-After", value)).into_iter().collect();
-            let result = failure_with_headers(ProviderKind::OpenaiChat, status, "application/json",
+            let result = failure_with_headers(ProviderKind::OpenaiChatCompletions, status, "application/json",
                 json!({"error":{"message":"temporary fixture"}}).to_string(), &headers).await;
             match (reason, result) {
                 (Some(reason), ModelError::Provider(failure)) => {
@@ -186,21 +186,21 @@ async fn http_and_sse_failures_preserve_typed_evidence_across_sdk_families() {
                 (_, result) => panic!("unexpected failure classification: {result}"),
             }
         }
-        for kind in [ProviderKind::OpenaiChat, ProviderKind::OpenaiCompatible { name: "fixture".into() }] {
+        for kind in [ProviderKind::OpenaiChatCompletions, ProviderKind::OpenaiCompatible { name: "fixture".into() }] {
             let chunk = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model",
                 "choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]});
             let error = failure(kind, 200, "text/event-stream", sse(&[chunk])).await;
             assert!(matches!(error, ModelError::Provider(failure)
                 if failure.reason() == maka_model::ProviderFailureReason::StreamTruncated && failure.replay_safe()));
         }
-    }).await.expect("bounded SDK error classification");
+    }).await.expect("bounded adapter error classification");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn text_and_unfinished_tool_input_make_overflow_non_replayable() {
     tokio::time::timeout(Duration::from_secs(20), async {
         for (kind, delta) in [
-            (ProviderKind::OpenaiChat,json!({"role":"assistant","content":"already visible"})),
+            (ProviderKind::OpenaiChatCompletions,json!({"role":"assistant","content":"already visible"})),
             (ProviderKind::OpenaiCompatible{name:"fixture".into()},json!({"tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":"echo","arguments":"{"}}]})),
         ] {
             let chunk = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":delta,"finish_reason":null}]});

@@ -50,16 +50,29 @@ export async function runCli(
     '--',
     ...argv,
   ];
-  return await new Promise((resolveRun, reject) => {
-    const child = spawn('cargo', args, {
-      cwd: repositoryRoot,
-      env,
-      stdio: 'inherit',
-      windowsHide: true,
+  const build = await cargo([
+    'build',
+    '--locked',
+    '-p',
+    'maka-python-runtime',
+    '--bin',
+    'maka-python-worker',
+  ]);
+  if (build.code !== 0 || build.signal) return build;
+  return await cargo(args);
+
+  function cargo(args) {
+    return new Promise((resolveRun, reject) => {
+      const child = spawn('cargo', args, {
+        cwd: repositoryRoot,
+        env,
+        stdio: 'inherit',
+        windowsHide: true,
+      });
+      child.once('error', reject);
+      child.once('exit', (code, signal) => resolveRun({ code, signal }));
     });
-    child.once('error', reject);
-    child.once('exit', (code, signal) => resolveRun({ code, signal }));
-  });
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

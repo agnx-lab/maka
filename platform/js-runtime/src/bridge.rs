@@ -17,110 +17,11 @@
  * under the License.
  */
 
-use crate::{CellContext, CellDiagnostic, CellDiagnosticKind, CellOutput, ToolCall};
+use crate::{CellContext, CellDiagnostic, CellDiagnosticKind, CellOutput};
 use deno_core::{OpState, op2};
-use maka_agent_facts::tools::ToolError;
-use maka_agent_facts::tools::ToolExecutor;
-use serde_json::Value;
-use std::{
-    cell::RefCell,
-    collections::HashSet,
-    future::Future,
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
-use tokio::{runtime::Handle, sync::oneshot};
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
-
-#[derive(Default)]
-pub(crate) struct Admission {
-    pub(crate) calls: Vec<ToolCall>,
-}
-
-pub(crate) struct ToolScope {
-    pub(crate) context: CellContext,
-    pub(crate) executor: Arc<dyn ToolExecutor>,
-    pub(crate) names: HashSet<String>,
-    pub(crate) cancellation: CancellationToken,
-    pub(crate) tasks: TaskTracker,
-    pub(crate) host: Handle,
-    pub(crate) admission: Mutex<Admission>,
-}
-
-impl ToolScope {
-    fn start(
-        self: &Arc<Self>,
-        name: String,
-        input: Value,
-    ) -> Result<oneshot::Receiver<Result<Value, CellDiagnostic>>, CellDiagnostic> {
-        if self.cancellation.is_cancelled() {
-            return Err(CellDiagnostic::new(
-                CellDiagnosticKind::ExecutionError,
-                "cell cancelled",
-            ));
-        }
-        if !self.names.contains(&name) {
-            return Err(CellDiagnostic::new(
-                CellDiagnosticKind::UnknownTool,
-                format!("unknown tool: {name}"),
-            ));
-        }
-        {
-            let mut admission = self.admission.lock().unwrap();
-            if self.cancellation.is_cancelled() {
-                return Err(CellDiagnostic::new(
-                    CellDiagnosticKind::ExecutionError,
-                    "cell cancelled",
-                ));
-            }
-            let index = admission.calls.len() + 1;
-            let mut reserved = admission.calls.clone();
-            reserved.push(ToolCall {
-                index,
-                name: name.clone(),
-            });
-            admission.calls = reserved;
-        }
-        let (sender, receiver) = oneshot::channel();
-        let scope = self.clone();
-        self.tasks.spawn_on(
-            async move {
-                use deno_core::futures::FutureExt;
-                let result = std::panic::AssertUnwindSafe(async {
-                    if scope.cancellation.is_cancelled() {
-                        return Err(ToolError::Failed(
-                            "cell cancelled before tool dispatch".into(),
-                        ));
-                    }
-                    scope
-                        .executor
-                        .invoke(name, input, scope.cancellation.clone())
-                        .await
-                })
-                .catch_unwind()
-                .await;
-                let result = result.unwrap_or_else(|_| {
-                    Err(ToolError::CleanupUnconfirmed(
-                        "tool executor panicked".into(),
-                    ))
-                });
-                if let Err(error @ (ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_))) =
-                    &result
-                {
-                    scope.cancellation.cancel();
-                    scope.context.fail(error.clone());
-                }
-                // The effect is settled even if JS no longer observes its promise.
-                let result = result.map_err(|error| {
-                    CellDiagnostic::new(CellDiagnosticKind::ToolFailure, error.to_string())
-                });
-                let _ = sender.send(result);
-            },
-            &self.host,
-        );
-        Ok(receiver)
-    }
-}
+use maka_code_runtime::ToolScope;
+use std::{cell::RefCell, future::Future, rc::Rc, sync::Arc};
+use tokio_util::sync::CancellationToken;
 
 // Synchronous admission before returning the future is intentional: even an
 // unawaited JS call immediately becomes tracked host work.

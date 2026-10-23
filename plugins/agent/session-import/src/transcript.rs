@@ -150,9 +150,7 @@ impl Timestamp {
             Some(_) => return None,
             None => {
                 let Self::Text(value) = self else { return None };
-                chrono::DateTime::parse_from_rfc3339(value)
-                    .ok()?
-                    .timestamp_millis() as f64
+                value.parse::<jiff::Timestamp>().ok()?.as_millisecond() as f64
             }
         };
         (0.0..=9_007_199_254_740_991.0)

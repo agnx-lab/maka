@@ -19,7 +19,11 @@
 
 use super::{ThinkingLevel, Value, json};
 
-pub(super) fn chat(name: &str, level: Option<ThinkingLevel>, parallel: Option<bool>) -> Value {
+pub(super) fn chat_completions(
+    name: &str,
+    level: Option<ThinkingLevel>,
+    parallel: Option<bool>,
+) -> Value {
     let mut options = json!({});
     if let Some(level) = level {
         options["reasoningEffort"] = match level {
@@ -60,17 +64,17 @@ mod tests {
     fn compatible_policy_encodes_only_resolved_effort_and_declared_parallel_support() {
         for (level, wire) in [(ThinkingLevel::High, "high"), (ThinkingLevel::Max, "max")] {
             assert_eq!(
-                chat("custom-chat_relay", Some(level), None),
+                chat_completions("custom-chat_relay", Some(level), None),
                 json!({"customChatRelay":{"reasoningEffort":wire}}),
             );
         }
-        assert_eq!(chat("relay", None, None), json!({}));
+        assert_eq!(chat_completions("relay", None, None), json!({}));
         assert_eq!(
-            chat("custom-chat", None, Some(false)),
+            chat_completions("custom-chat", None, Some(false)),
             json!({"customChat":{"parallel_tool_calls":false}}),
         );
         assert_eq!(
-            chat("relay", Some(ThinkingLevel::Off), Some(true)),
+            chat_completions("relay", Some(ThinkingLevel::Off), Some(true)),
             json!({"relay":{"reasoningEffort":"none","parallel_tool_calls":true}}),
         );
         assert_eq!(camel_case("relay--chat_A-2_b"), "relay-Chat_A-2B");

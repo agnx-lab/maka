@@ -23,9 +23,10 @@ use maka_agent_facts::artifact::ArtifactKind;
 use maka_agent_facts::artifact::ArtifactSource;
 use maka_agent_facts::artifact::content_digest;
 use maka_agent_facts::event::Invocation;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::{ModelExecutor, ProviderConfig, ProviderKind};
+use maka_tools::CodeExecutor;
 use maka_tools::ToolCatalog;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -65,7 +66,7 @@ pub fn input(base: &str, attachments: Value) -> RunInput {
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),
-            kind: ProviderKind::OpenaiChat,
+            kind: ProviderKind::OpenaiChatCompletions,
             model: "test".into(),
             base_url: base.into(),
             auth: maka_model::ProviderAuth::ApiKey("fixture".into()),

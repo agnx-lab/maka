@@ -22,7 +22,6 @@ pub use maka_agent_facts::model::assembly::StepBuilder;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Normalizer;
     use maka_agent_facts::model::ModelEvent;
     use maka_agent_facts::model::ModelFinishReason;
     use maka_agent_facts::model::ModelPart;
@@ -33,23 +32,50 @@ mod tests {
     #[test]
     fn interleaved_parts_preserve_metadata_and_require_complete_streams() {
         let events = [
-            json!({"type":"reasoning-start","id":"r","providerMetadata":{"anthropic":{"signature":"initial","other":1}}}),
-            json!({"type":"text-start","id":"t"}),
-            json!({"type":"reasoning-delta","id":"r","delta":"think"}),
-            json!({"type":"text-delta","id":"t","delta":"answer"}),
-            json!({"type":"reasoning-end","id":"r","providerMetadata":{"anthropic":{"signature":"signed"}}}),
-            json!({"type":"text-end","id":"t","providerMetadata":{"openai":{"itemId":"item"}}}),
-            json!({"type":"finish","finishReason":{"unified":"stop"},"usage":{"inputTokens":{"total":3},"outputTokens":{"total":4,"reasoning":2}}}),
+            ModelEvent::PartStarted {
+                id: "r".into(),
+                text_kind: TextKind::Thinking,
+                provider_options: Some(json!({"anthropic":{"signature":"initial","other":1}})),
+            },
+            ModelEvent::PartStarted {
+                id: "t".into(),
+                text_kind: TextKind::Text,
+                provider_options: None,
+            },
+            ModelEvent::PartDelta {
+                id: "r".into(),
+                text: "think".into(),
+                provider_options: None,
+            },
+            ModelEvent::PartDelta {
+                id: "t".into(),
+                text: "answer".into(),
+                provider_options: None,
+            },
+            ModelEvent::PartFinished {
+                id: "r".into(),
+                provider_options: Some(json!({"anthropic":{"signature":"signed"}})),
+            },
+            ModelEvent::PartFinished {
+                id: "t".into(),
+                provider_options: Some(json!({"openai":{"itemId":"item"}})),
+            },
+            ModelEvent::Finished {
+                reason: ModelFinishReason::Stop,
+                usage: ModelUsage {
+                    input_tokens: Some(3),
+                    output_tokens: Some(4),
+                    reasoning_tokens: Some(2),
+                    ..Default::default()
+                },
+                provider_options: None,
+            },
         ];
         for length in [4, 6, 7] {
-            let mut normalizer = Normalizer::default();
             let mut builder = StepBuilder::default();
             for event in &events[..length] {
-                if let Some(event) = normalizer.push(event.clone()).unwrap() {
-                    builder.push(event).unwrap();
-                }
+                builder.push(event.clone()).unwrap();
             }
-            assert_eq!(normalizer.end().is_ok(), length == 7);
             let result = builder.finish();
             assert_eq!(result.is_ok(), length == 7);
             if let Ok(step) = result {
@@ -95,8 +121,6 @@ mod tests {
             assert!(builder.finish().is_err());
         }
         for reason in ["content-filter", "error", "unknown"] {
-            let event = json!({"type":"finish","finishReason":{"unified":reason},"usage":{}});
-            assert!(Normalizer::default().push(event).is_err());
             assert!(serde_json::from_value::<ModelFinishReason>(json!(reason)).is_err());
         }
         for (reason, wire) in [
@@ -109,13 +133,15 @@ mod tests {
                 serde_json::from_value::<ModelFinishReason>(json!(wire)).unwrap(),
                 reason
             );
-            let finish = Normalizer::default()
-                .push(json!({
-                    "type":"finish", "finishReason":{"unified":wire},
-                    "usage":{"inputTokens":{"total":3},"outputTokens":{"total":8}}
-                }))
-                .unwrap()
-                .unwrap();
+            let finish = ModelEvent::Finished {
+                reason,
+                usage: ModelUsage {
+                    input_tokens: Some(3),
+                    output_tokens: Some(8),
+                    ..Default::default()
+                },
+                provider_options: None,
+            };
             let mut builder = StepBuilder::default();
             builder.push(finish).unwrap();
             let step = builder.finish().unwrap();

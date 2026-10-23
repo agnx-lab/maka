@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Real Host + native owner + shared provider SDK load, with no billable model.
+//! Real Host + native owner + native provider load, with no billable model.
 use super::*;
 use futures_util::future::join_all;
 use std::time::Instant;

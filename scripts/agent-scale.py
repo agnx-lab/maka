@@ -62,9 +62,9 @@ report = {
     "runs": [],
     "sizes": {"agents": args.agents, "prompt_bytes": args.prompt_bytes or 5, "delta_bytes": args.delta_bytes or 6, "deltas": args.deltas},
     "workload": (
-        "real Host/native owner/shared JS Chat SDK; all HTTP held until every agent arrives; 2ms paced SSE; durable output verified"
+        "real Host/native owner/native Chat adapter; all HTTP held until every agent arrives; 2ms paced SSE; durable output verified"
         if args.scenario == "barrier" else
-        "real Host/native owner/shared JS Chat SDK; all Agents admitted before releasing responses; flowing HTTP overlap; exact durable output, retirement and recovery verified"
+        "real Host/native owner/native Chat adapter; all Agents admitted before releasing responses; flowing HTTP overlap; exact durable output, retirement and recovery verified"
     ),
     "scenario": args.scenario, "waves": args.waves, "mixed_sizes": args.mixed,
     "scope": "includes in-process local HTTP server; excludes TUI rendering and external model latency",

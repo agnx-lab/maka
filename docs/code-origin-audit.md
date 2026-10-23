@@ -21,6 +21,10 @@
 
 Third-party source and dependency patch attribution is recorded in [LICENSE](../LICENSE). Apply-patch adaptations have a detailed record in [plugins/workspace/workspace-files/patch/SOURCE.md](../plugins/workspace/workspace-files/patch/SOURCE.md); native Computer Use notices live in [platform/computer-use/THIRD_PARTY_NOTICES](../platform/computer-use/THIRD_PARTY_NOTICES).
 
+### Native model protocol validation
+
+`plugins/agent/provider-protocol` implements Chat Completions compatible and Anthropic Messages with native Rust input types, wire decoders and stream state. Its behavior was checked against the relevant unchanged Vercel AI SDK tests at revision `e623e8c88b55066dde769614a16ae51d424974aa` (openai-compatible 3.0.77 and anthropic 4.0.87). The upstream tests and temporary validation bindings are external validation tools and are not distributed with Maka. The product uses the same Rust protocol core through Host-scoped transport.
+
 ### Source archive non-text inventory
 
 - `assets/logo.png`: Product artwork reproduced by `scripts/generate-logo.py` from its vector geometry; Apache-2.0.

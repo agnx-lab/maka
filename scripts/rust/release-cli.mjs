@@ -202,6 +202,16 @@ export async function releaseNativeCli({ source, keys, target, validator, output
       });
       if (!terminal.stdout.trim().endsWith(' ' + candidate.version))
         throw new Error('Built terminal shell reports another source version');
+      const worker = join(
+        dirname(binary),
+        platform.os === 'win32' ? 'maka-python-worker.exe' : 'maka-python-worker',
+      );
+      const workerVersion = await run(worker, ['--version'], {
+        timeout: 15_000,
+        windowsHide: true,
+      });
+      if (workerVersion.stdout.trim() !== 'maka-python-worker ' + candidate.version)
+        throw new Error('Built Python worker reports another source version');
       const executables = [
         binary,
         ...(platform.os === 'win32' ? [join(dirname(binary), 'maka-service.exe')] : []),

@@ -40,10 +40,11 @@ use maka_agent_facts::model::ModelPart;
 use maka_agent_facts::model::ModelStep;
 use maka_agent_facts::model::ModelToolCall;
 use maka_agent_facts::model::ModelUsage;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
 use maka_event_log::recovery::recover_invocations as recover;
-use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::{ModelExecutor, ProviderConfig, ProviderKind};
+use maka_tools::CodeExecutor;
 use maka_tools::ToolMode;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
@@ -365,7 +366,7 @@ async fn unknown_dispatch_stays_unknown_and_blocks_next_admission_after_reopen()
                 provider: ProviderConfig {
                     adapter: None,
                     capabilities: Default::default(),
-                    kind: ProviderKind::OpenaiChat,
+                    kind: ProviderKind::OpenaiChatCompletions,
                     model: "unused".into(),
                     base_url: "http://127.0.0.1:1".into(),
                     auth: maka_model::ProviderAuth::ApiKey("unused".into()),
@@ -454,7 +455,7 @@ async fn explicit_new_message_after_unknown_dispatch_informs_model_without_repla
             context: None,
             invocation: Invocation { session_id: "session".into(), turn_id: "new-turn".into(), run_id: "new-run".into(), invocation_id: "new-invocation".into() },
             request_fingerprint: None,
-            provider: ProviderConfig { adapter: None, capabilities: Default::default(), kind: ProviderKind::OpenaiChat,
+            provider: ProviderConfig { adapter: None, capabilities: Default::default(), kind: ProviderKind::OpenaiChatCompletions,
                 model: "test".into(), base_url, auth: maka_model::ProviderAuth::ApiKey("unused".into()),
                 headers: BTreeMap::new(), network: Default::default(), body_overlay: None },
             provider_options: json!({}),

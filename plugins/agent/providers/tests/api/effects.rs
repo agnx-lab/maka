@@ -95,7 +95,7 @@ async fn verification_keeps_protocol_fields_and_rejects_conflicting_customizatio
     for (name, protocol, suffix, path) in [
         (
             "openai-compatible",
-            ApiProtocol::OpenaiChat,
+            ApiProtocol::OpenaiChatCompletions,
             "/v1/",
             "/v1/chat/completions",
         ),

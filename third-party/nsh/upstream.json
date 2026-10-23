@@ -34,13 +34,13 @@
     ".github/workflows/windows.yml": "f3ce2cef5ba8f05156459dcbeba3857c816a2871744729d7a7dd8e58079ecf6e",
     ".gitignore": "09f8ab58f988ed6ac0047bb8d497cdb6a3cc8af3af02a676f6e39a31addec242",
     ".rustfmt.toml": "3e2351e140d029ca8104ed001ae088b8041aaf2e5d9606d5ede1807a986740da",
-    "AGENTS.md": "6b2e0883676c03c9a021a67c517da2e098e67a879123bb7cd2da8c39d0fca4eb",
+    "AGENTS.md": "8f2c3d834c60111abb7389c6716caa7b2a54aaaeb177ddc4c0d1d156da196913",
     "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
     "CONTRIBUTING.md": "fb27100fec01ba22dde6da1546f9cd761b8e23bec7d47eca87146c7991e85de2",
     "Cargo.lock": "f1765287f4b60baad0fe758919f878f9da61b6ac0f3e8a17ed9488b3608955c6",
-    "Cargo.toml": "fc0059d9067e1ce8c9bebb563d4e244985346c557e0c9d121e16e807be4ce9c5",
+    "Cargo.toml": "95f2a961a6236d03988ab3d4124c9d7586e9da91f775a2bf9f8e669a95e428a5",
     "LICENSE-APACHE": "ec75427ad955e3c740f22e7dc3f6db6fc5b2cc1d9135c2af91cece8dd47a2d38",
-    "README.md": "41b27ca2d909710134b9a43243b31b54b856fe5a07c84b1eff53cffe2791c95f",
+    "README.md": "bfbb302f6b0689fcfdc8d30cd1133fc11bca801677d17e517b2adf2d67b77fca",
     "crates/gpui/.cargo/config.toml": "5a1d7d3574a4c7ca0d894a26b0fd71d0fb2f42c85552af2c1539060148f2a1bc",
     "crates/gpui/Cargo.lock": "2b8a4fd17ecabf2cb11520392322bf5aaa2736a8f79989d9e55ab8795360487b",
     "crates/gpui/Cargo.toml": "1d53eec1242cd480700a9e2ffd5c013f21c8b0c3207cb9544733fd5ea375f0f1",
@@ -231,16 +231,17 @@
     "crates/nsh-core/src/color.rs": "93afe9bf38e8f7b12108fedc4863f8e1bee3a55ae7d0c75e788b79b02fb72a93",
     "crates/nsh-core/src/core/classes.rs": "242ff14438c0785b6d29af6315273d4f0256cc048fad221b4cabd2f3a0f2027f",
     "crates/nsh-core/src/core/components.rs": "93f3cb23f3a570c620d8204bf46a125885f35cebe71e56e637eaafcb673dd057",
+    "crates/nsh-core/src/core/layout_tree.rs": "dc834a3994e16fc86df87c99bb6d6a718adf30693b3e9ea5f91e5bbd3796741d",
     "crates/nsh-core/src/core/list.rs": "e709dcf029ac3d8d0c4bc87b4e1984ce07f50e18266d0759eaed773de1902684",
     "crates/nsh-core/src/core/measure.rs": "c6692abd3002576afef5b6d777d7694e28e4754bf7ada0adf8ed1c92419289c1",
-    "crates/nsh-core/src/core/mod.rs": "0dddd5ad69f1c2bf6e67fe69b0d49f8d8487e9c0b31c4f72d486cbab1e907406",
-    "crates/nsh-core/src/core/overlay.rs": "21be85fdbba3484b0e5ea2d7455f821c197bf3af195ef2532a5bdc37080987a5",
-    "crates/nsh-core/src/core/parent_viewport.rs": "7aba431169b7dbd3000896a2aa6af865b18286826ce031182c0903278ffb71b6",
+    "crates/nsh-core/src/core/mod.rs": "641f85478a333a2063fb7c2899869bbb271f8eae89b7d38322f374e5300eb00d",
+    "crates/nsh-core/src/core/overlay.rs": "7839b8e7da75b4599321d486a8891dfbd3a4514bc1992926b60fdb5b64640f29",
+    "crates/nsh-core/src/core/parent_viewport.rs": "1326e1b74de2d14cb9b0a99be4ff00b6f2509f79c6a98a3597e8508ac08d3fa6",
     "crates/nsh-core/src/core/reading.rs": "3bb3d25dc8b97f35eb73dcbaf2d6f1b5dff8cdbdd012a8edcef7fab6661f3d9f",
     "crates/nsh-core/src/core/renders.rs": "eba08379b95272762630258bba8c9d1908f8e8ec94d9518bfd59470edf49b5cd",
     "crates/nsh-core/src/core/services.rs": "8812eefd00661841ff2b1de5d4f8cf68dd667da4151b4c79ed966cc940934752",
     "crates/nsh-core/src/core/sticky.rs": "2c508038c1677fc10f11b5e6c1bf245cb78a75a02beaac24d0b09b2033a4beaa",
-    "crates/nsh-core/src/core/tests.rs": "1e4f1112be94a7cb3d86fa8242ef4a679b9e4016ee30a7ae4e4bddbb44ebc7fb",
+    "crates/nsh-core/src/core/tests.rs": "fdecbbbaee572484f54084e954911afd34f385e7f2cfb02874c82a7eca592386",
     "crates/nsh-core/src/core/touch.rs": "a8559c023a443a6defad135af2f319e60130e7df23af2a8353239b0862e494a8",
     "crates/nsh-core/src/core/views.rs": "c32c59533d5ee33bc16677b0459816f7670c224f3f8de3507c72029989660834",
     "crates/nsh-core/src/css.rs": "56760520c706f64505849d5a32a1eada2d9fd243a5c70e07f21bc8ed0105217f",
@@ -845,7 +846,7 @@
     "docs/dev/api-naming.md": "5286d04f523bd17c9ceaecb37612a145c52a91684889293b43fbf6f0da7a9363",
     "docs/dev/architecture.md": "dd96d2a3ea5d26d23d17e0db36a1b280486be933eb83452f8fbb5d4c87023951",
     "docs/dev/canvas.md": "e6c644b1198801f9242aac91339dc04b5c480d876dbcbe378c58b4953f3970c2",
-    "docs/dev/compatibility.md": "0307638db496f5ea70fd6c996ae5839336c54e370ed495b8fb06d860eb6a02bd",
+    "docs/dev/compatibility.md": "26336d6349cbedd0a70990dd5a4d2e7e48c604242974ac164e68bbeb4ad1cddd",
     "docs/dev/components.md": "9f4a41c405a016275002fc9d850a222dcf941eb47f96201a1a384ba3f8a34914",
     "docs/dev/dock.md": "51527992aeec0387fe7ebdb82b7d24ed4ab6f0dc19b3332e23236cb7a3ad1041",
     "docs/dev/elements.md": "94da584a4b2a7dfbd54c83799329ed05220ce8f2c86107df1e556148dd2b790f",
@@ -859,8 +860,8 @@
     "docs/dev/linux.md": "4441ec64b6edc5c03084bd203aa5114c066f9e2c0541ee320be8f17b6f82c3fe",
     "docs/dev/macos.md": "827c809b5774681c77daf05ac6603342c027dfd459e78f55558044861711dcd3",
     "docs/dev/native-pipeline.md": "07f803365af6ac90d5247c70d2e85ce9e03393f0e9e122c46690f85e381a0c55",
-    "docs/dev/performance.md": "c40be7a2052abf26542b024775ec10219247af26a473bb3f784c02e4f4a5209f",
-    "docs/dev/pitfalls.md": "b8dc2e12cdb09531c2903898028fa963104f13fbbee34677db37762781f13343",
+    "docs/dev/performance.md": "55a4d5a9af1098aa3d7f1ee9fbb71d188576542e539b989aacdcaffc28d140bf",
+    "docs/dev/pitfalls.md": "366400d2c07ab095536caa2907e0e5e451dcc68c2a08ccb88264cbc2fe23e24d",
     "docs/dev/reactive-components.md": "cd447fe8cfbe9026d7cadd5fa42d9c387e4c1b1b7e1c5adddd55c3f1beb94a4d",
     "docs/dev/rust-classes.md": "1f70015213dbcf56e6d6e4641019092003c22eb57ca324d9c4a85578b4468139",
     "docs/dev/rust-modules.md": "f793bfb12272ded93e80876fd2c72ff8dc0f1bd0337977f39b750af495a83592",
@@ -1316,7 +1317,7 @@
     "third-party/icy_sixel/src/lib.rs": "126c4edada7c430377a73839c9da93cae95f9191be69c1401fb4ac1cad9cbf5e",
     "third-party/icy_sixel/src/sixel_image.rs": "1e968370dd0ff8c69751213a1ed11cfce6783feabb30c2b5074ac1c4ba3d8503",
     "website/.gitignore": "eda836e62d95a4644a0c86bb8552be8a865960d68f1ccae195ea6284dd084186",
-    "website/DESIGN.md": "f4c18401d414c8881de312ac1c5810af271dfbfe793d8cc0425f09a56b382c83",
+    "website/DESIGN.md": "484ab5b78233c1c57b0d46e631d2341031b2b34a74740abbb88a275b4c8134b7",
     "website/README.md": "50de9faed8cd3b0751991d6168ac6e33a6437dfd36aa15dc30d35b13dfb94284",
     "website/astro.config.mjs": "0cfae54c7791bd915865dc535669b311e4f76001efed09fdb2772d332812924f",
     "website/demos/.gitignore": "287e770f56554944445f4702f8b89ad6f6f211a560ea49512c49e7f080f65488",
@@ -1382,13 +1383,13 @@
     "website/demos/tsconfig.json": "9cc30d6cb1f4394c49a8aaf0e4e0126a9a137ff98e2e102ba38a8cd405689dea",
     "website/demos/ui-navigation.tsx": "0ede3abc087bc9a66a69d3efb9f1997dfc0da76008e7c88311b5a13ee4c2e01d",
     "website/docs/accessibility.md": "acc7f899e192a16af5d3a07395a26c87e3ada2e05dfbad8bf453779e461fcb51",
-    "website/docs/android.md": "0b9610041d5419f13d07c88c0f3a13b8e4448a6722818f73d44e6d01549f48ca",
+    "website/docs/android.md": "6056ebd29e675f8dce7acd16d711b9a7c66c5860bf3665d20b6125e31103817d",
     "website/docs/animation.md": "74859043103a0e12b3e2cf22f5b29ecf3cca7dd9e4009801b38c9d5d5aa2ceed",
     "website/docs/architecture.md": "1a7f3fa3704a5e1c5f4dd6c2df4986c07cdaa247977f7b1e3a13464bfd82a8e5",
     "website/docs/canvas.md": "5589e8b7ceae1856e21081b30d3dc424dc977064fcbb711331f25165c962b4e7",
     "website/docs/cli.md": "a62a929b93aba13d6074966228300854273c7cec3e00d9c631f6465cda98017d",
     "website/docs/coding-guides.md": "38953161931200894317fdb0aaa25e5fd65a52b28ac2ac03e2196f771050dca9",
-    "website/docs/comparison.md": "f57b203b9d56e03427a11baf68125dd1272a8684e25d2589edc7d09783f8703f",
+    "website/docs/comparison.md": "80f11e255cf3463f29d5610213b57808e1ffa92c5de021ebff9e9e153455dca5",
     "website/docs/compatibility.md": "f2a0af8428dd5232052921e94a6a08914ee4e523c8f3dbac0db51f25c0da6650",
     "website/docs/design-guides.md": "4dfe088c5fe6082cd3e28ec6e88dcc79dc4f8549fc172c562b38daae32277a41",
     "website/docs/dev-server-and-debugging.md": "452ff7754cda3deac1e40ce02e97fde7f3d5b08aca0120a35b677925426928e2",
@@ -1398,9 +1399,9 @@
     "website/docs/getting-started.md": "2a8d1e38fcc84969f0284d606606afde0d0894f6ac4c714b8435d259a33b9601",
     "website/docs/gpui.md": "7d6d8be7cb24db6f7dc8478dcda6229aafe043ea7343a848a00bc0c179a02430",
     "website/docs/images-and-assets.md": "25b3f1455863969f1ce2dcb8961a30783c425c3d8015fe51a4ef5a134cfc2aa6",
-    "website/docs/index.md": "a1da36647d015a2cce6e01be206bed89c88335d94647fa68278cfb6c585277c8",
+    "website/docs/index.md": "31a039507f14aaf881b9fb351b18a837c5a53650ee8449b14afd91ba1fc22281",
     "website/docs/installation.md": "a7b1a6804f151719d35b8b62eb5b3861712a24cd90175730266ee5fb0874027d",
-    "website/docs/ios.md": "44c65186662b24a7735887ff1862d58d73d4d03f078d28e513108223c084d0e8",
+    "website/docs/ios.md": "2b6907f65fbe688850c11bda89d54caf4cd43f0e350d34160544fb3b8e9f5811",
     "website/docs/jsx-and-components.md": "75c24c3cb56503befc7c06d9eaf67c844318890d9fc989427231ecc9e6e9e627",
     "website/docs/layerfs.md": "827ff94d53cb27ed7a686776b2532de70d0cfaebf0cfc7ba39b433f42ec5342b",
     "website/docs/layout.md": "80c8f0995e88d01959766d6d95e86ead1034599b848e6e572ddc0c554fe5bf89",
@@ -1413,7 +1414,7 @@
     "website/docs/packaging.md": "74a12258a9d6bba2369a5260b957c7a11213e15849b689e9c54fa0c9208d6f7b",
     "website/docs/performance.md": "f6c4652eef83d81abeee6f2d2dfb370b14a7bb78b2dbb25313afe3a25a20dece",
     "website/docs/platform-specific.md": "acca9b1bce6444f64370e60eb2911b6e8467a21dbf2078823236ab22c95ad872",
-    "website/docs/platforms.md": "ab8b6bc08448af0307c0080f4fa653daa364c25e9f7dba7efc8437a6fe97406c",
+    "website/docs/platforms.md": "78f8662ab5b59f11c4a4f0c1f8f520800a46831b5a311cb5e7d6ea825531d09f",
     "website/docs/project-structure.md": "8465844846b69eddb6a2bf532b2cafa8a63e583c5b1ce246952c73d972588230",
     "website/docs/reactivity.md": "8c6731f9556ec0c3a4f401c7861c7198cca53a4bd5e95b57f2f773e7acdbf7a8",
     "website/docs/rust.md": "b3d18c6b202c136d7efbba0f7f87e9d0ae26d2469551f1bb09f47e955333ed34",
@@ -1514,22 +1515,22 @@
     "website/src/components/DocSearch.astro": "307737b68f753a710ab4df6a3c1ecdd9560973c4b1917ed2dbce218b767669c5",
     "website/src/components/Gallery.astro": "69c4fceb79a1f264c15274e693c39ec6930c360f141387ab91d05c27935e5bfd",
     "website/src/components/HeroField.astro": "f0c411892b430d77d3a87df7c9b0743b283c629b1b257687a1d417f3a9571a18",
-    "website/src/components/Home.astro": "24683ac53220a1d62a712421a7ad37c06f761b8ee9ad1908b5b7a3e5aac0cb0e",
+    "website/src/components/Home.astro": "e1d2f28ff3048c7ebb5f6769f9bb075702988df78e849d20b1f71d163b88942f",
     "website/src/components/Logo.astro": "87e1331cb061ff1fc4fa148151f106c384311921ba310dec610867ba67c8a397",
-    "website/src/components/Nav.astro": "815885985c301d2c3956228fb06b947a7aec919f3a2e4460ad9d050326e0ed78",
+    "website/src/components/Nav.astro": "4eee935f9f4020d89955e3e1362697c7aa36ff9951f97f1b984e9b720c78d944",
     "website/src/components/Playground.astro": "9ff3de1359e423e38507eb32f3f7c55515a65343481213ebb31d52c43dce44f4",
     "website/src/components/Sidebar.astro": "1b9376ee3e62467f6573592041d653d7cb24d352c15ec0ea1fd6a0620cfb6134",
-    "website/src/components/SiteFooter.astro": "e75a8e3a7c8303d9d636e035fafb84be8bbf60f963dab399030e4be626a802b8",
+    "website/src/components/SiteFooter.astro": "fd1a606faebaf869930867ef8845e8be17b633e17dbb02ff7e9ea4f88e72a4fb",
     "website/src/components/ThemeSwitch.astro": "4577309af53d69de8e039ee1f3c39088cb3f88f62899fbf8234d5c73147d4d80",
     "website/src/components/Toc.astro": "c2a7e68ae12d7def345f326d399d4ccbfe1a17ffb591ebea6d95e7d92c7244e3",
     "website/src/content.config.ts": "cb687143731ddd2a2620659cbb36b1eec9355f4d37449bd31ca1d0949f5ac2d2",
     "website/src/dark.theme.json": "f0f26ad7977362478ee03c2722890d89550a0bb03853b85f9b33378ae0766e4b",
-    "website/src/layouts/BaseLayout.astro": "60961a37ed77b151267150f985459b53fe2030075fb2b9cc99a2e575097b092f",
+    "website/src/layouts/BaseLayout.astro": "6f60f501ae5350cca2cbc6e03af928af06f8c17d63e99bcc1be9dddbfceb3a3e",
     "website/src/layouts/DocsLayout.astro": "3ff1b8ad53b9bb389fce2405da0dcb443f4946702c3ce6f446531e5dbe8526f3",
     "website/src/lib/code-tabs-client.ts": "80746cc8f4cc3ac9df7878a57bef98723378ab6c11300a7fce92dc301d82ba93",
     "website/src/lib/demo-client.ts": "d389471f98b41bd63f60a63bb4fa31186d4a8a7fbdfc5bc56145926b321e9060",
     "website/src/lib/demo.js": "f6825d6daa35887f479bc202a88b742beddd38b0add573de4fe5abce4ac1f9f6",
-    "website/src/lib/llms.ts": "99341c1cd10682368ef3efc347d16a78925a23a8502282e498ca8cff035b0325",
+    "website/src/lib/llms.ts": "eb0fc162e93316eacb86a97ad61755e5276d94be32eb1fbf2999835cbd945085",
     "website/src/lib/markdown-endpoint.ts": "1d551af7145b0c1148b4ead6d13d772115e64504e5bb5ac070d2890cdc796488",
     "website/src/lib/markdown.js": "1da143867f85b361dc8b46753a8bc98062055b48ab4ef550b2036be4989f0f50",
     "website/src/lib/play-dev.js": "a136486f79c173809f405d401a5da283fcc088935dca59413036aa4f4f60b50e",
@@ -1541,7 +1542,7 @@
     "website/src/lib/remark-doc-links.js": "4d1305578398c7171eab60b413d4593d2c0682aec39544c2ad2969b847dbe160",
     "website/src/lib/remark-strip-title.js": "3068a83d3a0cbc8e5acd00e40cb658b5ae130dfa74f6c7b5dcef7e90a76c7038",
     "website/src/lib/sections.ts": "dd07e17c5bc50cab1faab1d19ded55d568964a0dbf8f24aa5b8e64c77ef0b044",
-    "website/src/lib/site.ts": "d350a51eaa05b71fda9014ecca91413270b7ead25f515f953800134b2c1d421e",
+    "website/src/lib/site.ts": "bb5d441396687dec1c095f083295d41cbc77fbe84762faa3b4370aeb978e7c49",
     "website/src/light.theme.json": "6f17f1644d1037c2028526d36af10093590d9a87d02e417366a75fb93754461b",
     "website/src/pages/404.astro": "2931f5edd7a4697a17e7039d75373d26ebaa6a9029f7d8419ae6861f969f4a29",
     "website/src/pages/[section].md.ts": "06ce163636180ef2c277f041a7b5042558fe8551e73ed98dd53735791ec3e296",
@@ -1558,9 +1559,9 @@
     "website/src/pages/zh-CN/[section]/[...slug].astro": "ee09974de95eaf625c2354a550dece0728090680e08cd0a26ee5efd754d041bd",
     "website/src/pages/zh-CN/[section]/[...slug].md.ts": "f6e8aaa3c2d33d5f8311296291786e8bf79e8802ad858984dac4034d81c9f07b",
     "website/src/pages/zh-CN/gallery.astro": "1452289ad1d3e8792097890d3e40de472a0b534e241a615d081070618a92635a",
-    "website/src/pages/zh-CN/index.astro": "d4adf1298bd8844abb528b4a1f4ebe1511af7a378a297fc6c656aeb3e1451c5f",
+    "website/src/pages/zh-CN/index.astro": "fe827612ee6c77431f2a4bc373b82f6894a5b9da1f2ffca122e1af2cab229f34",
     "website/src/pages/zh-CN/playground.astro": "e7c84a4744dfe5359699e9834680743f973cf7a2da38dd7780fcf9e92e6233d8",
-    "website/src/styles/global.css": "1b303c43f43abe3ba8908f4ceb25173eec4435a86caaa1f3368e370d3805d5aa",
+    "website/src/styles/global.css": "0d144b4e3fdc0bea6bd4b7ff59c53626a620ff7bebdcc428e490798bd74162a0",
     "website/tests/code-tabs.test.ts": "3918f478bdf0c95814cfdce4358649ab7a14cc2acfe17aaeb045009c7d431613",
     "website/tests/content.test.ts": "105d2614c1e1320b8af29f436f4ab1b11fb0db2eb2a1231acd761b8ab7a34207",
     "website/tests/links.test.ts": "f6412e9693e69b809f694c8600ec8ea5e06315b84a84410215e57003c661d47e",
@@ -1569,13 +1570,13 @@
     "website/tests/storage.test.ts": "4711c006141dfea8792fbb1fe2c219746155f57a32650e0fc80aa56b404d1804",
     "website/tsconfig.json": "7b292fd267352f901284513544cd818de4a8a8fe15880f662b3a0900b2a93c99",
     "website/zh-CN/docs/accessibility.md": "63977505bc163dfe40b4d0e40168944c28153dde29a73be1db9931d90bb29bde",
-    "website/zh-CN/docs/android.md": "940e22c54c19d26fd25d2c2ac7a35fbd90b1e6e4415664eb1460e9a00b4b040b",
+    "website/zh-CN/docs/android.md": "b64f4fdecf8de8eff2feec7eb185de3982f2d98e78e30cc5aa5eab7399d95aed",
     "website/zh-CN/docs/animation.md": "a6d266e73b250cb3274784b48dfcc99ad791897ffdc5d6788e80a11db4fdebd2",
     "website/zh-CN/docs/architecture.md": "6759f09942a51486476a68a37e12c833be9430012e8b2da137d9123632c00294",
     "website/zh-CN/docs/canvas.md": "8a237d25ef877ce00715d88a03e50493667a9961ccfe045372485b0ff48c7b77",
     "website/zh-CN/docs/cli.md": "d6971d9ce2f9875fcd1073a15c2171ad71d767a4365669ad172844c6d6ef3967",
     "website/zh-CN/docs/coding-guides.md": "34af3e5c4f13861a7336aca26e636aad3a4a2a71ebbc5d806d25135c7882a716",
-    "website/zh-CN/docs/comparison.md": "179642fd6035c3fe91a3f5d06873ff394b72376cd2ca22cbe85f521a17800643",
+    "website/zh-CN/docs/comparison.md": "05e6ab8a44d3db224895d7029e029dbb48a9e74092e5135099ab0179a6ee974c",
     "website/zh-CN/docs/compatibility.md": "1990079dc6a9ed2c4c72a0ccd6a10aae154e5ca722f2c6d899d5874345f62d76",
     "website/zh-CN/docs/design-guides.md": "2b8d063912ebb2ff15e899bc66567bdef1b085295c16143014128e5ce03fe94d",
     "website/zh-CN/docs/dev-server-and-debugging.md": "62aa22956073ecdfdc56ebea40162e26237a9e60e632e245e0dc5741c8a28034",
@@ -1585,9 +1586,9 @@
     "website/zh-CN/docs/getting-started.md": "30dae5a17460e27792dbd18a5888d1aa7fbb2c0371e8bf7a2ce37d28f2f51466",
     "website/zh-CN/docs/gpui.md": "43484e580e48508abcaa27ca5d26fab670a0b7c0a1f3ccc485626e6f9ee18d44",
     "website/zh-CN/docs/images-and-assets.md": "de6564e02b94897bfa6865353acfa8d007b331f0dde1abe572db12281c654d63",
-    "website/zh-CN/docs/index.md": "37cc61a84bab0742b38ac4ffa13b211a0531d151092bd4e2ef34a055b1ba9773",
+    "website/zh-CN/docs/index.md": "bdde9f1324a8a2511bc1b740f3a1e42be071ab1390363a7152a4bde1705c2deb",
     "website/zh-CN/docs/installation.md": "149ece60315c3d00485a5307421a5b2d4898d6259ff59f1c9861295a56a079d9",
-    "website/zh-CN/docs/ios.md": "daa4deeea8a90775472af297d61032bdda86015a25b46647ba637a4dc2b24263",
+    "website/zh-CN/docs/ios.md": "615b26e421eb981ece4f360544732b81e9ca4ace2440b6edf05880f142091953",
     "website/zh-CN/docs/jsx-and-components.md": "7c80e941fdd795698c237edcfd5f600d748a870f4671b05973d1bc0c2279bf97",
     "website/zh-CN/docs/layerfs.md": "817b28c2b67d90fa5bc754f7b7dcebf07edcb8328d814e56f394ee91989c8217",
     "website/zh-CN/docs/layout.md": "34c9288812aa015497363034a38d338a3138808ea936c21948b1db1fca72733b",
@@ -1600,7 +1601,7 @@
     "website/zh-CN/docs/packaging.md": "8b50f913799aa252cd230b96ee50f5b73a6bd4bc06e6da35b483ac03fe8368b7",
     "website/zh-CN/docs/performance.md": "51e47481cf34e1d5b80cb63214a1f13ad89ad2ad902d0ba476f5b52f93a6a7af",
     "website/zh-CN/docs/platform-specific.md": "418a89f4880460fd661451290ce6c5d583c6fbee7423978b1d5ac90d098e6412",
-    "website/zh-CN/docs/platforms.md": "08a449519d649cf4d720ee8a7ffe46c62b01a522493f94cf57d0b571da912b5b",
+    "website/zh-CN/docs/platforms.md": "dcfde4bb011232303c45849ed0c1b84f30a0a7ef57121855e5ad32a9cd3cba0e",
     "website/zh-CN/docs/project-structure.md": "1006d1463cf46514347f888024a9a3a492486952fe6d2fe162c0f16c43d74f9a",
     "website/zh-CN/docs/reactivity.md": "2f5ab6ca8af99fe3b6c5aa885e3ea5ee878e612bba4b15cd75de37b2c7f4dbb3",
     "website/zh-CN/docs/rust.md": "4d8eebbf32c628977ad3d87b1c227a056a6d7be8cd140ababd3ea6294d70d473",
@@ -1672,5 +1673,128 @@
     "website/zh-CN/modules/style-reference.md": "7db6b969281da9b46046b82d3469a009426c4e2c6db9450ae6f70e90d15d9257",
     "website/zh-CN/modules/tailwind-reference.md": "9f366de10fe05a3fcf34f7e2ad7a6d7f8dc82379084f4958bef2c5761aff968f"
   },
-  "upstream_repository": "https://github.com/longbridge/nsh"
+  "upstream_repository": "https://github.com/longbridge/nsh",
+  "upstream_revision": "111b3a933319fadb0f1da9a59909ca526f256386",
+  "file_sources": {
+    "AGENTS.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "Cargo.toml": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "README.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "crates/nsh-core/src/core/layout_tree.rs": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "crates/nsh-core/src/core/mod.rs": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "crates/nsh-core/src/core/overlay.rs": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "crates/nsh-core/src/core/parent_viewport.rs": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "crates/nsh-core/src/core/tests.rs": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "docs/dev/compatibility.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "docs/dev/performance.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "docs/dev/pitfalls.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+    },
+    "website/DESIGN.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/docs/android.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/docs/comparison.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/docs/index.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/docs/ios.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/docs/platforms.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/components/Home.astro": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/components/Nav.astro": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/components/SiteFooter.astro": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/layouts/BaseLayout.astro": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/lib/llms.ts": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/lib/site.ts": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/pages/zh-CN/index.astro": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/src/styles/global.css": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/zh-CN/docs/android.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/zh-CN/docs/comparison.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/zh-CN/docs/index.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/zh-CN/docs/ios.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    },
+    "website/zh-CN/docs/platforms.md": {
+      "repository": "https://github.com/longbridge/nsh",
+      "revision": "de52bb3f9c236c48f0414f1bb36c17b92914ff91"
+    }
+  }
 }

@@ -28,7 +28,7 @@ maka-agent-facts.workspace = true
 maka-agent-ports.workspace = true
 maka-capabilities.workspace = true
 futures-util.workspace = true
-chrono.workspace = true
+jiff.workspace = true
 dunce = "1.0.5"
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }

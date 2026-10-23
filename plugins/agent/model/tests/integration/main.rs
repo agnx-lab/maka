@@ -18,13 +18,13 @@
  */
 
 mod adapters;
+mod concurrency;
 mod context_overflow;
 mod live_search;
+mod openrouter;
 mod provider_compatible;
-mod provider_errors;
 mod provider_ingress;
 mod provider_responses;
 mod provider_stream;
 mod provider_tools;
 mod responses_websocket;
-mod trusted_concurrency;

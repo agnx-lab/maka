@@ -232,7 +232,7 @@ async fn changed_provider_inputs_and_overlay_supersede_in_flight_verification() 
     let fixture = Fixture::new().await;
     fixture.key().await;
     for model in [
-        json!({"id":"manual","apiProtocol":"openai-chat"}),
+        json!({"id":"manual","apiProtocol":"openai-chat-completions"}),
         json!({"id":"manual","apiProtocol":"openai-responses"}),
     ] {
         let prepared = fixture.prepare(Some("manual")).await;
@@ -283,7 +283,7 @@ async fn changed_provider_inputs_and_overlay_supersede_in_flight_verification() 
     );
     for declaration in [
         json!({"displayName":"Configured", "compactionThreshold":8000}),
-        json!({"apiProtocol":"openai-chat"}),
+        json!({"apiProtocol":"openai-chat-completions"}),
     ] {
         let prepared = fixture.prepare(Some("manual")).await;
         let row = fixture.store.catalog().await.unwrap().connections.remove(0);

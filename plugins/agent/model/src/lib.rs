@@ -18,7 +18,6 @@
  */
 
 mod delta;
-mod events;
 pub use maka_agent_facts::model::error::ModelError;
 pub use maka_agent_facts::model::error::ProviderFailure;
 pub use maka_agent_facts::model::error::ProviderFailureReason;
@@ -26,9 +25,9 @@ pub use maka_agent_facts::model::prompt;
 pub use maka_agent_facts::model::request::ProviderKind;
 pub mod adapters;
 mod conversation;
+mod native;
 mod network;
 pub mod reasoning;
-mod sdk;
 mod step;
 pub use conversation::Conversation;
 pub use maka_agent_facts::model::ModelEvent;
@@ -36,7 +35,6 @@ pub use maka_agent_facts::tools::ToolDefinition;
 pub use maka_agent_ports::model::Emission;
 pub use step::StepBuilder;
 
-use maka_js_runtime::trusted::TrustedRuntime;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -287,15 +285,7 @@ impl ModelExecutor {
     }
 
     pub fn new(idle_timeout: Duration) -> Result<Self, ModelError> {
-        Self::with_runtime(TrustedRuntime::default(), idle_timeout)
-    }
-
-    pub fn with_runtime(
-        runtime: TrustedRuntime,
-        idle_timeout: Duration,
-    ) -> Result<Self, ModelError> {
         Self::build(
-            runtime,
             idle_timeout,
             maka_agent_facts::composition::SourceRevision {
                 kind: maka_agent_facts::composition::SourceKind::ModelAdapter,
@@ -313,11 +303,10 @@ impl ModelExecutor {
         idle_timeout: Duration,
         source: maka_agent_facts::composition::SourceRevision,
     ) -> Result<Self, ModelError> {
-        Self::build(TrustedRuntime::default(), idle_timeout, source)
+        Self::build(idle_timeout, source)
     }
 
     fn build(
-        runtime: TrustedRuntime,
         idle_timeout: Duration,
         source: maka_agent_facts::composition::SourceRevision,
     ) -> Result<Self, ModelError> {
@@ -326,7 +315,7 @@ impl ModelExecutor {
         }
         Ok(Self {
             idle_timeout,
-            adapters: adapters::builtin(runtime, source),
+            adapters: adapters::builtin(source),
             networks: Arc::default(),
         })
     }
@@ -400,8 +389,8 @@ impl ModelExecutor {
                 }
             }
         }
-        // This request crosses JSON.parse into the SDK. Root pins impose their
-        // own narrower policy; the generic boundary must not round JS numbers.
+        // Public requests also cross JSON clients. Keep their integer contract
+        // independent of the selected native provider implementation.
         if request
             .max_output_tokens
             .is_some_and(|value| value == 0 || value > 9_007_199_254_740_991)

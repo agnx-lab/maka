@@ -137,7 +137,7 @@ async fn idle_close_reconnect_and_upgrade_fallback_restore_the_raw_baseline() {
             assert_eq!(step.parts.len(), 3);
             assert!(matches!(&step.parts[0], ModelPart::Text { text_kind: TextKind::Thinking, text, .. } if text == "Check the file."));
             assert!(matches!(&step.parts[1], ModelPart::Text { text_kind: TextKind::Text, text, .. } if text == "Checking 😀"));
-            // Confirm exactly the SDK-observed history, not a hand-written
+            // Confirm exactly the adapter-observed history, not a hand-written
             // semantic prefix that could conceal lost reasoning or text.
             let content: Vec<_> = step.parts.iter().map(|part| match part {
                 ModelPart::Text { text_kind, text, provider_options } => json!({"type":if *text_kind == TextKind::Thinking { "reasoning" } else { "text" },"text":text,"providerOptions":provider_options}),
@@ -245,7 +245,7 @@ async fn canonical_tool_confirmation_and_changed_properties_restore_full_input()
                     assert_eq!(next["input"].as_array().unwrap().len(), 3, "{mode}");
                     assert!(
                         next["input"][1].get("id").is_none(),
-                        "full SDK projection, not raw cache"
+                        "full adapter projection, not raw cache"
                     );
                     assert_eq!(next["input"][1]["arguments"], MALFORMED_ARGUMENTS);
                     assert_eq!(next["input"][2], result);

@@ -152,7 +152,7 @@ mod tests {
         );
         let tagged = vec![json!({"role":"assistant","content":[thinking("reasoning", "thought")]})];
         for native in [
-            ProviderKind::OpenaiChat,
+            ProviderKind::OpenaiChatCompletions,
             ProviderKind::OpenaiResponses,
             ProviderKind::Anthropic,
         ] {

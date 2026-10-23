@@ -47,6 +47,7 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
                 collaboration_mode: CollaborationMode::Agent,
                 orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::Direct,
+                code_language: Default::default(),
                 model: None,
                 thinking_level: None,
             })),

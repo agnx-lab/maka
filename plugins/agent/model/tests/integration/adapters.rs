@@ -104,7 +104,12 @@ async fn captured_adapter_survives_executor_replacement_and_bounds_idle_work() {
             "chat-completions".into(),
             original.clone(),
         )]));
-    let input = || request(ProviderKind::OpenaiChat, "http://unused.example/v1".into());
+    let input = || {
+        request(
+            ProviderKind::OpenaiChatCompletions,
+            "http://unused.example/v1".into(),
+        )
+    };
     let original = executor.binding(&input().provider).unwrap();
     let source = original.source().clone();
     let mut accepted = executor

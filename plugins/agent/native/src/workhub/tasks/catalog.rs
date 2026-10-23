@@ -372,7 +372,7 @@ mod tests {
                 "tool_mode": "direct", "editing_tools": null, "public_model": null,
                 "context": {"provider_id":"provider"},
                 "provider": {"packageId":"provider", "entryId":"provider", "scope": maka_plugin_core::scope::Scope::Profile, "name":"provider"}, "provider_configuration": {},
-                "basis": {"adapter":"openai-chat", "protocol":"openai_chat", "base_url":"http://localhost", "capabilities":{}, "options":{}, "main_output_limit":null, "body_overlay":null}
+                "basis": {"adapter":"openai-chat-completions", "protocol":"openai_chat_completions", "base_url":"http://localhost", "capabilities":{}, "options":{}, "main_output_limit":null, "body_overlay":null}
             }}, "notification": null
         })).unwrap()
     }

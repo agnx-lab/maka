@@ -117,7 +117,7 @@ test('the launcher preserves Cargo failures and invokes Cargo from the repositor
   assert.equal(result.stderr, '');
   assert.deepEqual(JSON.parse(result.stdout), {
     command: 'cargo',
-    args: ['run', '--locked', '-p', 'maka-cli', '--no-default-features', '--', '--help'],
+    args: ['build', '--locked', '-p', 'maka-python-runtime', '--bin', 'maka-python-worker'],
     cwd: root,
   });
 });

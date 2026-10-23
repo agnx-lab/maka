@@ -230,7 +230,7 @@ impl ApiProvider {
             .and_then(|o| o.adapter.clone())
             .unwrap_or_else(|| {
                 match route.wire {
-                    Wire::OpenaiChat => "chat-completions",
+                    Wire::OpenaiChatCompletions => "chat-completions",
                     Wire::OpenaiResponses => "responses",
                     Wire::AnthropicMessages => "anthropic-messages",
                 }

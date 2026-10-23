@@ -23,21 +23,21 @@
 
 use crate::{
     CellAbort, CellContext, CellDiagnostic, CellDiagnosticKind, CellLimits, CellResult,
-    bridge::{Admission, ToolScope, maka_code},
-    result::complete,
+    bridge::maka_code,
 };
 use deno_core::{
     InspectorMsg, InspectorMsgKind, InspectorSessionKind, JsRuntime, JsRuntimeInspector,
     RuntimeOptions, v8,
 };
 use maka_agent_facts::tools::ToolExecutor;
+use maka_code_runtime::{ToolScope, complete};
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::{
     runtime::Handle,
     sync::{mpsc, oneshot},
 };
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tokio_util::sync::CancellationToken;
 
 pub struct Repl {
     sender: mpsc::Sender<Evaluation>,
@@ -182,15 +182,12 @@ async fn serve(
             )));
             continue;
         }
-        let scope = Arc::new(ToolScope {
-            context: request.context.clone(),
-            names: request.executor.names().into_iter().collect(),
-            executor: request.executor,
-            cancellation: request.cancellation.child_token(),
-            tasks: TaskTracker::new(),
-            host: host.clone(),
-            admission: Mutex::new(Admission::default()),
-        });
+        let scope = ToolScope::new(
+            request.context.clone(),
+            request.executor,
+            request.cancellation.child_token(),
+            host.clone(),
+        );
         runtime.op_state().borrow_mut().put(scope.clone());
         runtime.op_state().borrow_mut().put(request.context.clone());
 
@@ -253,9 +250,8 @@ async fn serve(
             } => result,
         };
         // Drain native work even after a JS exception, timeout or a lost caller.
-        scope.cancellation.cancel();
-        scope.tasks.close();
-        scope.tasks.wait().await;
+        scope.cancel();
+        scope.settle().await;
         finished.cancel();
         monitor
             .await
@@ -266,10 +262,7 @@ async fn serve(
         } else if request.cancellation.is_cancelled() || stopped.is_cancelled() {
             Err(CellAbort::Cancelled)
         } else {
-            Ok(complete(
-                result,
-                scope.admission.lock().unwrap().calls.clone(),
-            ))
+            Ok(complete(result, scope.calls()))
         };
         // Publish terminal state before waking the observer. The Session still
         // owns and joins this worker on reset/close, but it cannot be reused.

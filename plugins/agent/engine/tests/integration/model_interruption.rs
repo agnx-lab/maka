@@ -33,9 +33,10 @@ use maka_agent_facts::event::ModelInterruption;
 use maka_agent_facts::event::TerminalStatus;
 use maka_agent_facts::model::ModelEvent;
 use maka_agent_facts::model::error::ModelFailureCause;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::{ModelError, ModelExecutor, ProviderConfig, ProviderKind};
+use maka_tools::CodeExecutor;
 use maka_tools::ToolMode;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -61,7 +62,7 @@ fn input(base: &str, suffix: &str) -> RunInput {
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),
-            kind: ProviderKind::OpenaiChat,
+            kind: ProviderKind::OpenaiChatCompletions,
             model: "test".into(),
             base_url: base.into(),
             auth: maka_model::ProviderAuth::ApiKey("test-key".into()),

@@ -262,7 +262,7 @@ async fn codex_search_preserves_real_provider_calls_and_citations() {
         let sources = step.parts.iter().filter(|part| matches!(part, ModelPart::Source { source: ModelSource::Url { .. } })).count();
         println!("Codex native search: {calls} provider calls, {sources} cited sources; websocket={}", lane.needs_confirmation());
         assert!(calls > 0, "ordinary text is not evidence of a provider search");
-        assert!(sources > 0, "citations must survive the SDK and canonical step");
+        assert!(sources > 0, "citations must survive the adapter and canonical step");
         drop(lane);
     }).await.expect("live search must remain bounded");
 }

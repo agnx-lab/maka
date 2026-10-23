@@ -45,7 +45,7 @@ fn summary(options: &Value, text: &str, contract: PlaintextResponses) -> Option<
     {
         return None;
     }
-    // State lengths follow the SDK's UTF-16 convention; never split a Unicode scalar.
+    // Persisted summary lengths use UTF-16 units; never split a Unicode scalar.
     let mut remaining = text;
     let mut parts = Vec::with_capacity(state.summary_part_lengths.len());
     for length in &state.summary_part_lengths {
@@ -74,7 +74,7 @@ fn summary(options: &Value, text: &str, contract: PlaintextResponses) -> Option<
 }
 
 /// Project before recording the request digest. This is idempotent so direct model
-/// callers also receive the same contract enforcement at the SDK boundary.
+/// callers also receive the same contract enforcement at the adapter boundary.
 pub fn project(mut messages: Vec<Message>, provider: &ProviderKind) -> Vec<Message> {
     let ProviderKind::OpenResponses(contract) = provider else {
         return messages;

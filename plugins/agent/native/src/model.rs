@@ -77,6 +77,11 @@ pub(crate) struct AcceptedModel {
     /// Execution policy is captured at message admission. Later model settings
     /// do not reinterpret queued work.
     pub tool_mode: ToolMode,
+    #[serde(
+        default,
+        skip_serializing_if = "maka_agent_facts::execution::CodeLanguage::is_javascript"
+    )]
+    pub code_language: maka_agent_facts::execution::CodeLanguage,
     /// None captures an unfiltered tool selection.
     #[serde(deserialize_with = "Option::deserialize")]
     pub editing_tools: Option<EditingTools>,
@@ -153,6 +158,10 @@ impl Source {
                             .and_then(|models| models.get(&selection.model_id))
                             .and_then(|overrides| overrides.code_mode),
                     ),
+                    code_language: row.model_overrides.as_ref()
+                        .and_then(|models| models.get(&selection.model_id))
+                        .and_then(|overrides| overrides.code_mode_language)
+                        .unwrap_or_default(),
                     binding: ModelBinding {
                         connection_id: row.connection_id.clone(),
                         connection_slug: row.slug.clone(),

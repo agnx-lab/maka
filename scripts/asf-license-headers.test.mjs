@@ -247,7 +247,6 @@ describe('ASF header classification', () => {
       'plugins/workspace/workspace-files/patch/src/lib.rs',
       'plugins/workspace/workspace-files/patch/src/parser.rs',
       'plugins/workspace/workspace-files/patch/src/update.rs',
-      'platform/js-runtime/third-party/deno-telemetry/telemetry.ts',
     ]) {
       assert.deepEqual(
         classifyPath(path),

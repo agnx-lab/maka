@@ -174,7 +174,7 @@ async function setup(input) {
   const catalog = await client.readRuntimeHostConnectionCatalog(connection);
   let target = catalog.connections.find((item) => item.slug === 'offline-comparison');
   if (target) {
-    if (target.providerType !== 'custom' || target.defaultApiProtocol !== 'openai-chat')
+    if (target.providerType !== 'custom' || target.defaultApiProtocol !== 'openai-chat-completions')
       throw new Error('Existing comparison connection type differs');
     const updated = await connection.request('connection.catalog.update', {
       expected: { connectionId: target.connectionId, revision: target.revision },
@@ -194,7 +194,7 @@ async function setup(input) {
         slug: 'offline-comparison',
         name: 'Offline comparison',
         providerType: 'custom',
-        defaultApiProtocol: 'openai-chat',
+        defaultApiProtocol: 'openai-chat-completions',
         baseUrl: providerUrl.href,
         enabled: true,
         enabledModelIds: [model],

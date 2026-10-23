@@ -121,7 +121,7 @@ pub fn input(base: &str, suffix: &str, effects: Arc<Effects>) -> RunInput {
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),
-            kind: ProviderKind::OpenaiChat,
+            kind: ProviderKind::OpenaiChatCompletions,
             model: "test".into(),
             base_url: base.into(),
             auth: maka_model::ProviderAuth::ApiKey("fixture-secret".into()),

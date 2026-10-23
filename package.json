@@ -21,9 +21,6 @@
     "esbuild@0.28.2": true
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "4.0.68",
-    "@ai-sdk/openai": "4.0.80",
-    "@ai-sdk/openai-compatible": "3.0.59",
     "@biomejs/biome": "2.5.14",
     "esbuild": "0.28.2",
     "husky": "^9.1.7",

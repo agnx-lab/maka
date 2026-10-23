@@ -53,8 +53,8 @@ use maka_agent_facts::execution::InvocationConfiguration;
 use maka_agent_facts::input::MessageInput;
 use maka_agent_facts::tools::ToolError;
 use maka_event_log::{EventLog, StoreError};
-use maka_js_runtime::CodeExecutor;
 use maka_model::{ModelError, ModelExecutor, ProviderConfig};
+use maka_tools::CodeExecutor;
 use maka_tools::ToolCatalog;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -212,7 +212,7 @@ struct Inner {
 
 #[derive(Clone, Default)]
 struct SessionState {
-    code_store: maka_js_runtime::CellStore,
+    code_store: maka_code_runtime::CellStore,
     loaded: maka_tools::availability::LoadedTools,
 }
 

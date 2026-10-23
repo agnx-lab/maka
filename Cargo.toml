@@ -17,7 +17,7 @@
 
 [workspace]
 exclude = ["third-party/nsh", "third-party/gpui-fast", "third-party/async-io", "third-party/gix-index", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto", "third-party/termina"]
-default-members = ["products/maka/cli"]
+default-members = ["products/maka/cli", "platform/python-runtime"]
 members = [
     "plugins/agent/facts",
     "platform/packages",
@@ -55,7 +55,10 @@ members = [
     "plugins/agent/insights",
     "plugins/workspace/workspace-jev/engine",
     "platform/js-runtime",
+    "platform/code-runtime",
+    "platform/python-runtime",
     "plugins/agent/model",
+    "plugins/agent/provider-protocol",
     "platform/network",
     "platform/plugin-core",
     "platform/presentation",
@@ -90,6 +93,7 @@ publish = false
 [workspace.dependencies]
 mxc-sdk = { git = "https://github.com/microsoft/mxc", rev = "b21120168d70befe12356411423266bfef168446" }
 flatbuffers = "25"
+maka-python-runtime = { path = "platform/python-runtime" }
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }
@@ -128,7 +132,7 @@ agent-client-protocol = { version = "2.2.0", default-features = false, features 
 apply-patch = { path = "plugins/workspace/workspace-files/patch" }
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+jiff = "0.2.37"
 clap = { version = "4.6.6", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 deno_core = "=0.411.0"
@@ -154,7 +158,9 @@ maka-graph = { path = "plugins/agent/graph" }
 maka-insights = { path = "plugins/agent/insights" }
 maka-jev = { path = "plugins/workspace/workspace-jev/engine" }
 maka-js-runtime = { path = "platform/js-runtime" }
+maka-code-runtime = { path = "platform/code-runtime" }
 maka-model = { path = "plugins/agent/model" }
+maka-provider-protocol = { path = "plugins/agent/provider-protocol" }
 maka-network = { path = "platform/network" }
 maka-plugin-core = { path = "platform/plugin-core" }
 maka-presentation = { path = "platform/presentation" }
