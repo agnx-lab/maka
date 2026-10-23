@@ -272,7 +272,7 @@ describe('ASF source release verification', () => {
       'fixtures/shader.wgsl': '@compute @workgroup_size(1) fn main() {}\n',
       'fixtures/Cargo.toml.orig': '[package]\nname = "source"\nversion = "0.1.0"\n',
       'fixtures/CNAME': 'nsh.dev\n',
-      'fixtures/LICENSE-APACHE': 'Apache License, Version 2.0\n',
+      'fixtures/LICENSE-APACHE': 'Apache License, Version 2.0\n\f\nTERMS AND CONDITIONS\n',
       'fixtures/LICENSE-MIT': 'Permission is hereby granted, free of charge.\n',
       'fixtures/default-env': '# Presentation metadata\nLANG\n',
       'fixtures/layerfs': '#!/bin/sh\nexec python3 layerfs.py\n',
@@ -298,14 +298,27 @@ describe('ASF source release verification', () => {
   });
 
   test('rejects unknown non-text release inputs', async () => {
-    const fixture = createFixtureCandidate({ 'fixtures/unknown.bin': Buffer.from([0x01, 0x02]) });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
+    for (const [path, contents, expected] of [
+      [
+        'fixtures/unknown.bin',
+        Buffer.from([0x01, 0x02]),
         /Cannot safely classify non-text release input.*fixtures\/unknown\.bin/,
-      );
-    } finally {
-      fixture.cleanup();
+      ],
+      [
+        'fixtures/control.txt',
+        Buffer.from('page\u000bseparator\n'),
+        /Cannot safely classify non-text release input.*fixtures\/control\.txt/,
+      ],
+    ]) {
+      const fixture = createFixtureCandidate({ [path]: contents });
+      try {
+        await assert.rejects(
+          () => verifySourceCandidate({ archivePath: fixture.archivePath }),
+          expected,
+        );
+      } finally {
+        fixture.cleanup();
+      }
     }
   });
 

@@ -644,7 +644,7 @@ function validateNonTextInputs(candidateRoot, identity, entries) {
       const basename = entry.slice(entry.lastIndexOf('/') + 1);
       const extension = extname(basename).toLowerCase();
       if (
-        !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text) &&
+        !/[\u0000-\u0008\u000b\u000e-\u001f\u007f]/u.test(text) &&
         (textSourceExtensions.has(extension) || textSourceBasenames.has(basename))
       ) {
         continue;
