@@ -154,6 +154,7 @@ mod tests {
                 "VideoHostProps",
                 "  onLoad?: (e: { duration: number; size: Size }) => void;",
             ),
+            ("VideoHostProps", "  audioSession?: AudioSession;"),
             (
                 "ScrollingHostProps",
                 "  decelerationRate?: \"normal\" | \"fast\" | number;",

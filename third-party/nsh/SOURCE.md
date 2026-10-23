@@ -26,7 +26,7 @@ at `de176695240d550f2b303643b8019146c7989e7f`. The upstream project is
 
 `upstream.json` keeps that initial `repository` and `revision`. Its
 `upstream_revision` records the latest integrated `longbridge/nsh` main revision:
-`c2f019e6d46cd1bdd191dd736d4443fe6fcb25b9`. The first upstream synchronization
+`a4b25c49350d5084f7fa5a0fa7fe1fae57b4ed20`. The first upstream synchronization
 starts from `6bb0b7908043132067456e4a21dd57c90a0bdce5`, already included in the
 initial fork import.
 
