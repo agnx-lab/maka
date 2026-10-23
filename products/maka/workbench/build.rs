@@ -35,9 +35,9 @@ fn main() {
         split: false,
         ui_sets,
     })
-    .expect("bundle terminal application");
+    .expect("bundle workbench application");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));
-    std::fs::write(output.join("app.js"), module.code).expect("write terminal application");
+    std::fs::write(output.join("app.js"), module.code).expect("write workbench application");
     let app = std::path::PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").expect("package directory"),
     )
@@ -53,5 +53,5 @@ fn main() {
         ));
     }
     assets.push_str("]\n");
-    std::fs::write(output.join("assets.rs"), assets).expect("write terminal assets");
+    std::fs::write(output.join("assets.rs"), assets).expect("write workbench assets");
 }

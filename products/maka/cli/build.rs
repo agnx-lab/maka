@@ -48,7 +48,10 @@ fn terminal_fixture() {
     .join("../terminal-shell");
     let fixture = source.join("tests/fixtures/attachment-draft.tsx");
     println!("cargo:rerun-if-changed={}", fixture.display());
-    println!("cargo:rerun-if-changed={}", source.join("app").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        source.join("../workbench/app").display()
+    );
     println!(
         "cargo:rerun-if-changed={}",
         source.join("../desktop-shell/app/patch.js").display()
