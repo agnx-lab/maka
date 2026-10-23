@@ -1187,6 +1187,7 @@ impl Headless {
             self.engine
                 .control()
                 .dispatch_event(id, EventKind::ChangeText, payload);
+            self.report_selection(id);
         }
         self.done()
     }
@@ -1208,6 +1209,54 @@ impl Headless {
                 self.key(id, c);
             }
         }
+        self.done()
+    }
+
+    /// The step `paste(<selector>, <content>)`: the user pastes `content`
+    /// into the input `selector` names, as a paste with it on the clipboard
+    /// does: the input takes the focus, `onPaste` reports it, then, while
+    /// `pasteBehavior` inserts, its text is inserted at the end (a single
+    /// line takes line breaks as spaces; within `maxLength`): one edit
+    /// (`onChange`), no keys.
+    pub fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        let id = self.input_step(selector, format!("paste({selector})"))?;
+        self.send(
+            id,
+            EventKind::Paste,
+            EventPayload::Paste(Box::new(content.clone())),
+        );
+        let Some(input) = self.screen.input_mut(id) else {
+            return self.done();
+        };
+        if input.config.paste_behavior != nsh_core::PasteBehavior::Insert || content.text.is_empty()
+        {
+            return self.done();
+        }
+        let mut text = nsh_core::text_edit::pasted(&content.text, input.config.multiline);
+        if let Some(max) = input.config.max_length {
+            let room = (max as usize).saturating_sub(input.text.encode_utf16().count());
+            let mut used = 0;
+            text = text
+                .chars()
+                .take_while(|c| {
+                    used += c.len_utf16();
+                    used <= room
+                })
+                .collect();
+        }
+        if text.is_empty() {
+            return self.done();
+        }
+        input.text.push_str(&text);
+        input.count += 1;
+        let payload = EventPayload::Text {
+            text: input.text.clone(),
+            count: input.count,
+        };
+        self.engine
+            .control()
+            .dispatch_event(id, EventKind::ChangeText, payload);
+        self.report_selection(id);
         self.done()
     }
 
@@ -1318,6 +1367,24 @@ impl Headless {
         self.engine
             .control()
             .dispatch_event(id, EventKind::ChangeText, payload);
+        self.report_selection(id);
+    }
+
+    /// `onSelectionChange` and `onCaretMove` of input `id` after an edit,
+    /// as the platforms report them: the caret at the end of its text
+    /// ([`Screen::input_caret`]).
+    pub(crate) fn report_selection(&self, id: NodeId) {
+        let Some(input) = self.screen.input(id) else {
+            return;
+        };
+        let end = PayloadValue::Number(input.text.encode_utf16().count() as f64);
+        self.send(
+            id,
+            EventKind::SelectionChange,
+            EventPayload::Map(vec![("start", end.clone()), ("end", end)]),
+        );
+        let caret = self.screen.input_caret(id).unwrap_or_default();
+        self.send(id, EventKind::CaretMove, EventPayload::caret(caret));
     }
 
     /// The return key in input `id`.

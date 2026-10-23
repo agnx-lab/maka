@@ -351,6 +351,8 @@ ui::tokens::Tokens::set_number(value)                            # a design toke
 ui::tokens::Token::Number.0                                      # a design token: a generic number (a radius, a size, a ratio)
 ui::virtual_list::VirtualList::load_more_at_start_threshold(viewports)  # in viewport lengths (a ratio)
 ui::virtual_list::VirtualList::load_more_threshold(viewports)  # in viewport lengths (a ratio)
+animation::animator::Animator::value ->                          # a generic animated value (any prop: opacity, a color channel, a length)
+scroll::ScrollState::sticky_shifts_with(value)                  # a generic animated value read from the graph (a sticky cell's offset)
 ui::rows::Rows::column ->                                        # the app's data: numbers of any unit, which a component scales
 ui::rows::Rows::from_columns(columns)                            # the app's data: numbers of any unit, which a component scales
 

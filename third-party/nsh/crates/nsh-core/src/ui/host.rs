@@ -11,15 +11,16 @@ use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{
-        self, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo, VideoProgress,
-        WebNavigation,
+        self, CaretEvent, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo,
+        VideoProgress, WebNavigation,
     },
 };
 use crate::{
     AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue,
     KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp,
-    OverlayProp, Points, Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp,
-    ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag, WebSource,
+    OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType, Rgba,
+    ScreenAnimation, ScreenProp, ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag,
+    WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
@@ -66,6 +67,7 @@ crate::static_reactive!(ModalPresentation: ModalPresentation);
 crate::static_reactive!(ResizeMode: ResizeMode);
 crate::static_reactive!(ReturnKeyType: ReturnKeyType);
 crate::static_reactive!(SubmitBehavior: SubmitBehavior);
+crate::static_reactive!(PasteBehavior: PasteBehavior);
 crate::static_reactive!(crate::EllipsizeMode: crate::EllipsizeMode);
 crate::static_reactive!(JsonValue: JsonValue);
 crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
@@ -456,6 +458,19 @@ impl Input {
         })
     }
 
+    /// What a paste does (`pasteBehavior`; default: insert its text).
+    /// [`Self::on_paste`] hears what was pasted either way.
+    pub fn paste_behavior(self, behavior: impl IntoReactive<PasteBehavior>) -> Self {
+        self.bind_prop(behavior, Prop::PasteBehavior)
+    }
+
+    /// The user pasted: the text, the files with their bytes (a
+    /// screenshot) and local files' URLs, before the text it inserts is
+    /// reported.
+    pub fn on_paste<M>(self, listener: impl IntoListener<PasteEvent, M>) -> Self {
+        self.listen(EventKind::Paste, listener.into_listener(), events::paste)
+    }
+
     /// Focused when it appears.
     pub fn auto_focus(self, focus: impl IntoReactive<bool>) -> Self {
         self.bind_prop(focus, |focus: bool| Prop::AutoFocus(focus))
@@ -518,6 +533,17 @@ impl Input {
             EventKind::SelectionChange,
             listener.into_listener(),
             events::selection,
+        )
+    }
+
+    /// The caret moved: with the selection, or as the text scrolled or
+    /// wrapped again ([`CaretEvent`]: where it is, in the input and in the
+    /// root view).
+    pub fn on_caret_move<M>(self, listener: impl IntoListener<CaretEvent, M>) -> Self {
+        self.listen(
+            EventKind::CaretMove,
+            listener.into_listener(),
+            events::caret,
         )
     }
 
@@ -798,6 +824,15 @@ impl Overlay {
     pub fn anchor_point(self, point: impl IntoReactive<Point<Points>>) -> Self {
         self.bind_prop(point, |p| {
             Prop::Overlay(OverlayProp::Anchor(OverlayAnchor::Point(p)))
+        })
+    }
+
+    /// Places it against a box of the root view: an input's caret
+    /// ([`CaretEvent::page_bounds`]), where suggestions for what is being
+    /// typed open.
+    pub fn anchor_bounds(self, bounds: impl IntoReactive<Bounds<Points>>) -> Self {
+        self.bind_prop(bounds, |b| {
+            Prop::Overlay(OverlayProp::Anchor(OverlayAnchor::Bounds(b)))
         })
     }
 

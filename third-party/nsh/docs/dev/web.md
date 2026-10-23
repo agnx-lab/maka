@@ -581,7 +581,9 @@ with the content, and a cell no longer sticky goes back to its frame. Entering a
 animation already running on the cell, so its content coordinates cannot override the sticky insets. The cells of a
 list in the scroll view's viewport (`viewport="parent"`) are in that list: their tracks go there, the list isolates
 their z-index, and their insets add where the list is in the scroll view's content (`trackOrigin`, the frames
-between them); the core bounds their travel by the list's end. Views clip with `overflow: clip`, which, unlike
+between them); the core bounds their travel by the list's end. A cell's animated offset (an animated
+`stickyHeaderOffset` or sticky `top`) comes as the animator's `sticky-offset` output for the cell each frame
+(`op_a`): it is kept on the cell (`_stickyOffset`) and added to the track's inset. Views clip with `overflow: clip`, which, unlike
 `hidden`, makes no scroll container, so `position: sticky` reaches the scroll view through the list.
 
 A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),

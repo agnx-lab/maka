@@ -85,9 +85,10 @@ pub use crate::{
         HoverEvent, IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance,
         KeyboardDismissMode, KeyboardTaps, KeyboardType, ListContentStyle, ListViewport,
         ModalAnimation, ModalPresentation, ModalProp, NativeProp, NodeId, Op, OverlayProp,
-        PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation,
-        ScreenProp, ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, Viewability, WebSource,
+        PasteBehavior, PasteEvent, PastedFile, PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode,
+        ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, SnapAlignment, StatusBarConfig,
+        StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
+        Viewability, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityProp, AccessibilityRole,

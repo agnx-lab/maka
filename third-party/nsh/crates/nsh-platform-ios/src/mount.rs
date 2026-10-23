@@ -473,6 +473,32 @@ impl Mounter {
         for (_, area) in &self.areas {
             area.batch_applied();
         }
+        self.focused_caret_moved();
+    }
+
+    /// Reports the focused input's caret if the batch moved it (the input
+    /// was laid out again: its text wraps elsewhere).
+    fn focused_caret_moved(&self) {
+        let Some(id) = self.focused else { return };
+        let Some(Slot {
+            native: Native::Input(input),
+            events,
+            ..
+        }) = self.slot(id)
+        else {
+            return;
+        };
+        if !events.contains(EventKind::CaretMove) {
+            return;
+        }
+        let view = input.editor_view();
+        view.layoutIfNeeded();
+        let Some(caret) = crate::input::caret(view) else {
+            return;
+        };
+        if crate::input::caret_changed(view, caret) {
+            self.input_event(id, EventKind::CaretMove, EventPayload::caret(caret));
+        }
     }
 
     /// The surface's event target.
@@ -2279,6 +2305,9 @@ impl Mounter {
             return;
         };
         slot.events = events;
+        if let Native::Input(input) = &mut slot.native {
+            input.set_paste_listens(events.contains(EventKind::Paste));
+        }
         let v = slot.values;
         let any = |kinds: &[EventKind]| kinds.iter().any(|&k| events.contains(k));
         let handles_press = any(&[
@@ -3173,7 +3202,10 @@ impl Mounter {
         let offset = if l.horizontal { offset.x } else { offset.y } as f32;
         for c in cells {
             let Some(s) = self.slot(c.cell) else { continue };
-            let t = (offset - c.start.0).clamp(0.0, c.end.0 - c.start.0) as CGFloat;
+            // An animated offset is the graph's (pinned again with its frames).
+            let extra = c.offset.map_or(0.0, |n| self.animator.value(n));
+            let t =
+                (offset + extra - c.start.0).clamp(0.0, (c.end.0 - c.start.0).max(0.0)) as CGFloat;
             let (x, y) = if l.horizontal { (t, 0.0) } else { (0.0, t) };
             s.native
                 .view()
@@ -3225,6 +3257,12 @@ impl Mounter {
         for &id in &self.animated {
             if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
                 apply_dynamic(s, animator);
+            }
+        }
+        // Sticky cells that stick an animated value further in follow it.
+        for (&id, cells) in &self.sticky {
+            if cells.iter().any(|c| c.offset.is_some()) {
+                self.pin_sticky(id);
             }
         }
     }
