@@ -1,7 +1,7 @@
 {
   "inputs": {
-    "Cargo.lock": "d68c61ed5fa9a87f663611b4089fbbb4564dfd7a4b32adc48dc44278d406aab7",
-    "Cargo.toml": "f3b483b320ae4848eb177ae0680116adf47ab9f31e00504b57ba815a443e1102",
+    "Cargo.lock": "408eef8f99b0b5a56748dfd19fa652dfa8750144e7fb0abb7f260633141b1a43",
+    "Cargo.toml": "fc7b4e33c1bc9552b08ea85f5d9c3ebff58306fb33964a8e53336b9ddc57b25c",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "93fcc2c070289ffd4b48dcbaee426d72abff74f95c3166ad73447eec588c011a",
@@ -1120,5 +1120,5 @@
     "third-party/termina/upstream.json": "31ce8c2b8b45305bff1ce8a52db55f06e5887e770346dbc6c3ea3c574b58ebad",
     "tools/schema/Cargo.toml": "d8f47765451f555f872ea034945abd7afd54dc4c188ad5d5553932f8f2bc2462"
   },
-  "sha256": "8709a17258b9a4a7f79c9678a790cdf55c000526488fa00e7f7f7f083e6749cb"
+  "sha256": "3a1936ed4940adda2b3d5deae8d94ce0a2d517e890e3fdb84ada07f90f4701fc"
 }
