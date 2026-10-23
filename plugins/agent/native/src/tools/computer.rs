@@ -24,7 +24,7 @@ use maka_agent_facts::{
     event::Invocation,
     tool_output::ToolContent,
 };
-use maka_js_runtime::CellOutput;
+use maka_code_runtime::CellOutput;
 use maka_tools::request::{BindingRequest, BoundTool, RequestBinding};
 use maka_workspace_api::computer::{ReplState, ResultValue};
 use std::collections::BTreeMap;

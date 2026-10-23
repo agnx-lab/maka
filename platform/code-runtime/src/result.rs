@@ -49,13 +49,13 @@ pub struct CellDiagnostic {
 }
 
 impl CellDiagnostic {
-    pub(crate) fn new(kind: CellDiagnosticKind, message: impl Into<String>) -> Self {
+    pub fn new(kind: CellDiagnosticKind, message: impl Into<String>) -> Self {
         Self {
             kind,
             message: message.into(),
         }
     }
-    pub(crate) fn limit(message: impl Into<String>) -> Self {
+    pub fn limit(message: impl Into<String>) -> Self {
         Self::new(CellDiagnosticKind::LimitExceeded, message)
     }
 }
@@ -97,7 +97,7 @@ impl Serialize for CellResult {
     }
 }
 
-pub(crate) fn complete(result: Result<Value, CellDiagnostic>, calls: Vec<ToolCall>) -> CellResult {
+pub fn complete(result: Result<Value, CellDiagnostic>, calls: Vec<ToolCall>) -> CellResult {
     match result {
         Ok(value) => CellResult::Success {
             value,

@@ -36,12 +36,12 @@ use maka_agent_facts::tools::JournaledTools;
 use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
+use maka_code_runtime::{
+    CellAbort, CellContext, CellDiagnosticKind, CellLimits, CellResult, CellStore, ToolMetadata,
+};
 use maka_event_log::EventLog;
 use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadScope, WriteCoordinator, WriteScope};
-use maka_js_runtime::{
-    CellAbort, CellContext, CellDiagnosticKind, CellLimits, CellResult, CellStore, CodeExecutor,
-    ToolMetadata,
-};
+use maka_js_runtime::CodeExecutor;
 use maka_sandbox::{
     Sandbox,
     filesystem::{Access, Rule},

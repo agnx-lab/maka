@@ -19,9 +19,8 @@
 
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
-use maka_js_runtime::{
-    CellAbort, CellContext, CellLimits, CellOutput, CellResult, CellStore, repl::Repl,
-};
+use maka_code_runtime::{CellAbort, CellContext, CellLimits, CellOutput, CellResult, CellStore};
+use maka_js_runtime::repl::Repl;
 use serde_json::{Value, json};
 use std::{
     sync::{
@@ -203,7 +202,7 @@ async fn loops_and_unresolved_await_are_bounded_and_do_not_reuse_the_heap() {
         assert!(matches!(result, CellResult::Failure { .. }), "{result:?}");
         if heap {
             assert!(
-                matches!(&result,CellResult::Failure {error,..} if error.kind==maka_js_runtime::CellDiagnosticKind::LimitExceeded && error.message.contains("heap")),
+                matches!(&result,CellResult::Failure {error,..} if error.kind==maka_code_runtime::CellDiagnosticKind::LimitExceeded && error.message.contains("heap")),
                 "heap guard must fire before the wall timeout: {result:?}"
             );
         }

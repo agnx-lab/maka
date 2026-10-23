@@ -212,7 +212,7 @@ struct Inner {
 
 #[derive(Clone, Default)]
 struct SessionState {
-    code_store: maka_js_runtime::CellStore,
+    code_store: maka_code_runtime::CellStore,
     loaded: maka_tools::availability::LoadedTools,
 }
 

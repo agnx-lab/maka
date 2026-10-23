@@ -25,8 +25,9 @@ use maka_agent_facts::event::ToolOutcome;
 use maka_agent_facts::tool_output::DurableToolProjection;
 use maka_agent_facts::tool_output::ProjectionPart;
 use maka_agent_facts::tool_output::ToolSuccess;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::{CellLimits, CodeExecutor};
+use maka_js_runtime::CodeExecutor;
 use maka_tools::{
     PreparationFuture, PreparedEffect, RunTools, ToolCallContext, ToolCatalog, ToolDefinition,
     ToolHandler, ToolMode, ToolNesting, ToolPreparer, ToolRegistration, ToolSemantics,

@@ -28,7 +28,7 @@ use std::{
 };
 use tokio::sync::Notify;
 
-/// Only JSON crosses cell boundaries; neither V8 handles nor authority are stored.
+/// Only JSON crosses cell boundaries; neither interpreter values nor authority are stored.
 #[derive(Clone, Default)]
 pub struct CellStore(Arc<Mutex<BTreeMap<String, Value>>>);
 
@@ -74,7 +74,7 @@ pub struct ToolMetadata {
     pub description: String,
 }
 
-/// A cell's JSON scratch data and emitted output, separate from its V8 heap.
+/// A cell's JSON scratch data and emitted output, separate from its interpreter heap.
 /// Host observers own delivery; the VM only appends and requests an observation.
 #[derive(Clone)]
 pub struct CellContext(Arc<Inner>);
@@ -127,7 +127,7 @@ impl CellContext {
         }))
     }
 
-    pub(crate) fn metadata(&self) -> &[ToolMetadata] {
+    pub fn metadata(&self) -> &[ToolMetadata] {
         &self.0.metadata
     }
 
@@ -139,7 +139,7 @@ impl CellContext {
         self
     }
 
-    /// Host failures are visible before drain, but never erased by JS catch.
+    /// Host failures are visible before drain, but never erased by user exception handling.
     pub fn failure(&self) -> Option<ToolError> {
         self.0.state.lock().unwrap().failure.clone()
     }
@@ -149,11 +149,11 @@ impl CellContext {
         self.yield_output();
     }
 
-    pub(crate) fn load(&self, key: &str) -> Option<Value> {
+    pub fn load(&self, key: &str) -> Option<Value> {
         self.0.state.lock().unwrap().values.get(key).cloned()
     }
 
-    pub(crate) fn store(&self, key: String, value: Value) -> Result<(), CellDiagnostic> {
+    pub fn store(&self, key: String, value: Value) -> Result<(), CellDiagnostic> {
         let mut state = self.0.state.lock().unwrap();
         state.values.insert(key.clone(), value.clone());
         state.writes.insert(key, value);
@@ -170,7 +170,7 @@ impl CellContext {
         Ok(())
     }
 
-    pub(crate) fn emit(&self, output: CellOutput) -> Result<(), CellDiagnostic> {
+    pub fn emit(&self, output: CellOutput) -> Result<(), CellDiagnostic> {
         if let CellOutput::Media { content, .. } = &output
             && !matches!(
                 content,
@@ -200,7 +200,7 @@ impl CellContext {
         Ok(())
     }
 
-    pub(crate) fn yield_output(&self) {
+    pub fn yield_output(&self) {
         self.0.state.lock().unwrap().yielded = true;
         self.0.changed.notify_one();
     }
@@ -221,7 +221,7 @@ impl CellContext {
         std::mem::take(&mut state.output)
     }
 
-    pub(crate) fn notify(&self, text: String) -> Result<(), CellDiagnostic> {
+    pub fn notify(&self, text: String) -> Result<(), CellDiagnostic> {
         let closed = self.0.notification_gate.0.lock().unwrap();
         if *closed {
             return Err(CellDiagnostic::new(

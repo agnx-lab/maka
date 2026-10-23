@@ -26,7 +26,7 @@ use maka_agent_facts::tool_output::ToolContent;
 use maka_agent_facts::tool_output::ToolOutput;
 use maka_agent_facts::tool_output::ToolSuccess;
 use maka_agent_facts::tools::ToolError;
-use maka_js_runtime::{
+use maka_code_runtime::{
     CellAbort, CellContext, CellOutput, CellStore, NotificationGate, ToolMetadata,
 };
 use serde::Serialize;

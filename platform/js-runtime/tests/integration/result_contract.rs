@@ -17,7 +17,8 @@
  * under the License.
  */
 
-use maka_js_runtime::{CellAbort, CellDiagnosticKind, CellLimits, CellResult, CodeExecutor};
+use maka_code_runtime::{CellAbort, CellDiagnosticKind, CellLimits, CellResult};
+use maka_js_runtime::CodeExecutor;
 use serde_json::json;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -85,7 +86,7 @@ async fn complete_source_runs_forty_ordered_effects_and_returns_complete_value()
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn complete_scratch_output_and_notifications_survive_cell_settlement() {
-    use maka_js_runtime::{CellContext, CellOutput, CellStore};
+    use maka_code_runtime::{CellContext, CellOutput, CellStore};
     let store = CellStore::default();
     let context = CellContext::new(store.clone(), vec![]);
     let engine = CodeExecutor::new(CellLimits::default()).unwrap();
