@@ -30,8 +30,9 @@ use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationOutcome;
 use maka_agent_facts::event::TerminalStatus;
 use maka_agent_facts::event::ToolOutcome;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::{CellLimits, CodeExecutor};
+use maka_js_runtime::CodeExecutor;
 use maka_model::{ModelExecutor, ProviderConfig, ProviderKind};
 use maka_tools::{
     ToolCatalog, ToolDefinition, ToolHandler, ToolMode, ToolNesting, ToolRegistration,

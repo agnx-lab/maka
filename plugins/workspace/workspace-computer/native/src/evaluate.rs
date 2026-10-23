@@ -28,7 +28,8 @@ use maka_agent_facts::{
     tools::{PreparedEffect, ToolExecutor, ToolFuture, ToolJournal},
 };
 use maka_capabilities::call::Scope;
-use maka_js_runtime::{CellContext, CellLimits, CellOutput, CellResult, repl::Repl};
+use maka_code_runtime::{CellContext, CellLimits, CellOutput, CellResult};
+use maka_js_runtime::repl::Repl;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -134,7 +135,7 @@ impl Computer {
                 cancellation.cancel();
                 let settled = result.await;
                 match settled {
-                    Err(maka_js_runtime::CellAbort::Tool(error)) if !matches!(error, ToolError::Failed(_)) => return Err(partial(error, &context, runtime.is_closed(), language)),
+                    Err(maka_code_runtime::CellAbort::Tool(error)) if !matches!(error, ToolError::Failed(_)) => return Err(partial(error, &context, runtime.is_closed(), language)),
                     _ => return Err(partial(stopped.err().unwrap_or_else(|| failed("Computer permission monitor closed")), &context, runtime.is_closed(), language)),
                 }
             },
@@ -152,7 +153,7 @@ impl Computer {
                     language,
                 ));
             }
-            Err(maka_js_runtime::CellAbort::Tool(error)) => {
+            Err(maka_code_runtime::CellAbort::Tool(error)) => {
                 return Err(partial(error, &context, runtime.is_closed(), language));
             }
             Err(error) => {

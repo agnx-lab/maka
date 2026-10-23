@@ -22,7 +22,8 @@ use std::time::Duration;
 
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
-use maka_js_runtime::{CellDiagnostic, CellDiagnosticKind, CellLimits, CellResult, CodeExecutor};
+use maka_code_runtime::{CellDiagnostic, CellDiagnosticKind, CellLimits, CellResult};
+use maka_js_runtime::CodeExecutor;
 use serde_json::{Value, json};
 use tokio::sync::{Barrier, Notify};
 use tokio_util::sync::CancellationToken;
@@ -171,8 +172,10 @@ async fn javascript_failure_cancels_and_drains_dispatched_tools() {
         // Admission precedes dispatch. Wait for the tool to enter before failing JS,
         // otherwise cancellation may correctly prevent dispatch altogether.
         let mut task = tokio::spawn(async move {
-            let context =
-                maka_js_runtime::CellContext::new(maka_js_runtime::CellStore::default(), vec![]);
+            let context = maka_code_runtime::CellContext::new(
+                maka_code_runtime::CellStore::default(),
+                vec![],
+            );
             executor()
                 .execute_module(
                     format!(
@@ -281,7 +284,7 @@ async fn dropping_caller_cancels_tools_without_blocking_independent_cells() {
 
 trait SuccessResult {
     fn success_value(&self) -> Value;
-    fn calls(&self) -> &[maka_js_runtime::ToolCall];
+    fn calls(&self) -> &[maka_code_runtime::ToolCall];
 }
 impl SuccessResult for CellResult {
     fn success_value(&self) -> Value {
@@ -290,7 +293,7 @@ impl SuccessResult for CellResult {
             _ => panic!("{self:?}"),
         }
     }
-    fn calls(&self) -> &[maka_js_runtime::ToolCall] {
+    fn calls(&self) -> &[maka_code_runtime::ToolCall] {
         match self {
             CellResult::Success { tool_calls, .. } => tool_calls,
             _ => panic!("{self:?}"),

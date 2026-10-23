@@ -78,7 +78,7 @@ impl RunTools {
         }
     }
 
-    pub fn with_store(mut self, store: maka_js_runtime::CellStore) -> Self {
+    pub fn with_store(mut self, store: maka_code_runtime::CellStore) -> Self {
         self.code = cell::Cells::new(store);
         self
     }

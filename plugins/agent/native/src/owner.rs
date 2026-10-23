@@ -271,7 +271,7 @@ impl Owner {
         } else {
             workspace::open(settings.import_roots.clone(), root.canonical_path())?
         };
-        let cells = maka_js_runtime::CodeExecutor::new(maka_js_runtime::CellLimits::default())
+        let cells = maka_js_runtime::CodeExecutor::new(maka_code_runtime::CellLimits::default())
             .map_err(|_| "agent_executor_unavailable")?;
         let workers = TaskTracker::new();
         let stop = CancellationToken::new();

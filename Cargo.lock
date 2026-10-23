@@ -8213,6 +8213,7 @@ dependencies = [
  "maka-agent-facts",
  "maka-agent-ports",
  "maka-capabilities",
+ "maka-code-runtime",
  "maka-event-log",
  "maka-js-runtime",
  "maka-model",
@@ -8269,6 +8270,7 @@ dependencies = [
  "maka-agent-ports",
  "maka-assistant",
  "maka-capabilities",
+ "maka-code-runtime",
  "maka-computer-native",
  "maka-computer-use",
  "maka-config",
@@ -8453,6 +8455,7 @@ dependencies = [
  "maka-agent-ports",
  "maka-app-client",
  "maka-capabilities",
+ "maka-code-runtime",
  "maka-computer-use",
  "maka-config",
  "maka-event-log",
@@ -8499,6 +8502,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "maka-code-runtime"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "maka-agent-facts",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "maka-computer-native"
 version = "0.2.0"
 dependencies = [
@@ -8509,6 +8525,7 @@ dependencies = [
  "maka-agent-authority",
  "maka-agent-facts",
  "maka-capabilities",
+ "maka-code-runtime",
  "maka-computer-use",
  "maka-event-log",
  "maka-host-runtime",
@@ -8536,6 +8553,7 @@ dependencies = [
  "libc",
  "maka-agent-facts",
  "maka-capabilities",
+ "maka-code-runtime",
  "maka-js-runtime",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -8911,6 +8929,7 @@ dependencies = [
  "maka-agent-facts",
  "maka-agent-ports",
  "maka-capabilities",
+ "maka-code-runtime",
  "maka-plugin-core",
  "serde",
  "serde_json",
@@ -9408,6 +9427,7 @@ version = "0.2.0"
 dependencies = [
  "futures-util",
  "maka-agent-facts",
+ "maka-code-runtime",
  "maka-event-log",
  "maka-js-runtime",
  "maka-tool-catalog",

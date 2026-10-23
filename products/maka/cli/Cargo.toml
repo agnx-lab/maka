@@ -43,6 +43,7 @@ name = "terminal_real_host"
 path = "../terminal-shell/tests/real_host.rs"
 
 [dependencies]
+maka-code-runtime.workspace = true
 hex.workspace = true
 maka-agent-facts.workspace = true
 maka-agent-ports.workspace = true

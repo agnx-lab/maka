@@ -20,9 +20,8 @@
 use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
-use maka_js_runtime::{
-    CellContext, CellLimits, CellOutput, CellResult, CellStore, CodeExecutor, ToolMetadata,
-};
+use maka_code_runtime::{CellContext, CellLimits, CellOutput, CellResult, CellStore, ToolMetadata};
+use maka_js_runtime::CodeExecutor;
 use serde_json::{Value, json};
 use std::sync::{
     Arc,
@@ -240,7 +239,7 @@ async fn fatal_failure_is_observable_before_other_accepted_work_finishes_cleanup
         assert!(matches!(context.failure(), Some(ToolError::Persistence(_))));
         assert!(futures_util::poll!(&mut worker).is_pending(), "admitted work remains owned during cleanup");
         tools.release.notify_one();
-        assert!(matches!(worker.await.unwrap(), Err(maka_js_runtime::CellAbort::Tool(ToolError::Persistence(_)))));
+        assert!(matches!(worker.await.unwrap(), Err(maka_code_runtime::CellAbort::Tool(ToolError::Persistence(_)))));
         assert_eq!(tools.later.load(Ordering::SeqCst), 0);
     }).await.expect("fatal notification must not wait for cleanup");
 }

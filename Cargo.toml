@@ -55,6 +55,7 @@ members = [
     "plugins/agent/insights",
     "plugins/workspace/workspace-jev/engine",
     "platform/js-runtime",
+    "platform/code-runtime",
     "plugins/agent/model",
     "plugins/agent/provider-protocol",
     "platform/network",
@@ -153,6 +154,7 @@ maka-graph = { path = "plugins/agent/graph" }
 maka-insights = { path = "plugins/agent/insights" }
 maka-jev = { path = "plugins/workspace/workspace-jev/engine" }
 maka-js-runtime = { path = "platform/js-runtime" }
+maka-code-runtime = { path = "platform/code-runtime" }
 maka-model = { path = "plugins/agent/model" }
 maka-provider-protocol = { path = "plugins/agent/provider-protocol" }
 maka-network = { path = "platform/network" }

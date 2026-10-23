@@ -46,6 +46,7 @@ native-desktop = [
 ]
 
 [dependencies]
+maka-code-runtime.workspace = true
 hex = { workspace = true, optional = true }
 maka-agent-facts.workspace = true
 maka-capabilities.workspace = true

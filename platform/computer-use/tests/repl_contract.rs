@@ -19,8 +19,9 @@
 
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
+use maka_code_runtime::{CellContext, CellLimits, CellOutput, CellResult};
 use maka_computer_use::facade;
-use maka_js_runtime::{CellContext, CellLimits, CellOutput, CellResult, repl::Repl};
+use maka_js_runtime::repl::Repl;
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
