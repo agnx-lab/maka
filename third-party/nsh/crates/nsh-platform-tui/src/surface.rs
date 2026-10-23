@@ -1111,6 +1111,16 @@ impl Surface {
                     files: Vec::new(),
                 },
             ),
+            // Terminal surfaces do not launch external applications. The host
+            // channel may already have handled the URL before it reaches us.
+            Command::OpenUrl { id, .. } => self.emit(
+                ROOT_ID,
+                EventKind::OpenUrl,
+                EventPayload::Map(vec![
+                    ("id", PayloadValue::Number(f64::from(id))),
+                    ("opened", PayloadValue::Bool(false)),
+                ]),
+            ),
             Command::ImageInfo { id, uri } => self.request_image(uri, Some(id)),
             Command::Native { name, args } => {
                 let response = self
@@ -1957,6 +1967,31 @@ mod tests {
     use nsh_core::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
 
     use super::*;
+
+    #[test]
+    fn an_unsupported_url_open_answers_once_without_launching() {
+        let mut surface = Surface::new(10, 5, CellMetrics::default());
+        surface.apply(MountBatch {
+            items: vec![MountItem::Command {
+                id: ROOT_ID,
+                command: Command::OpenUrl {
+                    id: 42,
+                    url: "https://example.com/".into(),
+                },
+            }],
+        });
+        let events: Vec<_> = surface.drain_events().collect();
+        assert!(matches!(
+            events.as_slice(),
+            [SurfaceEvent::Event(ROOT_ID, EventKind::OpenUrl, EventPayload::Map(fields))]
+                if matches!(fields.as_slice(), [
+                    ("id", PayloadValue::Number(42.0)),
+                    ("opened", PayloadValue::Bool(false))
+                ])
+        ));
+        surface.tick(1.0);
+        assert!(surface.drain_events().next().is_none());
+    }
 
     #[test]
     fn an_unsupported_image_pick_answers_once_with_no_files() {

@@ -1725,7 +1725,7 @@
     "third-party/nsh/crates/nsh-platform-tui/src/script.rs": "a0fb944fabd26af711306bdee37342b13fdba26c5066e5752e180e4e916d09a6",
     "third-party/nsh/crates/nsh-platform-tui/src/scroll.rs": "3a5f2de17609b5e93aecaf3ba89a403c35dc4046d2814106a40c0c00a31caaea",
     "third-party/nsh/crates/nsh-platform-tui/src/services.rs": "e871114faa1c56ae24ab047ff2da7ae5df4a728cff17797c8bb5e3009904ec1a",
-    "third-party/nsh/crates/nsh-platform-tui/src/surface.rs": "c4381a77c86b7746a652815fdbbcdca3275679cb17b98a5d95d42566978987ae",
+    "third-party/nsh/crates/nsh-platform-tui/src/surface.rs": "5f646e972018459dcfb9c682b03129fb620a23bb4b753f2a83007bf8cc0d5194",
     "third-party/nsh/crates/nsh-platform-tui/src/text.rs": "c1e2a055250529ed1cc2888cfe444e306e1ea13c62b3e52f36f1afc1586f5ee1",
     "third-party/nsh/crates/nsh-platform-tui/src/worker.rs": "0eef61c1cc330015df84793e604d984af732f10fb14e1520c7f989253d354bb5",
     "third-party/nsh/crates/nsh-platform-web/Cargo.toml": "d49263fc6c477f87e42e5e6c8852c792bf79068c411b40c98055f6415b616167",
