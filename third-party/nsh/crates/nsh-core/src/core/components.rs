@@ -11,7 +11,7 @@
 //! at the start of a commit, so a view starts with all the props set in
 //! the JS turn before.
 
-use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
+use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc, sync::Arc};
 
 use rustc_hash::FxHashMap;
 
@@ -2561,18 +2561,7 @@ impl<M: TextEngine> Core<M> {
             // out of the window for a moment, which ends its touches and
             // its focus (Android: an input that gains a sibling would lose
             // the keyboard on each keystroke).
-            let ids: Vec<NodeId> = wanted().copied().collect();
-            let mut before = None;
-            for &child in ids.iter().rev() {
-                if !self.precedes(parent, child, before) {
-                    let _ = self.apply_op(Op::Insert {
-                        parent,
-                        child,
-                        before,
-                    });
-                }
-                before = Some(child);
-            }
+            self.place_before(parent, &wanted_ids, None);
         }
         out
     }
@@ -2633,6 +2622,15 @@ impl<M: TextEngine> Core<M> {
             new
         };
         let mut old: Vec<Option<Expanded>> = old.into_iter().map(Some).collect();
+        // Old positions stay authoritative: other branches can consume a
+        // candidate too. Duplicate keys retain their original FIFO order.
+        let mut keyed: FxHashMap<SharedString, VecDeque<usize>> = FxHashMap::default();
+        for (index, entry) in old.iter().enumerate() {
+            if let Some(key) = entry.as_ref().and_then(|entry| entry.key.as_ref()) {
+                keyed.entry(key.clone()).or_default().push_back(index);
+            }
+        }
+
         let mut out = Vec::with_capacity(new.len());
         let mut placeholder = None;
         // Unkeyed elements take the next unused old element of their kind,
@@ -2647,6 +2645,7 @@ impl<M: TextEngine> Core<M> {
                     host,
                     inst,
                     &mut old,
+                    &mut keyed,
                     &mut out,
                     &mut placeholder,
                     &mut cursor,
@@ -2690,6 +2689,7 @@ impl<M: TextEngine> Core<M> {
         host: NodeId,
         inst: &mut Instance,
         old: &mut [Option<Expanded>],
+        keyed: &mut FxHashMap<SharedString, VecDeque<usize>>,
         out: &mut Vec<Expanded>,
         placeholder: &mut Option<usize>,
         cursor: &mut usize,
@@ -2786,9 +2786,14 @@ impl<M: TextEngine> Core<M> {
             }
             // An `Each` row that stays: as it was.
             ElKind::Keep => {
-                let kept = old.iter().position(|o| {
-                    o.as_ref()
-                        .is_some_and(|o| o.key.is_some() && o.key == el.key)
+                let kept = el.key.as_ref().and_then(|key| {
+                    let candidates = keyed.get_mut(key)?;
+                    while let Some(index) = candidates.pop_front() {
+                        if old[index].is_some() {
+                            return Some(index);
+                        }
+                    }
+                    None
                 });
                 match kept.and_then(|at| old[at].take()) {
                     Some(e) => out.push(e),
@@ -2856,9 +2861,11 @@ impl<M: TextEngine> Core<M> {
                 let component = matches!(part, Part::Component(_));
                 let matches = |o: &Expanded| !component && o.tag == el.tag && o.part == part;
                 let at = match &el.key {
-                    Some(k) => old.iter().position(|o| {
-                        o.as_ref()
-                            .is_some_and(|o| o.key.as_ref() == Some(k) && matches(o))
+                    Some(key) => keyed.get(key).and_then(|candidates| {
+                        candidates
+                            .iter()
+                            .copied()
+                            .find(|&index| old[index].as_ref().is_some_and(&matches))
                     }),
                     None => {
                         let at = old[(*cursor).min(old.len())..]
@@ -3315,20 +3322,11 @@ impl<M: TextEngine> Core<M> {
             Placement::At(parent, anchor) => {
                 let parent_key = self.key(parent).ok();
                 // An anchor that left the parent: at the end.
-                let mut before = self.anchor_node(anchor).filter(|&a| {
+                let before = self.anchor_node(anchor).filter(|&a| {
                     self.key(a)
                         .is_ok_and(|k| Some(self.nodes[k as usize].parent) == parent_key)
                 });
-                for &child in nodes.iter().rev() {
-                    if !self.precedes(parent, child, before) {
-                        let _ = self.apply_op(Op::Insert {
-                            parent,
-                            child,
-                            before,
-                        });
-                    }
-                    before = Some(child);
-                }
+                self.place_before(parent, &nodes, before);
             }
             Placement::Nested(other, anchor) => {
                 let mut before = self.anchor_node(anchor);
@@ -3343,20 +3341,52 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Whether `child` is a child of `parent` right before `next` (the last
-    /// one when `next` is `None`).
-    pub(super) fn precedes(&self, parent: NodeId, child: NodeId, next: Option<NodeId>) -> bool {
-        let Ok(k) = self.key(parent) else {
-            return false;
+    /// Place this batch before an anchor using the current physical sibling
+    /// order. The temporary lookup is refreshed only after a real insertion;
+    /// Insert remains the authority for moves, aliases and invalid operations.
+    pub(super) fn place_before(
+        &mut self,
+        parent: NodeId,
+        nodes: &[NodeId],
+        mut before: Option<NodeId>,
+    ) {
+        if nodes.is_empty() {
+            return;
+        }
+        let order = |core: &Self, next: &mut FxHashMap<NodeId, Option<NodeId>>| {
+            next.clear();
+            if let Ok(parent) = core.key(parent) {
+                let children = &core.nodes[parent as usize].children;
+                next.reserve(children.len());
+                for (index, &child) in children.iter().enumerate() {
+                    next.insert(
+                        core.nodes[child as usize].id,
+                        children
+                            .get(index + 1)
+                            .map(|&next| core.nodes[next as usize].id),
+                    );
+                }
+            }
         };
-        let children = &self.nodes[k as usize].children;
-        let Some(at) = children
-            .iter()
-            .position(|&c| self.nodes[c as usize].id == child)
-        else {
-            return false;
-        };
-        children.get(at + 1).map(|&c| self.nodes[c as usize].id) == next
+        let mut next = FxHashMap::default();
+        order(self, &mut next);
+        for &child in nodes.iter().rev() {
+            // An absent child is not the last child, even with no anchor.
+            if next.get(&child) != Some(&before)
+                && self
+                    .apply_op(Op::Insert {
+                        parent,
+                        child,
+                        before,
+                    })
+                    .is_ok()
+            {
+                order(self, &mut next);
+            }
+            // A rejected Insert still resolves the next child's anchor in
+            // the same way as the original reverse-placement sequence.
+            before = Some(child);
+        }
     }
 
     /// Slot node `node` as element `el`: its styles, props and handlers

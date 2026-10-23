@@ -1717,6 +1717,7 @@ fn down(
         finish(surface, stale, true);
     }
     let Some(mut hit) = pick(&surface.root, x, y, true) else {
+        log::debug!(target: "nsh::interaction", "down surface={} x={x} y={y} hit=none", surface.key());
         return;
     };
     let touch = key != Key::Mouse;
@@ -1744,6 +1745,7 @@ fn down(
         })
         .flatten();
     if let Some(view) = thumb {
+        log::debug!(target: "nsh::interaction", "down surface={} x={x} y={y} hit={} press=none scrollbar={}", surface.key(), hit.view.id(), view.id());
         let input = &surface.input;
         if input.pointers.borrow().is_empty() {
             input.js_block.set(false);
@@ -1855,6 +1857,7 @@ fn down(
     } else {
         find_press(surface, &hit.view, &views, x, y, modifiers, clicks)
     };
+    log::debug!(target: "nsh::interaction", "down surface={} x={x} y={y} hit={} press={:?} native={native} selection={selects}", surface.key(), hit.view.id(), press.as_ref().map(|press| press.node));
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
     let mut p = Pointer {
@@ -2049,6 +2052,7 @@ fn up(surface: &Rc<Surface>, key: Key, at: Option<(f32, f32)>, time: f64, cancel
 
 /// The pointer lifted (or was cancelled): ends what it did.
 fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
+    log::debug!(target: "nsh::interaction", "up surface={} pointer={} x={} y={} target={} press={:?} cancelled={cancelled} moved={} inside={:?}", surface.key(), p.id, p.x, p.y, p.target.id(), p.press.as_ref().map(|press| press.node), p.moved, p.press.as_ref().map(|press| released_inside(&press.view, p.x, p.y)));
     if let Some(item) = p.item.take() {
         let kind = if cancelled {
             PointerKind::Cancel
@@ -2267,6 +2271,7 @@ fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool, at: (f32, f32
 /// Sends `kind` of `press` with the pointer at `(x, y)` (root coordinates).
 fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, f32)) {
     log::debug!(target: "nsh::input", "{} on {}", kind.prop_name(), press.node);
+    log::debug!(target: "nsh::interaction", "press surface={} kind={} node={} x={x} y={y}", surface.key(), kind.prop_name(), press.node);
     let (location_x, location_y) = local(&press.view, x, y);
     let event = nsh_core::PressEvent {
         position: nsh_core::geometry::point(Points(location_x), Points(location_y)),

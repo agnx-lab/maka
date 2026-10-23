@@ -300,7 +300,32 @@ pub(crate) fn refreshing(surface: &Rc<Surface>, view: &NshView, refreshing: bool
 
 /// `scrollTo` and `scrollToEnd`.
 pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) {
+    let diagnostic = log::log_enabled!(target: "nsh::scroll", log::Level::Debug)
+        && matches!(
+            command,
+            Command::ScrollTo { .. } | Command::ScrollToEnd { .. }
+        );
+    if diagnostic {
+        let state = view.state();
+        if let Some(scroll) = &state.scroll {
+            match command {
+                Command::ScrollTo { x, y, animated } => {
+                    log::debug!(target: "nsh::scroll", "native_scroll_to surface={} node={} old_x={} old_y={} target_x={} target_y={} viewport_w={} viewport_h={} content_w={} content_h={} animated={animated}", surface.key(), state.id, scroll.x.0, scroll.y.0, x.0, y.0, state.frame.size.width.0, state.frame.size.height.0, scroll.content.width.0, scroll.content.height.0);
+                }
+                Command::ScrollToEnd { animated } => {
+                    log::debug!(target: "nsh::scroll", "native_scroll_to_end surface={} node={} old_x={} old_y={} viewport_w={} viewport_h={} content_w={} content_h={} animated={animated}", surface.key(), state.id, scroll.x.0, scroll.y.0, state.frame.size.width.0, state.frame.size.height.0, scroll.content.width.0, scroll.content.height.0);
+                }
+                _ => {}
+            }
+        }
+    }
     shared::command(&Host::new(surface, view), command);
+    if diagnostic {
+        let state = view.state();
+        if let Some(scroll) = &state.scroll {
+            log::debug!(target: "nsh::scroll", "native_scroll_applied surface={} node={} x={} y={} applied={}", surface.key(), state.id, scroll.x.0, scroll.y.0, scroll.applied);
+        }
+    }
 }
 
 // Input.

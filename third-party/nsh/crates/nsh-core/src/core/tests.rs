@@ -10432,14 +10432,17 @@ mod views {
         fn view(_: RowsProps, _: Scope<NoEvent>) -> impl IntoElement {
             let items = signal(vec![1, 2, 3]);
             ITEMS.with(|i| i.set(Some(items)));
-            view().child(each(
-                items,
-                |n| *n,
-                |item, index| {
-                    MADE.with(|m| m.set(m.get() + 1));
-                    text(move || format!("{}@{}", item.get(), index.get()))
-                },
-            ))
+            view()
+                .child(text("before"))
+                .child(each(
+                    items,
+                    |n| *n,
+                    |item, index| {
+                        MADE.with(|m| m.set(m.get() + 1));
+                        text(move || format!("{}@{}", item.get(), index.get()))
+                    },
+                ))
+                .child(text("after"))
         }
     }
 
@@ -10450,15 +10453,17 @@ mod views {
         let batch = c.commit().unwrap();
         // The rows are the root view's children: the host's.
         let list = root_host(&batch);
-        assert_eq!(order(&c, list), ["1@0", "2@1", "3@2"]);
+        assert_eq!(order(&c, list), ["before", "1@0", "2@1", "3@2", "after"]);
         let one = text_node(&batch, "1@0");
+        let before = text_node(&batch, "before");
+        let after = text_node(&batch, "after");
         let items = ITEMS.with(Cell::get).unwrap();
         {
             let _entered = c.components.runtime.enter();
             items.set(vec![3, 1, 4]);
         }
         let batch = c.commit().unwrap();
-        assert_eq!(order(&c, list), ["3@0", "1@1", "4@2"]);
+        assert_eq!(order(&c, list), ["before", "3@0", "1@1", "4@2", "after"]);
         assert_eq!(MADE.with(Cell::get), 4, "one new row");
         assert!(
             !batch
@@ -10466,6 +10471,128 @@ mod views {
                 .iter()
                 .any(|i| matches!(i, MountItem::Create { id, .. } if *id == one)),
             "row 1 kept its node"
+        );
+
+        // A tail append must remain inside the region, ahead of the static
+        // trailing sibling. Further moves and removals retain the old rows.
+        for (items_now, expected) in [
+            (
+                vec![3, 1, 4, 5],
+                vec!["before", "3@0", "1@1", "4@2", "5@3", "after"],
+            ),
+            (
+                vec![4, 3, 5, 1],
+                vec!["before", "4@0", "3@1", "5@2", "1@3", "after"],
+            ),
+            (vec![5, 1], vec!["before", "5@0", "1@1", "after"]),
+        ] {
+            {
+                let _entered = c.components.runtime.enter();
+                items.set(items_now);
+            }
+            let batch = c.commit().unwrap();
+            assert_eq!(order(&c, list), expected);
+            assert!(
+                !batch.items.iter().any(|item| matches!(item, MountItem::Insert { child, .. } if *child == before || *child == after)),
+                "static siblings stay mounted in place"
+            );
+            assert!(
+                !batch
+                    .items
+                    .iter()
+                    .any(|item| matches!(item,MountItem::Create {id,..} if *id==one)),
+                "row 1 retains its original node through append and moves"
+            );
+        }
+        assert_eq!(
+            MADE.with(Cell::get),
+            5,
+            "only the appended row was constructed"
+        );
+    }
+
+    thread_local! {
+        static KEYED_PHASE: Cell<Option<Signal<u32>>> = const {Cell::new(None)};
+    }
+
+    #[component]
+    fn DuplicateKeys() -> impl IntoElement {
+        let phase = signal(0);
+        KEYED_PHASE.with(|current| current.set(Some(phase)));
+        view().child(dynamic(move || match phase.get() {
+            0 => vec![
+                text("first text").key("shared").into_element(),
+                view()
+                    .key("shared")
+                    .child(text("first view"))
+                    .into_element(),
+                text("second text").key("shared").into_element(),
+                text("plain first").into_element(),
+                text("plain second").into_element(),
+            ],
+            1 => vec![
+                view()
+                    .key("shared")
+                    .child(text("updated view"))
+                    .into_element(),
+                text("updated first").key("shared").into_element(),
+                text("updated second").key("shared").into_element(),
+                text("plain survivor").into_element(),
+            ],
+            _ => vec![
+                text("last first").key("shared").into_element(),
+                view().key("shared").child(text("last view")).into_element(),
+                text("plain last").into_element(),
+            ],
+        }))
+    }
+
+    #[test]
+    fn duplicate_keys_consume_the_first_unused_matching_kind_without_advancing_plain_siblings() {
+        let mut c = core();
+        c.mount_root(&Root::of::<DuplicateKeys>());
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let first = text_node(&batch, "first text");
+        let second = text_node(&batch, "second text");
+        let original_view = native_parent(&c, text_node(&batch, "first view")).unwrap();
+        let plain = text_node(&batch, "plain first");
+        let phase = KEYED_PHASE.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            phase.set(1);
+        }
+        let batch = c.commit().unwrap();
+        assert_eq!(text_node(&batch, "updated first"), first);
+        assert_eq!(text_node(&batch, "updated second"), second);
+        assert_eq!(
+            native_parent(&c, text_node(&batch, "updated view")),
+            Some(original_view)
+        );
+        assert_eq!(text_node(&batch, "plain survivor"), plain);
+        let ids = |c: &Core<FakeEngine>| {
+            c.nodes[c.key(host).unwrap() as usize]
+                .children
+                .iter()
+                .map(|&key| c.nodes[key as usize].id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&c), vec![original_view, first, second, plain]);
+        {
+            let _entered = c.components.runtime.enter();
+            phase.set(2);
+        }
+        let batch = c.commit().unwrap();
+        assert_eq!(text_node(&batch, "last first"), first);
+        assert_eq!(
+            native_parent(&c, text_node(&batch, "last view")),
+            Some(original_view)
+        );
+        assert_eq!(text_node(&batch, "plain last"), plain);
+        assert_eq!(ids(&c), vec![first, original_view, plain]);
+        assert!(
+            c.key(second).is_err(),
+            "the unused duplicate leaves the tree"
         );
     }
 

@@ -1818,7 +1818,10 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Command { id, command } => {
-                self.key(id)?;
+                let key = self.key(id)?;
+                if matches!(command, Command::ScrollToEnd { .. }) {
+                    log::debug!(target: "nsh::scroll", "core_scroll_to_end_received node={id} created={} list={}", self.nodes[key as usize].created, self.nodes[key as usize].list.is_some());
+                }
                 self.commands.push((id, command));
                 Ok(())
             }
@@ -6186,6 +6189,9 @@ impl<M: TextEngine> Core<M> {
                 }
                 _ => continue,
             };
+            if matches!(command, Command::ScrollToEnd { .. }) {
+                log::debug!(target: "nsh::scroll", "core_scroll_to_end list={id} old={} target={offset} viewport={} content={} outer={} animated={animated}", list.offset, list.viewport, list.content_len(), outer.is_some());
+            }
             if automatic && !list.idle() {
                 list.wait_for_idle(pin.expect("automatic index target"), animated);
                 retarget = None;
