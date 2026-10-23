@@ -68,7 +68,7 @@ pub enum CellOutput {
     },
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ToolMetadata {
     pub name: String,
     pub description: String,
