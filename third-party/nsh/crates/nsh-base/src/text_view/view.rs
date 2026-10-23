@@ -1621,6 +1621,8 @@ impl Cx {
                 let url = SharedString::from(url.clone());
                 let outer = self.link.replace(Some(url.clone()));
                 let span = self.span(content, key);
+                let mut label = String::new();
+                super::document::inline_text(content, &mut label);
                 self.link.replace(outer);
                 let target = element_ref();
                 let el = span
@@ -1632,6 +1634,7 @@ impl Cx {
                     .text_decoration_thickness(px(1.0))
                     .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
+                    .label(SharedString::from(label))
                     .when_some(title.clone(), |t, title| t.hint(title))
                     .on_press(self.link_press(url, target));
                 self.part(el, Part::Link).into_element()

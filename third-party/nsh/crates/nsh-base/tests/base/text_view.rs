@@ -3,7 +3,7 @@ use nsh_base::text_view::{Block, ParseContext, mdast};
 use nsh_base::{MarkdownPlugin, MarkdownPlugins, text_view};
 use nsh_core::{
     Size,
-    ui::{Root, prelude::*},
+    ui::{EngineContext, Root, engine_context, prelude::*},
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -66,6 +66,7 @@ impl MarkdownPlugin for Paused {
 }
 #[component]
 fn Stream() -> impl IntoElement {
+    provide_context((*engine_context::<MarkdownPlugins>().expect("test plugins")).clone());
     let source = signal(SharedString::from("**FIRST**"));
     let source_id = signal(SharedString::from("message"));
     let visible = signal(true);
@@ -118,10 +119,8 @@ fn one_worker_coalesces_and_publishes_a_real_prefix_without_crossing_identity_or
     let plugins = MarkdownPlugins::new().with(Paused(gate.clone()));
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(500.0), px(800.0)),
-        ..EngineConfig::new(Root::new::<Stream>(move || {
-            provide_context(plugins.clone());
-            Default::default()
-        }))
+        context: EngineContext::default().with(plugins),
+        ..EngineConfig::new(Root::of::<Stream>())
     })
     .unwrap();
     let _release = Release(gate.clone());
@@ -168,6 +167,7 @@ impl MarkdownPlugin for Failing {
 }
 #[component]
 fn Failure() -> impl IntoElement {
+    provide_context((*engine_context::<MarkdownPlugins>().expect("test plugins")).clone());
     let source = signal(SharedString::from("**FIRST**"));
     let failure = signal(SharedString::from("no error"));
     view()
@@ -202,10 +202,8 @@ fn a_failed_append_shows_the_complete_latest_source_and_can_recover() {
     let plugins = MarkdownPlugins::new().with(Failing);
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(500.0), px(400.0)),
-        ..EngineConfig::new(Root::new::<Failure>(move || {
-            provide_context(plugins.clone());
-            Default::default()
-        }))
+        context: EngineContext::default().with(plugins),
+        ..EngineConfig::new(Root::of::<Failure>())
     })
     .unwrap();
     app.wait_for("text:FIRST").unwrap();
