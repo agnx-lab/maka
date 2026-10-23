@@ -82,6 +82,7 @@ import { latestToolActivity, updateToolActivity } from './toolActivity';
 import type { ToolActivity } from './toolActivity';
 import type {
   AgentHistoryAttachment,
+  AgentHistoryChunk,
   AgentHistoryLandmark,
   AgentPendingInteractions,
   AgentQueue,
@@ -611,14 +612,18 @@ export function Conversation(props: ConversationProps) {
                 offset: last.fragments!.at(-1)!.offset,
               },
             }
-          : { kind: 'tail' };
+          : { kind: 'start' };
+        const chunks: AgentHistoryChunk[] = [];
         for (;;) {
           const page = await history(fence, position);
           if (!alive) return;
-          publishHistory(page.chunks, page.through);
+          chunks.push(...page.chunks);
           if (page.after === null) break;
           position = { kind: 'after', cursor: page.after };
         }
+        // A completed message replaces its live text as one canonical read,
+        // rather than shrinking it to the first transport page on the way.
+        publishHistory(chunks, fence);
         const currentLive = live();
         const nextLive = currentLive.filter(
           (row) => row.closedAt === null || row.closedAt! > fence,
