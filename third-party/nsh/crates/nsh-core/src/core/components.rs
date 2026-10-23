@@ -2865,7 +2865,7 @@ impl<M: TextEngine> Core<M> {
                         candidates
                             .iter()
                             .copied()
-                            .find(|&index| old[index].as_ref().is_some_and(&matches))
+                            .find(|&index| old[index].as_ref().is_some_and(matches))
                     }),
                     None => {
                         let at = old[(*cursor).min(old.len())..]
