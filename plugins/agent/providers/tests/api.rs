@@ -147,7 +147,7 @@ async fn public_provider_binding_preserves_protocol_contracts_and_explicit_polic
     for (name, protocol, adapter) in [
         (
             "openai-compatible",
-            ApiProtocol::OpenaiChat,
+            ApiProtocol::OpenaiChatCompletions,
             "chat-completions",
         ),
         (

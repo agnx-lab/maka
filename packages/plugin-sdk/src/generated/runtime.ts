@@ -2573,7 +2573,7 @@ export type SettingsConnectionDetail =
       editing?: SettingsConnectionEditingFacts;
       kind: 'ready';
     };
-export type ApiProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+export type ApiProtocol = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages';
 export type ModelModality = 'text' | 'image' | 'audio' | 'pdf' | 'video';
 export type RelayServiceTier = 'fast';
 export type SettingsCredentialLoginResult =

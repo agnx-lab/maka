@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
-    OpenaiChat,
+    OpenaiChatCompletions,
     OpenaiResponses,
     OpenResponses(PlaintextResponses),
     OpenaiCompatible { name: String },

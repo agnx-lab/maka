@@ -164,8 +164,8 @@ pub(super) async fn authenticate(
     let expires_at = device
         .expires_at
         .as_deref()
-        .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
-        .and_then(|v| u64::try_from(v.timestamp_millis()).ok())
+        .and_then(|v| v.parse::<jiff::Timestamp>().ok())
+        .and_then(|v| u64::try_from(v.as_millisecond()).ok())
         .filter(|v| *v > now().unwrap_or(u64::MAX))
         .unwrap_or(now()? + 15 * 60 * 1000);
     let interval = device.interval.duration()?;

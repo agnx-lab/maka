@@ -34,6 +34,6 @@ pub(super) fn resolve(provider: &str, model: &str) -> Wire {
     {
         Wire::OpenaiResponses
     } else {
-        Wire::OpenaiChat
+        Wire::OpenaiChatCompletions
     }
 }

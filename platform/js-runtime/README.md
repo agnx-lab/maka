@@ -25,8 +25,4 @@ Provides the V8 execution machinery shared by plugin guests and persistent JavaS
 
 Nested tool calls pass complete JSON inputs and results through the embedding's original executor. A cell can consume a large tool result and publish a short summary; complete cell results, emitted output and scratch values remain available under the configured V8 heap and execution deadline. Admitted tool work remains tracked until cleanup, including when JavaScript stops observing its promise.
 
-The trusted provider SDK isolate uses V8’s default heap policy and queues requests with byte reservations held through native cleanup. Heap-limit notifications mark the shared runtime failed; native out-of-memory failures can still terminate the process. Generated code and plugin guests keep their separately configured limits.
-
-Model SDKs submit shaped JSON through the existing request-scoped HTTP capability. Rust encodes the body into owned bytes, so an aggregate request need not fit one JavaScript string. This bridge accepts the SDK’s JSON objects, not arbitrary JavaScript values or general Fetch bodies. It still buffers the complete body; cancellation is checked during encoding, while synchronous value conversion and individual writes are not preemptible.
-
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

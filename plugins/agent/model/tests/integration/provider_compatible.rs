@@ -289,7 +289,7 @@ async fn cancellation_drains_failure_body_and_retry_without_poisoning_capacity()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn captured_language_reaches_sdk_notifications_without_becoming_provider_parameter() {
+async fn captured_language_reaches_native_notifications_without_becoming_provider_parameter() {
     use maka_agent_facts::language::Language;
     use maka_model::prompt::Message;
 

@@ -54,7 +54,7 @@ pub(super) fn resolve(
         ProviderKind::OpenaiResponses if row.provider == "openai-responses-compatible" => {
             relay::responses(row, thinking_level, parallel.unwrap_or(true))
         }
-        ProviderKind::OpenaiChat | ProviderKind::OpenaiResponses => {
+        ProviderKind::OpenaiChatCompletions | ProviderKind::OpenaiResponses => {
             // An explicit account capability can opt out; it never gates rendering.
             let summary = row.model.supports_reasoning_summary.unwrap_or(false);
             Ok(openai(
@@ -65,7 +65,7 @@ pub(super) fn resolve(
             ))
         }
         ProviderKind::OpenaiCompatible { name } => {
-            Ok(compatible::chat(name, thinking_level, parallel))
+            Ok(compatible::chat_completions(name, thinking_level, parallel))
         }
         ProviderKind::OpenResponses(contract) => {
             if parallel == Some(false) {

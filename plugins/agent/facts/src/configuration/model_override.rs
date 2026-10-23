@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum ApiProtocol {
-    OpenaiChat,
+    OpenaiChatCompletions,
     OpenaiResponses,
     AnthropicMessages,
 }

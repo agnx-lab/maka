@@ -507,7 +507,7 @@ pub(super) fn prepare_request<W>(
     let prompt = if input.supports_vision
         && matches!(
             &input.provider.kind,
-            maka_model::ProviderKind::OpenaiChat
+            maka_model::ProviderKind::OpenaiChatCompletions
                 | maka_model::ProviderKind::OpenaiCompatible { .. }
         ) {
         history::project_chat(prompt, input.configuration.language)

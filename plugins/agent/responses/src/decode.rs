@@ -657,9 +657,9 @@ impl Decoder {
                             seconds.is_finite() && seconds.abs() <= 8_640_000_000_000.0
                         })
                         .and_then(|seconds| {
-                            chrono::DateTime::from_timestamp_millis((seconds * 1000.0) as i64)
+                            jiff::Timestamp::from_millisecond((seconds * 1000.0) as i64).ok()
                         })
-                        .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+                        .map(|value| format!("{value:.3}")),
                 });
             }
             Event::Added { item } => {

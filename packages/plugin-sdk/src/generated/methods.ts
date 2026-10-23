@@ -112,7 +112,7 @@ export type SettingsUpdateInput_ThinkingLevel =
   | 'max'
   | 'ultra';
 export type SettingsUpdateInput_ApiProtocol =
-  | 'openai-chat'
+  | 'openai-chat-completions'
   | 'openai-responses'
   | 'anthropic-messages';
 export type SettingsUpdateInput_ModelModality = 'text' | 'image' | 'audio' | 'pdf' | 'video';

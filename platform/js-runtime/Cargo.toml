@@ -32,15 +32,8 @@ deno_error.workspace = true
 futures-util.workspace = true
 deno_webidl = "=0.258.0"
 deno_web = "=0.289.0"
-deno_fetch = "=0.282.0"
-deno_net = "=0.250.0"
-deno_telemetry = "=0.80.0"
-deno_crypto = "=0.272.0"
-deno_permissions = "=0.117.0"
-sys_traits = { version = "0.1.28", features = ["real", "libc", "winapi"] }
 serde.workspace = true
 serde_json.workspace = true
-ryu-js = "1"
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

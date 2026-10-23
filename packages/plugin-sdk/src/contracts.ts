@@ -41615,7 +41615,7 @@ export const contracts = {
               },
               ApiProtocol: {
                 type: 'string',
-                enum: ['openai-chat', 'openai-responses', 'anthropic-messages'],
+                enum: ['openai-chat-completions', 'openai-responses', 'anthropic-messages'],
               },
               ModelOverrideCapabilities: {
                 description: 'Vision has one declaration owner: ModelOverride::vision.',
@@ -42038,7 +42038,7 @@ export const contracts = {
               },
               ApiProtocol: {
                 type: 'string',
-                enum: ['openai-chat', 'openai-responses', 'anthropic-messages'],
+                enum: ['openai-chat-completions', 'openai-responses', 'anthropic-messages'],
               },
               ModelOverrideCapabilities: {
                 description: 'Vision has one declaration owner: ModelOverride::vision.',
@@ -44538,7 +44538,7 @@ export const contracts = {
               },
               ApiProtocol: {
                 type: 'string',
-                enum: ['openai-chat', 'openai-responses', 'anthropic-messages'],
+                enum: ['openai-chat-completions', 'openai-responses', 'anthropic-messages'],
               },
               ModelOverrideCapabilities: {
                 description: 'Vision has one declaration owner: ModelOverride::vision.',

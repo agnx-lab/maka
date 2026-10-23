@@ -34,7 +34,7 @@ pub(super) fn resolve(
         .and_then(|value| value.max_output_tokens);
     if requested.is_none()
         && wire != Wire::AnthropicMessages
-        && !(connection.provider == "kimi-coding-plan" && wire == Wire::OpenaiChat)
+        && !(connection.provider == "kimi-coding-plan" && wire == Wire::OpenaiChatCompletions)
     {
         return Ok(None);
     }

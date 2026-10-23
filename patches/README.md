@@ -17,18 +17,12 @@
   under the License.
 -->
 
-# Provider SDK patches
+# Dependency patches
 
-Root installation applies these exact-version patches with `patch-package --error-on-fail`. Native source builds install the pinned dependencies before bundling provider SDKs into V8.
+Root installation applies these exact-version patches with `patch-package --error-on-fail`. Product bundles use the pinned dependencies.
 
 ## `zod@4.6.5`
 
 Recursive schemas can retain their last parse context and input graph, and exceptional exits can leave entries on the allocation stack. The patch keeps memoization local to a parse and restores allocation state in `finally`, preserving cycles, aliases and reentrant parsing.
 
 When updating the dependency, verify its behavior before replacing or removing the patch. Keep the patched package version and the root lockfile synchronized.
-
-## `@ai-sdk/provider-utils@5.0.51`
-
-The shared JSON POST helper accepts an optional typed `fetch.json` transport before serialization. Maka sends the SDK-shaped value to its owned native JSON encoder, avoiding V8's aggregate string limit while retaining the SDK's original request values, headers and response/error handlers. Ordinary external fetch and FormData calls keep their existing encoded bodies.
-
-The patch includes source, executable distribution and TypeScript declarations. When updating the dependency, verify the shared helper and all three model streaming protocols before replacing or removing it; the provider packages resolve the executable distribution during native bundling.

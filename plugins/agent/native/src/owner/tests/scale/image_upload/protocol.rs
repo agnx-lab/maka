@@ -23,7 +23,7 @@ use maka_agent_facts::configuration::{ApiProtocol, headers::*};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Protocol {
     Compatible,
-    Chat,
+    ChatCompletions,
     Anthropic,
     Responses,
 }
@@ -45,7 +45,7 @@ impl Options {
             .unwrap_or("openai-compatible")
         {
             "openai-compatible" => Protocol::Compatible,
-            "openai-chat" => Protocol::Chat,
+            "openai-chat-completions" => Protocol::ChatCompletions,
             "anthropic" => Protocol::Anthropic,
             "responses" => Protocol::Responses,
             _ => panic!("unknown MAKA_IMAGE_PROTOCOL"),
@@ -64,7 +64,7 @@ impl Options {
     pub fn name(self) -> &'static str {
         match self.protocol {
             Protocol::Compatible => "openai-compatible",
-            Protocol::Chat => "openai-chat",
+            Protocol::ChatCompletions => "openai-chat-completions",
             Protocol::Anthropic => "anthropic",
             Protocol::Responses => "responses",
         }
@@ -72,7 +72,7 @@ impl Options {
     pub fn provider(self) -> &'static str {
         match self.protocol {
             Protocol::Compatible => "openai-compatible",
-            Protocol::Chat => "openai",
+            Protocol::ChatCompletions => "openai",
             Protocol::Anthropic => "anthropic",
             Protocol::Responses => "openai-responses-compatible",
         }
@@ -90,7 +90,7 @@ impl Options {
                     api_protocol: Some(match self.protocol {
                         Protocol::Anthropic => ApiProtocol::AnthropicMessages,
                         Protocol::Responses => ApiProtocol::OpenaiResponses,
-                        _ => ApiProtocol::OpenaiChat,
+                        _ => ApiProtocol::OpenaiChatCompletions,
                     }),
                     ..Default::default()
                 },
@@ -151,13 +151,15 @@ impl Options {
     }
     pub fn image(self, part: &Value) -> Option<&str> {
         match self.protocol {
-            Protocol::Compatible | Protocol::Chat if part["type"] == "image_url" => Some(
-                part["image_url"]["url"]
-                    .as_str()
-                    .unwrap()
-                    .strip_prefix("data:image/png;base64,")
-                    .expect("structured PNG image"),
-            ),
+            Protocol::Compatible | Protocol::ChatCompletions if part["type"] == "image_url" => {
+                Some(
+                    part["image_url"]["url"]
+                        .as_str()
+                        .unwrap()
+                        .strip_prefix("data:image/png;base64,")
+                        .expect("structured PNG image"),
+                )
+            }
             Protocol::Anthropic if part["type"] == "image" => {
                 assert_eq!(part["source"]["type"], "base64");
                 assert_eq!(part["source"]["media_type"], "image/png");
@@ -241,7 +243,7 @@ impl Options {
             return;
         }
         let events = match self.protocol {
-            Protocol::Chat => vec![
+            Protocol::ChatCompletions => vec![
                 json!({"id":"image-reply","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"role":"assistant","content":ANSWER},"finish_reason":null}]}),
                 json!({"id":"image-reply","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}),
             ],
@@ -269,7 +271,7 @@ impl Options {
             }
             body.push_str(&format!("data: {event}\n\n"));
         }
-        if self.protocol == Protocol::Chat {
+        if self.protocol == Protocol::ChatCompletions {
             body.push_str("data: [DONE]\n\n");
         }
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();

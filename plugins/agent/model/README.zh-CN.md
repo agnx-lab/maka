@@ -23,6 +23,8 @@
 
 通过提供商适配器构造模型请求并接收流式响应。`ModelExecutor` 管理请求，`Conversation` 构造会话输入，`reasoning` 处理推理配置。凭据通过 `AuthResolver` 提供，调用方传入已授权的网络与计量上下文。
 
-[源码](src/lib.rs) · [Cargo 配置](Cargo.toml)
+Chat Completions 兼容协议与 Anthropic Messages 使用纯 Rust [协议核心](../provider-protocol/README.zh-CN.md)。原生适配器将共享输入预留持有至实际清理完成，输出预留持有至消费结束。空闲期限只覆盖网络等待，本地容量等待属于背压。
 
 HTTP、SSE、WebSocket 及持久重建保留完整的规范响应条目和文本。分块与有界通道施加背压，不另设整个响应的配额。可丢弃的续接缓存允许淘汰，恢复依据仍是规范历史。请求 token 选择、提供商协议校验及原有空闲、取消清理与内容保留分开处理。
+
+[源码](src/lib.rs) · [Cargo 配置](Cargo.toml)

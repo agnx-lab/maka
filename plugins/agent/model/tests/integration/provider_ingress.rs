@@ -18,7 +18,6 @@
  */
 
 use super::{provider_compatible::body as read_request, provider_stream::request};
-use maka_js_runtime::trusted::TrustedRuntime;
 use maka_model::{ModelError, ModelEvent, ModelExecutor, ProviderKind, StepBuilder};
 use serde_json::json;
 use std::{io, time::Duration};
@@ -43,8 +42,7 @@ enum Response {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ingress_limits_close_only_offending_http_and_preserve_bounded_sse_records() {
     tokio::time::timeout(Duration::from_secs(30), async {
-        let runtime = TrustedRuntime::default();
-        let models = ModelExecutor::with_runtime(runtime, Duration::from_secs(20)).unwrap();
+        let models = ModelExecutor::new(Duration::from_secs(20)).unwrap();
         let exact_record = format!(":{}\n\n", "x".repeat(LIMIT - 3));
         let cr_records = format!(":{}\r\r", "x".repeat(LIMIT / 2)).repeat(3);
         let multiline = "data: {}\r\n".repeat(LIMIT / 10 + 1);
@@ -103,9 +101,9 @@ async fn ingress_limits_close_only_offending_http_and_preserve_bounded_sse_recor
             });
             let kind = if compatible {
                 ProviderKind::OpenaiCompatible { name: "bounded-fixture".into() }
-            } else { ProviderKind::OpenaiChat };
+            } else { ProviderKind::OpenaiChatCompletions };
             let mut request = request(kind, base);
-            // Exercise the custom-fetch path as well as the SDK default.
+            // Exercise the custom headers as well as the adapter default.
             request.provider.headers.insert("X-Fixture".into(), "ingress".into());
             let mut stream = models.stream(request, CancellationToken::new()).await.unwrap();
             let mut step = StepBuilder::default();

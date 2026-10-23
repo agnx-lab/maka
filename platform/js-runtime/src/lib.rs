@@ -25,7 +25,6 @@ mod module;
 pub mod plugin;
 pub mod repl;
 mod result;
-pub mod trusted;
 
 use bridge::{Admission, ToolScope, maka_code};
 pub use cell_context::{CellContext, CellOutput, CellStore, NotificationGate, ToolMetadata};

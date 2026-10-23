@@ -203,7 +203,7 @@ async fn generate(executor: &ModelExecutor, lane: &Conversation, request: ModelR
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn turn_reuses_socket_and_drops_it_after_sdk_cleanup() {
+async fn turn_reuses_socket_and_drops_it_after_native_cleanup() {
     tokio::time::timeout(Duration::from_secs(20), async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_port = listener.local_addr().unwrap().port();

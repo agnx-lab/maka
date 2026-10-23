@@ -237,9 +237,6 @@ export const exclusionRules = [
         'plugins/workspace/workspace-files/patch/src/update.rs',
         'platform/sandbox/src/seatbelt/base.sbpl',
         'platform/sandbox/src/seatbelt/network.sbpl',
-        // Verbatim Deno MIT sources; exact revision and license in LICENSE.
-        'platform/js-runtime/third-party/deno-telemetry/telemetry.ts',
-        'platform/js-runtime/third-party/deno-telemetry/util.ts',
       )(path) ||
       gpuiUpstreamFiles.has(path) ||
       isUnder('patches', '.patch')(path),

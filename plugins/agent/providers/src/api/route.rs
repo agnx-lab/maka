@@ -37,7 +37,8 @@ fn supports(adapter: &RuntimeAdapter, wire: Wire) -> bool {
             wire != Wire::AnthropicMessages && api_protocol.is_none_or(|selected| selected == wire)
         }
         AdapterKind::OpenaiCompatible { responses, .. } => {
-            wire == Wire::OpenaiChat || (wire == Wire::OpenaiResponses && responses.is_some())
+            wire == Wire::OpenaiChatCompletions
+                || (wire == Wire::OpenaiResponses && responses.is_some())
         }
         AdapterKind::Anthropic { .. } => wire == Wire::AnthropicMessages,
         AdapterKind::Google { .. } | AdapterKind::Cohere | AdapterKind::Unavailable => false,
@@ -69,7 +70,7 @@ fn check_execution(adapter: &RuntimeAdapter, wire: Wire) -> Result<(), Error> {
             replay_assistant_reasoning_details: None,
             normalize_usage: None,
             ..
-        } => wire == Wire::OpenaiChat,
+        } => wire == Wire::OpenaiChatCompletions,
         _ => false,
     };
     if !supported {
@@ -136,8 +137,8 @@ pub(crate) fn resolve<'a>(
             let preferred = preferred(row.provider, model);
             if supports(base, preferred) {
                 preferred
-            } else if supports(base, Wire::OpenaiChat) {
-                Wire::OpenaiChat
+            } else if supports(base, Wire::OpenaiChatCompletions) {
+                Wire::OpenaiChatCompletions
             } else if supports(base, Wire::OpenaiResponses) {
                 Wire::OpenaiResponses
             } else {
@@ -197,7 +198,9 @@ pub(crate) fn resolve<'a>(
     };
     url.set_path(&path);
     let kind = match wire {
-        Wire::OpenaiChat if matches!(selected.kind, AdapterKind::OpenaiCompatible { .. }) => {
+        Wire::OpenaiChatCompletions
+            if matches!(selected.kind, AdapterKind::OpenaiCompatible { .. }) =>
+        {
             ProviderKind::OpenaiCompatible {
                 name: if matches!(
                     selected.kind,
@@ -212,7 +215,7 @@ pub(crate) fn resolve<'a>(
                 },
             }
         }
-        Wire::OpenaiChat => ProviderKind::OpenaiChat,
+        Wire::OpenaiChatCompletions => ProviderKind::OpenaiChatCompletions,
         Wire::OpenaiResponses => {
             let responses = match &selected.kind {
                 AdapterKind::Openai { responses, .. } | AdapterKind::OpenaiCodex { responses } => {

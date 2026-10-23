@@ -17,20 +17,19 @@
  * under the License.
  */
 
-use crate::{ProviderKind, sdk};
+use crate::{ProviderKind, native};
 use maka_agent_facts::composition::SourceKind;
 use maka_agent_facts::composition::SourceRevision;
 use maka_agent_ports::model::Binding;
 use maka_agent_ports::model::ProviderAdapter;
-use maka_js_runtime::trusted::TrustedRuntime;
 use std::{collections::BTreeMap, sync::Arc};
 
-pub(crate) fn builtin(runtime: TrustedRuntime, owner: SourceRevision) -> BTreeMap<String, Binding> {
-    let sdk = Arc::new(sdk::Adapter(runtime));
+pub(crate) fn builtin(owner: SourceRevision) -> BTreeMap<String, Binding> {
+    let native = Arc::new(native::Adapter::default());
     let providers: [(&str, Arc<dyn ProviderAdapter>); 4] = [
         ("responses", Arc::new(maka_responses::Adapter::default())),
-        ("chat-completions", sdk.clone()),
-        ("anthropic-messages", sdk),
+        ("chat-completions", native.clone()),
+        ("anthropic-messages", native),
         (
             maka_providers::codex::ADAPTER,
             Arc::new(maka_providers::codex::Codex::default()),
@@ -51,6 +50,8 @@ pub fn name(kind: &ProviderKind) -> &str {
     match kind {
         ProviderKind::OpenaiResponses | ProviderKind::OpenResponses(_) => "responses",
         ProviderKind::Anthropic => "anthropic-messages",
-        ProviderKind::OpenaiChat | ProviderKind::OpenaiCompatible { .. } => "chat-completions",
+        ProviderKind::OpenaiChatCompletions | ProviderKind::OpenaiCompatible { .. } => {
+            "chat-completions"
+        }
     }
 }

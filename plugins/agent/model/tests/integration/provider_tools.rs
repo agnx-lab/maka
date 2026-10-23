@@ -58,7 +58,7 @@ fn anthropic() -> Vec<Value> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn hosted_tools_cross_the_real_sdks_on_http_and_websocket_without_becoming_functions() {
+async fn hosted_tools_cross_the_real_adapters_on_http_and_websocket_without_becoming_functions() {
     tokio::time::timeout(Duration::from_secs(40), scenario())
         .await
         .unwrap();
@@ -225,4 +225,48 @@ async fn scenario() {
             .await
             .expect("actual stream cleanup");
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn anthropic_hosted_result_replays_from_canonical_parts_with_opaque_content_intact() {
+    use maka_model::prompt::{AssistantPart, Message as PromptMessage, ToolOutput};
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let raw = read_request(&mut socket).await;
+                requests.push(serde_json::from_str::<Value>(raw.split_once("\r\n\r\n").unwrap().1).unwrap());
+                let body = anthropic().iter().map(|event| format!("event: {}\ndata: {event}\n\n", event["type"].as_str().unwrap())).collect::<String>();
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let executor = ModelExecutor::new(Duration::from_secs(10)).unwrap();
+        let mut history = Vec::new();
+        for _ in 0..2 {
+            let mut input = request(ProviderKind::Anthropic, base.clone());
+            input.tools[0].name = "Research".into();
+            input.tools[0].provider = Some(ProviderTool { id: "anthropic.web_search_20250305".into(), args: json!({"maxUses":8}) });
+            input.prompt.extend(history.clone());
+            let mut stream = executor.stream(input, CancellationToken::new()).await.unwrap();
+            let mut builder = StepBuilder::default();
+            while let Some(event) = stream.next().await { builder.push(event.unwrap().event).unwrap(); }
+            let step = builder.finish().unwrap();
+            stream.cancel_and_wait().await.unwrap();
+            let content = step.parts.into_iter().filter_map(|part| match part {
+                ModelPart::ToolCall { call } => Some(AssistantPart::ToolCall { tool_call_id: call.id, tool_name: call.name, input: call.input, provider_executed: Some(call.provider_executed), provider_options: call.provider_options }),
+                ModelPart::ToolResult { id, name, output, is_error, provider_options } => Some(AssistantPart::ToolResult { tool_call_id: id, tool_name: name, output: if is_error { ToolOutput::ErrorJson(output) } else { ToolOutput::Json(output) }, provider_options }),
+                ModelPart::Text { text, provider_options, .. } => Some(AssistantPart::Text { text, provider_options }),
+                _ => None,
+            }).collect();
+            history = vec![PromptMessage::Assistant { content, provider_options: None }, PromptMessage::user("Continue")];
+        }
+        let requests = server.await.unwrap();
+        let assistant = requests[1]["messages"].as_array().unwrap().iter().find(|message| message["role"] == "assistant").unwrap();
+        assert_eq!(assistant["content"][0], json!({"type":"server_tool_use","id":"search_1","name":"web_search","input":{"query":"Maka"}}));
+        assert_eq!(assistant["content"][1], json!({"type":"web_search_tool_result","tool_use_id":"search_1","content":[{"type":"web_search_result","url":"https://example.com/source","title":"Source","encrypted_content":"opaque","page_age":null}]}));
+    }).await.expect("hosted result completes and replays over HTTP");
 }
