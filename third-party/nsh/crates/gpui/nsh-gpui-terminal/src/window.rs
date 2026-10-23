@@ -444,7 +444,6 @@ impl WindowState {
         };
         if let Some(mut callback) = callback {
             callback(RequestFrameOptions {
-                require_presentation: true,
                 signal_source: FrameRequestSource::LocalSchedule,
                 ..RequestFrameOptions::default()
             });

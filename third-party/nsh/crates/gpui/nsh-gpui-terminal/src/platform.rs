@@ -683,6 +683,23 @@ mod tests {
         platform.mark_presented(original.clone())?;
 
         let foreground = Rc::new(Cell::new(0));
+        let next_frame = foreground.clone();
+        application.update(|cx| {
+            window
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .update(cx, |_, window, _| {
+                    window.on_next_frame(move |_, _| next_frame.set(1));
+                })
+                .unwrap();
+        });
+        // A next-frame callback can run without changing the visual scene.
+        // Servicing it must not submit the already-presented pixels again.
+        assert!(platform.pump());
+        assert_eq!(foreground.get(), 1);
+        assert!(frames.borrow().is_empty());
+
         let progressed = foreground.clone();
         platform
             .foreground_executor()
