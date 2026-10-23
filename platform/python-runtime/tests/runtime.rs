@@ -411,3 +411,109 @@ async fn caught_fatal_tool_error_cannot_publish_success() {
         Err(CellAbort::Tool(ToolError::Persistence(_)))
     ));
 }
+
+#[tokio::test]
+async fn json_depth_is_independent_of_request_and_reply_framing() {
+    for depth in [123, 124, 125, 126, 127, 128] {
+        for host_value in [false, true] {
+            let tools = Arc::new(Tools(move |_, input, _| -> ToolFuture {
+                Box::pin(async move {
+                    Ok(if host_value {
+                        (0..depth).fold(json!("leaf"), |value, _| json!([value]))
+                    } else {
+                        input
+                    })
+                })
+            }));
+            let context = context();
+            let source = format!(
+                "v='leaf'\nfor _ in range({depth}):\n    v=[v]\ntry:\n    v=await tools.echo({})\n    for _ in range({depth}):\n        v=v[0]\n    text(v)\nexcept Exception:\n    text('rejected')",
+                if host_value { "None" } else { "v" }
+            );
+            success(
+                executor(CellLimits::default())
+                    .execute_module(source, tools, CancellationToken::new(), context.clone())
+                    .await
+                    .unwrap(),
+            );
+            let expected = if depth < 128 { "leaf" } else { "rejected" };
+            assert!(
+                matches!(&context.take_output()[0], CellOutput::Text { text } if text == expected),
+                "depth {depth}, host value {host_value}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn parent_cell_can_await_child_without_a_worker_pool_deadlock() {
+    let child = executor(CellLimits::default());
+    let tools = Arc::new(Tools(move |_, _, cancel| -> ToolFuture {
+        let child = child.clone();
+        Box::pin(async move {
+            success(
+                child
+                    .execute_module("text('child')".into(), echo(), cancel, context())
+                    .await
+                    .unwrap(),
+            );
+            Ok(json!("child settled"))
+        })
+    }));
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        executor(CellLimits::default()).execute_module(
+            "text(await tools.echo({}))".into(),
+            tools,
+            CancellationToken::new(),
+            context(),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(success(result), 1);
+}
+
+#[tokio::test]
+async fn execution_budget_accumulates_across_host_resumes() {
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        executor(CellLimits {
+            timeout: Duration::from_millis(150),
+            ..Default::default()
+        })
+        .execute_module(
+            "while True:\n    await tools.echo({})".into(),
+            echo(),
+            CancellationToken::new(),
+            context(),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        matches!(result,CellResult::Failure{error,tool_calls} if error.kind==CellDiagnosticKind::LimitExceeded && tool_calls.len()>1)
+    );
+}
+
+#[tokio::test]
+async fn loading_deep_host_or_javascript_store_values_is_catchable() {
+    let context = context();
+    context
+        .store(
+            "deep".into(),
+            (0..132).fold(json!(0), |value, _| json!([value])),
+        )
+        .unwrap();
+    success(
+        run(
+            "try:\n    load('deep')\nexcept Exception:\n    text('rejected')",
+            context.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+    assert!(matches!(&context.take_output()[0],CellOutput::Text{text} if text=="rejected"));
+}

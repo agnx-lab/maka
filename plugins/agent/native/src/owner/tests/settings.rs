@@ -752,13 +752,13 @@ async fn saved_model_survives_restart_and_resolves_locally_at_the_current_revisi
             ("other-model".into(), ModelOverride { code_mode: Some(true), ..Default::default() }),
         ]))).await;
         let current = query(&f, "resolveModel", target.clone()).await;
-        let update = json!({"selection":current["choice"]["selection"],"tools":{"codeMode":false,"applyPatch":true},"limits":{"contextWindow":100000,"inputLimit":90000,"maxOutputTokens":4000,"compactionThreshold":80000}});
+        let update = json!({"selection":current["choice"]["selection"],"tools":{"codeMode":false,"codeModeLanguage":"python","applyPatch":true},"limits":{"contextWindow":100000,"inputLimit":90000,"maxOutputTokens":4000,"compactionThreshold":80000}});
         let (saved, _) = mutate(&f, "updateModelSettings", update.clone(), None).await;
         assert_eq!(saved["kind"], "committed");
         assert_eq!(mutate(&f, "updateModelSettings", update, None).await.0["kind"], "connection_stale");
         todo_tests::reopen(&mut f).await;
         let current = query(&f, "resolveModel", target.clone()).await;
-        assert_eq!(current["choice"]["tools"], json!({"codeMode":false,"applyPatch":true}));
+        assert_eq!(current["choice"]["tools"], json!({"codeMode":false,"codeModeLanguage":"python","applyPatch":true}));
         let overrides = f.config.catalog().await.unwrap().connections.remove(0).model_overrides.unwrap();
         assert_eq!(current["choice"]["limits"]["overrides"], json!({"contextWindow":100000,"inputLimit":90000,"maxOutputTokens":4000,"compactionThreshold":80000}));
         assert_eq!(current["choice"]["limits"]["contextWindow"], 100000);
@@ -774,10 +774,10 @@ async fn saved_model_survives_restart_and_resolves_locally_at_the_current_revisi
         assert_eq!(context.declared_window, Some(80000));
         assert_eq!(overrides["other-model"].code_mode, Some(true));
         assert_eq!(overrides["fixture-model"].thinking_levels, Some(vec![maka_agent_facts::execution::ThinkingLevel::High]));
-        let (reset, _) = mutate(&f, "updateModelSettings", json!({"selection":current["choice"]["selection"],"tools":{"codeMode":null,"applyPatch":null},"limits":{"contextWindow":null,"inputLimit":null,"maxOutputTokens":null,"compactionThreshold":null}}), None).await;
+        let (reset, _) = mutate(&f, "updateModelSettings", json!({"selection":current["choice"]["selection"],"tools":{"codeMode":null,"codeModeLanguage":null,"applyPatch":null},"limits":{"contextWindow":null,"inputLimit":null,"maxOutputTokens":null,"compactionThreshold":null}}), None).await;
         assert_eq!(reset["kind"], "committed");
         let current = query(&f, "resolveModel", target.clone()).await;
-        assert_eq!(current["choice"]["tools"], json!({"codeMode":null,"applyPatch":null}));
+        assert_eq!(current["choice"]["tools"], json!({"codeMode":null,"codeModeLanguage":null,"applyPatch":null}));
         selection::edit(&f, |changes| changes.enabled = Some(false)).await;
         assert_eq!(query(&f, "resolveModel", target).await["kind"], "unavailable");
         assert!(tokio::time::timeout(Duration::from_millis(50), listener.accept()).await.is_err(), "restore must not contact the provider");

@@ -19,6 +19,8 @@
 
 //! Journaled tool execution and Code Mode.
 mod cell;
+mod code_executor;
+pub use code_executor::CodeExecutor;
 mod dispatch;
 pub use dispatch::{RequestTools, RunTools, StepTools};
 pub use maka_tool_catalog::*;

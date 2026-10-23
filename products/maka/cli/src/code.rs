@@ -182,6 +182,7 @@ pub(super) async fn run(args: Args) -> Result<(), maka_host_runtime::HostError> 
                 collaboration_mode: CollaborationMode::Agent,
                 orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::CodeMode,
+                code_language: Default::default(),
                 model: None,
                 thinking_level: None,
             })),

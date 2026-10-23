@@ -21,6 +21,10 @@
 static ALLOCATOR: monty_alloc::LimitedAllocator = monty_alloc::LimitedAllocator;
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("maka-python-worker {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     if let Err(error) = maka_python_runtime::worker::run_stdio() {
         eprintln!("Python worker: {error}");
         std::process::exit(1);

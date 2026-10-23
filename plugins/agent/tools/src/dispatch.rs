@@ -23,6 +23,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use crate::CodeExecutor;
 use maka_agent_facts::event::EventSink;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::language::Language;
@@ -31,7 +32,6 @@ use maka_agent_facts::tool_call::ToolCallIdentity;
 use maka_agent_facts::tool_call::ToolRejection;
 use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolJournal;
-use maka_js_runtime::CodeExecutor;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -198,10 +198,11 @@ impl<'a> RequestTools<'a> {
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         if self.run.mode == ToolMode::CodeMode {
-            let mut exec = cell::definition();
+            let mut exec = cell::definition(self.run.cells.language());
             let definitions: Vec<_> = self.described.definitions().cloned().collect();
             exec.description.push('\n');
-            exec.description.push_str(&cell::declarations(&definitions));
+            exec.description
+                .push_str(&cell::declarations(&definitions, self.run.cells.language()));
             std::iter::once(exec)
                 .chain(std::iter::once(cell::wait_definition()))
                 .chain(self.direct.definitions().cloned())
@@ -319,7 +320,7 @@ impl<'a> StepTools<'a> {
                 let effect = if call.name == "exec" && run.mode == ToolMode::CodeMode {
                     let executor = cell::CellTool::new(
                         run.cells.clone(),
-                        cell::source(input)?,
+                        cell::source(input, run.cells.language())?,
                         request.catalog.clone(),
                         run.journal.clone(),
                         operation_id.clone(),

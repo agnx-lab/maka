@@ -102,6 +102,10 @@ export type AgentSkillCandidatesInput_ThinkingLevel =
 export type SettingsUpdateInput_Nullable_MapOf_ModelOverride = {
   [k: string]: SettingsUpdateInput_ModelOverride | undefined;
 } | null;
+/**
+ * Interpreter used only for model-facing Code Mode cells.
+ */
+export type SettingsUpdateInput_CodeLanguage = 'javascript' | 'python';
 export type SettingsUpdateInput_ThinkingLevel =
   | 'off'
   | 'minimal'
@@ -1155,6 +1159,10 @@ export interface SettingsUpdateInput_ModelOverride {
    * Omitted means model-specific defaults; false is an explicit opt-out.
    */
   codeMode?: boolean;
+  /**
+   * Code Mode interpreter; omitted selects JavaScript.
+   */
+  codeModeLanguage?: SettingsUpdateInput_CodeLanguage;
   /**
    * Independent of Code Mode: select patch editing or structured Edit/Write.
    */

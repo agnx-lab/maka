@@ -257,6 +257,7 @@ export const exclusionRules = [
       'platform/computer-use/src/api.md',
       'platform/computer-use/src/api.zh-CN.md',
       'platform/computer-use/src/api.zh-TW.md',
+      'plugins/agent/tools/src/cell/python.md',
     ),
   },
   {

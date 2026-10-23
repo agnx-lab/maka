@@ -2364,6 +2364,10 @@ export type SettingsModelsPage =
       next: SettingsModelCursor | null;
       kind: 'ready';
     };
+/**
+ * Interpreter used only for model-facing Code Mode cells.
+ */
+export type CodeLanguage = 'javascript' | 'python';
 export type SettingsDefaultModel =
   | {
       kind: 'none';
@@ -7871,6 +7875,7 @@ export interface SettingsModelChoice {
 }
 export interface SettingsModelToolPreferences {
   codeMode: boolean | null;
+  codeModeLanguage: CodeLanguage | null;
   applyPatch: boolean | null;
 }
 export interface SettingsModelLimitSettings {
@@ -7943,6 +7948,10 @@ export interface ModelOverride {
    * Omitted means model-specific defaults; false is an explicit opt-out.
    */
   codeMode?: boolean;
+  /**
+   * Code Mode interpreter; omitted selects JavaScript.
+   */
+  codeModeLanguage?: CodeLanguage;
   /**
    * Independent of Code Mode: select patch editing or structured Edit/Write.
    */

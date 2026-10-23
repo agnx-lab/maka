@@ -25,7 +25,7 @@ use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
 use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::CodeExecutor;
+use maka_tools::CodeExecutor;
 use maka_tools::{
     RunTools, ToolCatalog, ToolDefinition, ToolHandler, ToolMode, ToolNesting, ToolRegistration,
     ToolSemantics,

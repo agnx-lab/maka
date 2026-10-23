@@ -268,6 +268,7 @@ impl Owner {
         // A continuation retains the original tool protocol even when the
         // user selects a model whose default differs from the original Run.
         source.accepted.tool_mode = configuration.tool_mode;
+        source.accepted.code_language = configuration.code_language;
         source.accepted.editing_tools = configuration.editing_tools;
         let graph = match self
             .resume_graph(&input.session_id, &configuration.orchestration_mode)

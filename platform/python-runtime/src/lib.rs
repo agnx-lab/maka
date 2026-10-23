@@ -123,7 +123,10 @@ impl CodeExecutor {
             cancellation.child_token(),
             Handle::current(),
         );
-        let mut child = tokio::process::Command::new(&self.worker)
+        let mut command = tokio::process::Command::new(&self.worker);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: worker only uses pipes.
+        let mut child = command
             .args([
                 self.limits.heap_bytes.to_string(),
                 self.limits.timeout.as_millis().to_string(),
@@ -191,6 +194,15 @@ async fn drive(
     limits: &CellLimits,
 ) -> Result<Result<Value, CellDiagnostic>, CellAbort> {
     send(input, &start).await?;
+    // Loading the trusted executable and initializing transport precede user
+    // execution, just as V8 construction precedes its execution clock. The
+    // owning cancellation token remains active through this handshake.
+    if !matches!(
+        receive(output, limits.heap_bytes.saturating_add(4 * 1024 * 1024)).await?,
+        Request::Ready
+    ) {
+        return Err(internal("Python worker omitted its ready frame"));
+    }
     let mut remaining = limits.timeout;
     let mut pending = Pending::new();
     let mut ready = BTreeMap::new();
@@ -212,6 +224,7 @@ async fn drive(
             }
         };
         let reply = match request {
+            Request::Ready => return Err(internal("duplicate Python worker ready frame")),
             Request::Complete { error } => {
                 return Ok(match error {
                     Some(error) => Err(error),
@@ -233,7 +246,10 @@ async fn drive(
                             "tool expects one JSON argument or keyword arguments",
                         )),
                     };
-                    match input.and_then(|input| scope.start(name.into(), input)) {
+                    match input.and_then(|input| {
+                        protocol::validate_json(&input)?;
+                        scope.start(name.into(), input)
+                    }) {
                         Ok(receiver) => {
                             if !admitted.insert(id) {
                                 return Err(internal("duplicate Python call identity"));
@@ -241,9 +257,15 @@ async fn drive(
                             pending.push(Box::pin(async move {
                                 (
                                     id,
-                                    receiver.await.unwrap_or_else(|_| {
-                                        Err(helpers::error("tool outcome unavailable"))
-                                    }),
+                                    receiver
+                                        .await
+                                        .unwrap_or_else(|_| {
+                                            Err(helpers::error("tool outcome unavailable"))
+                                        })
+                                        .and_then(|value| {
+                                            protocol::validate_json(&value)?;
+                                            Ok(value)
+                                        }),
                                 )
                             }));
                             Reply::Pending
@@ -251,7 +273,10 @@ async fn drive(
                         Err(error) => Reply::Error { error },
                     }
                 } else if let Some(name) = name.strip_prefix("helper:") {
-                    match helpers::invoke(name, args, kwargs, context) {
+                    match helpers::invoke(name, args, kwargs, context).and_then(|value| {
+                        protocol::validate_json(&value)?;
+                        Ok(value)
+                    }) {
                         Ok(_) if name == "exit" => return Ok(Ok(Value::Null)),
                         Ok(_) if name == "yield_control" => {
                             admitted.insert(id);
@@ -344,7 +369,7 @@ async fn receive(
         line.extend_from_slice(&bytes[..count]);
         output.consume(count);
         if end.is_some() {
-            return serde_json::from_slice(&line).map_err(internal);
+            return protocol::decode(&line).map_err(internal);
         }
     }
 }

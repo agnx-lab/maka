@@ -27,7 +27,7 @@ The Runtime Host owns operation admission, execution scopes, canonical state and
 
 Native tools enforce filesystem, process and network restrictions through the relevant operating-system mechanisms. Approval grants a specific capability; it does not validate untrusted text or make a stale observation executable.
 
-Code Mode executes JavaScript in an embedded V8 isolate with explicit host bindings. Installed Host plugins are trusted extensions. Computer Use has a separate session and observation lifecycle, and requires the corresponding platform permissions.
+Code Mode defaults to JavaScript in an embedded V8 isolate with explicit host bindings. Models can opt into Python through a bundled Monty worker process. Each Python cell has fresh interpreter state, bounded allocation and execution time, and no direct filesystem, network or subprocess access. Both languages call the same authorized Host tools and wait for admitted effects to settle after cancellation. Installed Host plugins are trusted extensions. Computer Use has a separate session and observation lifecycle, and requires the corresponding platform permissions.
 
 Configuration and event data remain under the selected state root. Secrets are handled through credential capabilities; plugin state, tool output and application UI must not be treated as secret stores.
 

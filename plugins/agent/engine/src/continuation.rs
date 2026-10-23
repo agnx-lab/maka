@@ -160,7 +160,10 @@ pub(super) async fn inspect(
         input.invocation.clone(),
         catalog.clone(),
         input.configuration.tool_mode,
-        inner.cells.clone(),
+        inner
+            .cells
+            .clone()
+            .with_language(input.configuration.code_language),
         loaded_basis.clone().into(),
     )
     .with_model(input.provider.tool_context());

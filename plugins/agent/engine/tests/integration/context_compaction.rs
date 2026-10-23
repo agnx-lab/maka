@@ -34,7 +34,7 @@ async fn compact_next_main_and_reopen_use_durable_baseline_with_complete_tail() 
         maka_agent_engine::Engine::new(
             log,
             model,
-            maka_js_runtime::CodeExecutor::new(Default::default()).unwrap(),
+            maka_tools::CodeExecutor::new(Default::default()).unwrap(),
         )
     };
     let input = |base: &str, id: &str, compact| {

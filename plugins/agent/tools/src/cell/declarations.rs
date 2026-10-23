@@ -56,6 +56,28 @@ pub(super) fn render(definitions: &[ToolDefinition]) -> String {
     output
 }
 
+/// Python callers consume the same authoritative JSON schemas, including
+/// references and constraints that Python type annotations cannot express.
+pub(super) fn python(definitions: &[ToolDefinition]) -> String {
+    let mut output = String::new();
+    for tool in definitions {
+        for line in tool.description.lines() {
+            output.push_str("# ");
+            output.push_str(line);
+            output.push('\n');
+        }
+        output.push_str(&format!(
+            "# await tools.{}(input)\n# Input JSON Schema: {}\n",
+            maka_python_runtime::tool_identifier(&tool.name),
+            tool.input_schema
+        ));
+        if let Some(schema) = &tool.output_schema {
+            output.push_str(&format!("# Output JSON Schema: {schema}\n"));
+        }
+    }
+    output
+}
+
 struct Renderer<'a> {
     root: &'a Value,
     remaining: usize,

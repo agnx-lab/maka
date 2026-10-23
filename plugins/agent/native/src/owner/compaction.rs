@@ -160,6 +160,7 @@ impl Owner {
             collaboration_mode: session.configuration.collaboration_mode,
             orchestration_mode: BehaviorId::default(),
             tool_mode: source.accepted.tool_mode,
+            code_language: source.accepted.code_language,
             model: Some(source.accepted.binding.clone()),
             thinking_level: source.accepted.thinking_level,
             system_prompt: None,

@@ -68,6 +68,7 @@ async fn opening(log: &EventLog, session: &str, id: &str) -> Invocation {
                 collaboration_mode: CollaborationMode::Agent,
                 orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::Direct,
+                code_language: Default::default(),
             })),
             input: InvocationInput::Message {
                 source_messages: vec![],
