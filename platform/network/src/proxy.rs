@@ -18,8 +18,9 @@
  */
 
 //! Per-execution HTTP/CONNECT gateway. Destination authority and upstream routing
-//! are independent immutable inputs. The native sandbox must restrict the child
-//! to this listener; proxy environment variables alone are not isolation.
+//! are independent immutable inputs. The native sandbox enforces direct network
+//! access separately from proxy settings. MXC restricted networking also permits
+//! host loopback services, matching its native policy contract.
 
 use crate::{Policy, tunnel};
 use futures_util::TryStreamExt;

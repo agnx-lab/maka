@@ -23,7 +23,7 @@ use std::{
     collections::BTreeMap,
     io,
     os::windows::{
-        ffi::OsStrExt,
+        ffi::{OsStrExt, OsStringExt},
         io::{AsHandle, AsRawHandle},
     },
     path::Path,
@@ -83,6 +83,13 @@ impl Prepared {
             line,
             environment,
         })
+    }
+
+    pub(crate) fn windows_command_line(&self) -> io::Result<std::ffi::OsString> {
+        let buffers = self.windows()?;
+        Ok(std::ffi::OsString::from_wide(
+            &buffers.line[..buffers.line.len() - 1],
+        ))
     }
 
     /// # Safety

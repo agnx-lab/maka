@@ -137,7 +137,7 @@ pub(super) fn shared_lease(path: &Path) -> io::Result<File> {
 }
 
 pub(super) fn remove(path: &Path) -> io::Result<()> {
-    let mut file = match open_nofollow(path, false) {
+    let file = match open_nofollow(path, false) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error),

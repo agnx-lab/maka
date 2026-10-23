@@ -17,9 +17,17 @@
  * under the License.
  */
 
-use super::{Installation, guards::Guards, policy, store};
+use super::{
+    Installation,
+    guards::{self, Guards},
+    policy, store,
+};
 use maka_process::bootstrap::{self, Preparation};
-use maka_sandbox::{Network, filesystem::Policy, windows::WriteCapability};
+use maka_sandbox::{
+    Network,
+    filesystem::{Access, Policy, Rule},
+    windows::{ExecutionJob, WriteCapability, mxc},
+};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -33,6 +41,15 @@ pub struct Backend {
     state_root: PathBuf,
     helper: PathBuf,
 }
+
+enum NativePreparation {
+    Ready {
+        filesystem: Policy,
+        lease: bootstrap::MxcLease,
+    },
+    Unsupported(String),
+}
+
 impl Backend {
     pub fn new(state_root: &Path, helper: &Path) -> Self {
         Self {
@@ -52,6 +69,65 @@ impl bootstrap::Backend for Backend {
     ) -> Preparation {
         let backend = self.clone();
         Box::pin(async move {
+            let policy_executable = executable.clone();
+            let policy_cwd = cwd.clone();
+            let policy_network = network.clone();
+            let (filesystem, native) = tokio::task::spawn_blocking(move || {
+                let filesystem = filesystem
+                    .compile()
+                    .and_then(|policy| policy.process_snapshot())
+                    .map_err(io::Error::other)?;
+                let compiled = filesystem.compile().map_err(io::Error::other)?;
+                if [&policy_executable, &policy_cwd]
+                    .into_iter()
+                    .any(|path| !compiled.access(path).can_read())
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "sandbox denies its working directory or executable",
+                    ));
+                }
+                let native = prepare_native(
+                    &filesystem,
+                    &policy_network,
+                    &policy_executable,
+                    &policy_cwd,
+                )?;
+                Ok((filesystem, native))
+            })
+            .await
+            .map_err(io::Error::other)??;
+            let mxc_unsupported = match native {
+                NativePreparation::Ready {
+                    filesystem,
+                    mut lease,
+                } => {
+                    // MXC owns isolation per command tree. Its proxy has no account
+                    // slot or installation lifetime and remains with that same tree.
+                    let (proxy_address, proxy) = if matches!(network, Network::Restricted { .. }) {
+                        let (address, proxy) =
+                            match maka_network::proxy::Proxy::start(network.clone(), route).await {
+                                Ok(proxy) => proxy,
+                                Err(error) => {
+                                    lease.finish().await.map_err(cleanup_error)?;
+                                    return Err(error);
+                                }
+                            };
+                        (Some(address), Some(Arc::new(proxy)))
+                    } else {
+                        (None, None)
+                    };
+                    return Ok(bootstrap::Launch::Mxc {
+                        executable: backend.helper,
+                        filesystem,
+                        network,
+                        proxy,
+                        proxy_address,
+                        lease,
+                    });
+                }
+                NativePreparation::Unsupported(reason) => reason,
+            };
             let root = backend.state_root.clone();
             let helper = backend.helper.clone();
             let account_network = network.clone();
@@ -68,10 +144,6 @@ impl bootstrap::Backend for Backend {
                 if installation.status()? != super::Status::Ready {
                     return Err(super::setup_required());
                 }
-                let filesystem = filesystem
-                    .compile()
-                    .and_then(|policy| policy.process_snapshot())
-                    .map_err(io::Error::other)?;
                 let compiled = filesystem.compile().map_err(io::Error::other)?;
                 let guards = Guards::prepare(&compiled)
                     .map_err(|error| context("protect filesystem boundaries", error))?;
@@ -93,7 +165,15 @@ impl bootstrap::Backend for Backend {
                 }
             })
             .await
-            .map_err(cleanup_error)??;
+            .map_err(cleanup_error)?
+            .map_err(|error| {
+                context(
+                    &format!(
+                        "prepare account isolation (Microsoft MXC cannot enforce this policy: {mxc_unsupported})"
+                    ),
+                    error,
+                )
+            })?;
             let id = execution.id;
             let capability = execution.capability;
             let mut guards = Some(guards);
@@ -134,7 +214,7 @@ impl bootstrap::Backend for Backend {
                 let root = backend.state_root.clone();
                 let read_helper = backend.helper.clone();
                 let guards = guards.take().expect("one execution owner");
-                Ok::<_, io::Error>(bootstrap::Launch {
+                Ok::<_, io::Error>(bootstrap::Launch::Account {
                     runner: runner.with_proxy(proxy.take()).with_cleanup(move || {
                         Installation::new(&root).settle(id)?;
                         guards.finish()?;
@@ -177,6 +257,69 @@ impl bootstrap::Backend for Backend {
             }
         })
     }
+}
+
+fn prepare_native(
+    filesystem: &Policy,
+    network: &Network,
+    executable: &Path,
+    cwd: &Path,
+) -> io::Result<NativePreparation> {
+    guards::recover().map_err(cleanup_error)?;
+    if !mxc::is_available() {
+        return Ok(NativePreparation::Unsupported(
+            "native Windows process security environments are unavailable".into(),
+        ));
+    }
+    let registry = guards::registry_root()?;
+    maka_event_log::root::private_directory(&registry)?;
+    let ceiling = Policy {
+        default: Access::Write,
+        rules: vec![Rule::subtree(registry, Access::Deny)],
+        deny_globs: Vec::new(),
+    };
+    let compiled = filesystem
+        .compile()
+        .and_then(|policy| policy.intersect(&ceiling.compile()?))
+        .map_err(io::Error::other)?;
+    if !compiled.access(executable).can_read() || !compiled.access(cwd).can_read() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "sandbox denies its working directory or executable",
+        ));
+    }
+    let filesystem = compiled.policy().clone();
+    let mut guards = Some(match Guards::prepare_native(&compiled) {
+        Ok(guards) => guards,
+        Err(error) if error.kind() == io::ErrorKind::Unsupported => {
+            return Ok(NativePreparation::Unsupported(error.to_string()));
+        }
+        Err(error) => return Err(context("protect native filesystem boundaries", error)),
+    });
+    let prepared = (|| {
+        match mxc::PreparedPolicy::new(&filesystem, network, cwd) {
+            Ok(_) => {}
+            Err(maka_sandbox::Error::Unsupported(reason)) => {
+                return Ok(NativePreparation::Unsupported(reason));
+            }
+            Err(error) => return Err(io::Error::other(error)),
+        }
+        let id = uuid::Uuid::new_v4();
+        let job = ExecutionJob::create(id)?;
+        if let Some(guards) = &guards {
+            guards.bind(id)?;
+        }
+        let guards = guards.take();
+        let lease = bootstrap::MxcLease::new(job, move || match guards {
+            Some(guards) => guards.finish(),
+            None => Ok(()),
+        });
+        Ok(NativePreparation::Ready { filesystem, lease })
+    })();
+    if let Some(guards) = guards {
+        guards.finish().map_err(cleanup_error)?;
+    }
+    prepared
 }
 
 fn cleanup_error(error: impl std::fmt::Display) -> io::Error {

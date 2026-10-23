@@ -92,6 +92,8 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+mxc-sdk = { git = "https://github.com/microsoft/mxc", rev = "b21120168d70befe12356411423266bfef168446" }
+flatbuffers = "25"
 maka-python-runtime = { path = "platform/python-runtime" }
 maka-mcp = { path = "plugins/agent/mcp" }
 hex = "0.4.3"

@@ -321,6 +321,14 @@ const reviewedProvenance = new Map([
     'plugins/workspace/workspace-files/patch/SOURCE.md',
     'Maka-authored adaptation record quoting the attributed upstream copyright.',
   ],
+  [
+    'platform/sandbox/README.md',
+    'Maka-authored sandbox documentation records attributed Codex source provenance.',
+  ],
+  [
+    'platform/sandbox/README.zh-CN.md',
+    'Maka-authored sandbox documentation records attributed Codex source provenance.',
+  ],
   ['website/src/copy/en.ts', 'Website footer copy includes the ASF copyright statement.'],
   ['website/src/copy/zh-CN.ts', 'Website footer copy includes the ASF copyright statement.'],
   ['website/test/site.test.mjs', 'Checks the ASF copyright statement in the built website.'],

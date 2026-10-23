@@ -26,6 +26,8 @@ targets = [
 
 # Follow Apache OpenDAL's cargo-deny policy, with Maka's own dependency exceptions.
 # https://github.com/apache/opendal/blob/main/deny.toml
+# Blue Oak and Unicode data-file licenses are ASF Category A.
+# https://www.apache.org/legal/resolved.html#category-a
 [licenses]
 allow = [
   "0BSD",
@@ -34,12 +36,14 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "BSL-1.0",
+  "BlueOak-1.0.0",
   "CC0-1.0",
   "CDLA-Permissive-2.0",
   "ISC",
   "MIT",
   "MIT-0",
   "Unicode-3.0",
+  "Unicode-DFS-2016",
   "Unlicense",
   "Zlib",
 ]
@@ -105,6 +109,7 @@ license-files = [{ path = "../../../../../LICENSE.md", hash = 0xd83541a2 }]
 
 [sources]
 allow-git = [
+  "https://github.com/microsoft/mxc",
   "https://github.com/maka-agent/cua",
   "https://github.com/longbridge/gpui-fast",
   "https://github.com/longbridge/gpui-kit",

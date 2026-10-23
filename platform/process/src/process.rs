@@ -36,6 +36,8 @@ pub(crate) async fn run(
     if cancellation.is_cancelled() {
         return Err(failed("Shell cancelled before spawn"));
     }
+    #[cfg(windows)]
+    let plan = plan.with_startup_cancellation(cancellation.clone());
     let plan = plan.prepare().await?;
     if cancellation.is_cancelled() {
         plan.abort().await?;
@@ -78,9 +80,13 @@ async fn settle(
     timeout_ms: Option<u64>,
     cancellation: CancellationToken,
 ) -> Result<Outcome, ToolError> {
+    #[cfg(windows)]
+    let wait = child.wait_foreground();
+    #[cfg(unix)]
+    let wait = child.wait();
     let reason = tokio::select! {
         biased;
-        result = child.wait() => return result.map(Outcome::Exited).map_err(unknown),
+        result = wait => return result.map(Outcome::Exited).map_err(unknown),
         _ = cancellation.cancelled() => Termination::Cancelled,
         _ = crate::timeout(timeout_ms) => Termination::Timeout,
     };

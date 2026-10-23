@@ -89,6 +89,8 @@ impl Worker {
                 return Err(error.into());
             }
         };
+        #[cfg(windows)]
+        let command = command.with_startup_cancellation(self.cancellation.clone());
         let spawned = if self.cancellation.is_cancelled() {
             Err(maka_agent_facts::tools::ToolError::Failed(
                 "PTY launch cancelled before spawn".into(),

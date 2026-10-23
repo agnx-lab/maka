@@ -48,6 +48,18 @@ pub enum Status {
     Removing,
     Busy,
 }
+
+/// Preferred Windows isolation needs no installation on MXC-capable systems.
+/// Individual commands still check whether MXC can enforce their whole policy;
+/// unsupported policies require the explicitly configured account sandbox.
+pub fn status(state_root: &Path) -> io::Result<Status> {
+    if maka_sandbox::windows::mxc::is_available() {
+        Ok(Status::NotRequired)
+    } else {
+        Installation::new(state_root).status()
+    }
+}
+
 use maka_sandbox::Network;
 use maka_sandbox::windows::{
     Account, AccountId, Credential, ExecutionJob, NetworkRules, Password, ReadGroup,

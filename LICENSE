@@ -291,6 +291,19 @@ OpenAI Codex sandbox policy (unmodified source)
 platform/sandbox/src/seatbelt/{base,network}.sbpl are Copyright OpenAI, Apache License 2.0.
 Source provenance is recorded in platform/sandbox/README.md.
 
+OpenAI Codex Windows MXC sandbox adapter (adapted source)
+
+Copyright 2025 OpenAI
+License: Apache License 2.0 (the text at the beginning of this file).
+
+platform/sandbox/src/windows/mxc.rs and
+platform/sandbox/src/windows/mxc/{availability,policy}.rs contain portions
+adapted from codex-rs/mxc-sandbox at revision
+4610b573e59b211bf9430cf6ffb97cfb84623090. Maka integrates native capability
+probing, network mapping and filesystem normalization with its own permission
+policy, process transports and execution ownership. Detailed source provenance
+is recorded in platform/sandbox/README.md.
+
 Native Computer Use dependency notices are recorded in
 platform/computer-use/THIRD_PARTY_NOTICES.
 

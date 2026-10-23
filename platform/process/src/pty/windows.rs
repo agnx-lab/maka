@@ -47,6 +47,10 @@ enum ConsoleState {
 enum ConsoleOwner {
     Native(Console),
     Runner(crate::bootstrap::terminal::Remote),
+    Mxc {
+        console: Console,
+        owner: crate::bootstrap::mxc::Owner,
+    },
 }
 impl ConsoleOwner {
     async fn close(self, terminated: bool) -> io::Result<()> {
@@ -55,6 +59,13 @@ impl ConsoleOwner {
                 .await
                 .map_err(io::Error::other),
             Self::Runner(console) => console.close(terminated).await,
+            Self::Mxc { console, mut owner } => {
+                let result = owner.finish().await;
+                tokio::task::spawn_blocking(move || drop(console))
+                    .await
+                    .map_err(io::Error::other)?;
+                result
+            }
         }
     }
 }
@@ -73,8 +84,7 @@ pub async fn spawn(
     let mut plan = plan.prepare().await?;
     if let Some(launch) = plan.take_launch() {
         return launch
-            .runner
-            .terminal(launch.endpoint, plan, launch.capabilities, size)
+            .terminal(plan, size)
             .await
             .map_err(crate::launch_error);
     }
@@ -137,6 +147,30 @@ pub(crate) fn from_runner(
     )
 }
 
+pub(crate) fn from_mxc(
+    process: OwnedHandle,
+    pid: u32,
+    job: Job,
+    input: NamedPipeServer,
+    output: NamedPipeServer,
+    console: Console,
+    owner: crate::bootstrap::mxc::Owner,
+) -> (PtyChild, PtyIo) {
+    let output = Arc::new(output);
+    (
+        PtyChild {
+            process,
+            job,
+            pid,
+            output: output.clone(),
+            console: ConsoleState::Open(ConsoleOwner::Mxc { console, owner }),
+            status: None,
+            terminated: false,
+        },
+        PtyIo { output, input },
+    )
+}
+
 impl PtyChild {
     pub fn id(&self) -> u32 {
         self.pid
@@ -144,7 +178,9 @@ impl PtyChild {
 
     pub async fn resize(&mut self, size: TerminalSize) -> io::Result<()> {
         match &self.console {
-            ConsoleState::Open(ConsoleOwner::Native(console)) => console.resize(size),
+            ConsoleState::Open(
+                ConsoleOwner::Native(console) | ConsoleOwner::Mxc { console, .. },
+            ) => console.resize(size),
             ConsoleState::Open(ConsoleOwner::Runner(console)) => console.resize(size).await,
             _ => Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
@@ -154,8 +190,13 @@ impl PtyChild {
     }
 
     pub fn terminate(&mut self) -> io::Result<bool> {
-        if self.status.is_some() {
+        if self.status.is_some()
+            && !matches!(self.console, ConsoleState::Open(ConsoleOwner::Mxc { .. }))
+        {
             return Ok(false);
+        }
+        if let ConsoleState::Open(ConsoleOwner::Mxc { owner, .. }) = &mut self.console {
+            owner.terminate();
         }
         self.job.terminate(130)?;
         self.terminated = true;
@@ -170,14 +211,9 @@ impl PtyChild {
         let status = wait_process(&self.process).await?;
         if matches!(self.console, ConsoleState::Open(ConsoleOwner::Native(_))) {
             self.job.terminate(130)?;
-            tokio::time::timeout(Duration::from_secs(2), async {
-                while !self.job.is_empty()? {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                Ok::<_, io::Error>(())
-            })
-            .await
-            .map_err(|_| io::Error::other("PTY Job exit is unconfirmed"))??;
+            while !self.job.is_empty()? {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
         }
         self.status = Some(status);
         Ok(status)
@@ -215,7 +251,9 @@ impl PtyChild {
 
 impl Drop for PtyChild {
     fn drop(&mut self) {
-        if self.status.is_none() {
+        if self.status.is_none()
+            || matches!(self.console, ConsoleState::Open(ConsoleOwner::Mxc { .. }))
+        {
             let _ = self.job.terminate(130);
         }
         // A Drop fallback cannot preserve unread frames. Break the output peer

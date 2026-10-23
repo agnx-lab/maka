@@ -34,6 +34,7 @@ mod token;
 pub use network::{AccountNetwork, NetworkRules};
 pub use token::{WriteCapability, WriteToken};
 pub mod acl;
+pub mod mxc;
 
 use std::{ffi::c_void, io};
 use windows_sys::Win32::Foundation::LocalFree;
