@@ -349,8 +349,7 @@ impl<M: TextEngine> Core<M> {
         let node = &self.nodes[key as usize];
         let mut style = node.mounted_view_style();
         if let Some(layout) = node.layout {
-            style.hidden |=
-                self.layout.style(layout).expect("taffy style").display == taffy::Display::None;
+            style.hidden |= self.layout.style(layout).display == taffy::Display::None;
         }
         let parent = node.parent;
         if parent == NO_KEY || node.inline {

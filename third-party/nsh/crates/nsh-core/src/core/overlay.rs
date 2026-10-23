@@ -156,8 +156,7 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn overlay_made(&mut self, key: Key, layout: LayoutId) {
         let wrapper = self
             .layout
-            .new_with_children(taffy::Style::default(), &[layout])
-            .expect("taffy wrapper");
+            .new_with_children(taffy::Style::default(), &[layout]);
         if let Some(root) = self.nodes[key as usize].root.as_mut() {
             root.overlay = Some(Box::new(OverlayState {
                 config: OverlayConfig::default(),
@@ -229,7 +228,7 @@ impl<M: TextEngine> Core<M> {
         node.fixed_view = true;
         node.root = Some(Box::default());
         let layout = node.layout.expect("a view has a layout");
-        let style = self.layout.style(layout).cloned().unwrap_or_default();
+        let style = self.layout.style(layout).clone();
         self.nodes[key as usize].base_layout = Some(Box::new(style));
         self.roots.push(key);
         self.overlay_made(key, layout);
@@ -256,7 +255,7 @@ impl<M: TextEngine> Core<M> {
             .layout
             .expect("a view has a layout");
         if let Some((_, wrapper)) = state {
-            let _ = self.layout.remove_child(wrapper, layout);
+            self.layout.remove_child(wrapper, layout);
             self.overlay_released(key, wrapper);
         }
         self.roots.retain(|&k| k != key);
@@ -264,9 +263,7 @@ impl<M: TextEngine> Core<M> {
         node.fixed_view = false;
         node.root = None;
         if let Some(base) = node.base_layout.as_deref() {
-            self.layout
-                .set_style(layout, base.clone())
-                .expect("taffy style");
+            self.layout.set_style(layout, base.clone());
         }
         if !node.kind.derives_layout() {
             node.base_layout = None;
@@ -278,7 +275,7 @@ impl<M: TextEngine> Core<M> {
     /// layout node is gone already).
     pub(super) fn overlay_released(&mut self, key: Key, wrapper: LayoutId) {
         self.overlays.retain(|&k| k != key);
-        let _ = self.layout.remove(wrapper);
+        self.layout.remove(wrapper);
     }
 
     /// Node `id` is released: the nodes made for its `tooltip` go with it.
@@ -356,10 +353,7 @@ impl<M: TextEngine> Core<M> {
                 if !n.created {
                     return None;
                 }
-                let hidden = self
-                    .layout
-                    .style(layout)
-                    .is_ok_and(|s| s.display == taffy::Display::None);
+                let hidden = self.layout.style(layout).display == taffy::Display::None;
                 if hidden && !n.is_overlay() {
                     return None;
                 }
@@ -579,7 +573,10 @@ impl<M: TextEngine> Core<M> {
                     let callback = events.contains(EventKind::Show)
                         || events.contains(EventKind::Dismiss)
                         || self.hint_scope_has_callbacks(k);
-                    let layout = self.nodes[k as usize].layout.map(u64::from).unwrap_or(0);
+                    let layout = self.nodes[k as usize]
+                        .layout
+                        .map(|layout| self.layout.lifetime(layout))
+                        .unwrap_or(0);
                     hinting.push(Watch {
                         key: k,
                         id: self.nodes[k as usize].id,
@@ -597,10 +594,13 @@ impl<M: TextEngine> Core<M> {
                         layout,
                         hints: vec![(
                             self.nodes[key as usize].id,
-                            self.nodes[key as usize].layout.map(u64::from).unwrap_or(0),
+                            self.nodes[key as usize]
+                                .layout
+                                .map(|layout| self.layout.lifetime(layout))
+                                .unwrap_or(0),
                             self.overlay_host(key)
                                 .and_then(|host| self.nodes[host as usize].layout)
-                                .map(u64::from)
+                                .map(|layout| self.layout.lifetime(layout))
                                 .unwrap_or(0),
                         )],
                         token: None,
@@ -772,7 +772,7 @@ impl<M: TextEngine> Core<M> {
             .find(|watch| watch.token == Some(token))?;
         let anchor = self.nodes.get(watch.key as usize)?;
         if anchor.id != watch.id
-            || anchor.layout.map(u64::from) != Some(watch.layout)
+            || anchor.layout.map(|layout| self.layout.lifetime(layout)) != Some(watch.layout)
             || !self.passive_hint_anchor(watch.key)
         {
             return None;
@@ -791,10 +791,12 @@ impl<M: TextEngine> Core<M> {
                 let hint = &self.nodes[key as usize];
                 (
                     hint.id,
-                    hint.layout.map(u64::from).unwrap_or(0),
+                    hint.layout
+                        .map(|layout| self.layout.lifetime(layout))
+                        .unwrap_or(0),
                     self.overlay_host(key)
                         .and_then(|host| self.nodes[host as usize].layout)
-                        .map(u64::from)
+                        .map(|layout| self.layout.lifetime(layout))
                         .unwrap_or(0),
                 )
             })
@@ -1247,7 +1249,7 @@ impl<M: TextEngine> Core<M> {
         };
         let root = self.nodes[key as usize].root.as_ref().expect("root state");
         let changed = root.laid_out != Some((size, 0.0));
-        if !changed && !self.layout.dirty(wrapper).unwrap_or(true) {
+        if !changed && !self.layout.dirty(wrapper) {
             return;
         }
         if changed {
@@ -1258,7 +1260,7 @@ impl<M: TextEngine> Core<M> {
                 },
                 ..taffy::Style::default()
             };
-            self.layout.set_style(wrapper, style).expect("taffy style");
+            self.layout.set_style(wrapper, style);
         }
         self.nodes[key as usize]
             .root

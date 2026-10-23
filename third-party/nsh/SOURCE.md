@@ -26,7 +26,7 @@ at `de176695240d550f2b303643b8019146c7989e7f`. The upstream project is
 
 `upstream.json` keeps that initial `repository` and `revision`. Its
 `upstream_revision` records the latest integrated `longbridge/nsh` main revision:
-`de52bb3f9c236c48f0414f1bb36c17b92914ff91`. The first upstream synchronization
+`111b3a933319fadb0f1da9a59909ca526f256386`. The first upstream synchronization
 starts from `6bb0b7908043132067456e4a21dd57c90a0bdce5`, already included in the
 initial fork import.
 
@@ -38,6 +38,12 @@ the README retains the terminal backend description). This is a mixed-source
 vendor tree, not a claim that one upstream revision contains the fork features.
 The source, tests, resources, original licenses and independent workspaces are
 retained. `SOURCE.md` and `upstream.json` are Maka's provenance files.
+The local hint-observation integration retains an allocation lifetime separate
+from the upstream layout tree's reusable slab index. This prevents a delayed
+pointer observation from activating a newly allocated hint or anchor; the
+existing hint-lifetime regression covers release and reuse. Keep this adaptation
+until an upstream owner-identity mechanism provides the same guarantee.
+
 Maka's workspace uses these local crates, including NSH's offscreen renderer and
 image codec; changing them here changes the code built and tested with Maka.
 
