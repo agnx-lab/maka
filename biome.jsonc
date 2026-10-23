@@ -37,6 +37,8 @@
       "!plugins/agent/providers/data/*.json",
       "!plugins/settings/store/data/*.json",
       "!website/**",
+      // Vendored NSH keeps upstream formatting; provenance is recorded in SOURCE.md.
+      "!third-party/nsh/**",
       // Verbatim Deno sources; tests verify their exact bytes.
       "!platform/js-runtime/third-party/deno-telemetry/telemetry.ts",
       "!platform/js-runtime/third-party/deno-telemetry/util.ts",

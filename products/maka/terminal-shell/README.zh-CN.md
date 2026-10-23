@@ -21,6 +21,8 @@
 
 使用 NSH 构建的实验性 Agent 工作台，支持鼠标与键盘操作，连接或启动 Maka Host Root。
 
+NSH 源码位于 [`third-party/nsh`](../../../third-party/nsh/SOURCE.md)。Cargo 从这里构建运行时、TSX 打包器、`nsh-base` 组件和 UI 类型声明生成器，无需单独检出 NSH。相关的 NSH 与 Maka 修改在同一源码树中完成，并通过终端的[真实 Host 测试](tests/real_host.rs)一起验证：`cargo test -p maka-cli --no-default-features --test terminal_real_host`。
+
 ## 启动
 
 在仓库根目录构建产品包，再通过 Maka CLI 启动终端界面：
