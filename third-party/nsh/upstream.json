@@ -231,17 +231,17 @@
     "crates/nsh-core/src/color.rs": "93afe9bf38e8f7b12108fedc4863f8e1bee3a55ae7d0c75e788b79b02fb72a93",
     "crates/nsh-core/src/core/classes.rs": "242ff14438c0785b6d29af6315273d4f0256cc048fad221b4cabd2f3a0f2027f",
     "crates/nsh-core/src/core/components.rs": "93f3cb23f3a570c620d8204bf46a125885f35cebe71e56e637eaafcb673dd057",
-    "crates/nsh-core/src/core/layout_tree.rs": "dc834a3994e16fc86df87c99bb6d6a718adf30693b3e9ea5f91e5bbd3796741d",
+    "crates/nsh-core/src/core/layout_tree.rs": "767715a7dbbb6d28718cfea4b2893dddc7a0237d48057618738ea80616080c33",
     "crates/nsh-core/src/core/list.rs": "e709dcf029ac3d8d0c4bc87b4e1984ce07f50e18266d0759eaed773de1902684",
     "crates/nsh-core/src/core/measure.rs": "c6692abd3002576afef5b6d777d7694e28e4754bf7ada0adf8ed1c92419289c1",
-    "crates/nsh-core/src/core/mod.rs": "641f85478a333a2063fb7c2899869bbb271f8eae89b7d38322f374e5300eb00d",
+    "crates/nsh-core/src/core/mod.rs": "50805dbbb2f7f3b00a100d6b7a30cb4c5702c22063ddb4fa38f8d4e3a8d57906",
     "crates/nsh-core/src/core/overlay.rs": "7839b8e7da75b4599321d486a8891dfbd3a4514bc1992926b60fdb5b64640f29",
     "crates/nsh-core/src/core/parent_viewport.rs": "1326e1b74de2d14cb9b0a99be4ff00b6f2509f79c6a98a3597e8508ac08d3fa6",
     "crates/nsh-core/src/core/reading.rs": "3bb3d25dc8b97f35eb73dcbaf2d6f1b5dff8cdbdd012a8edcef7fab6661f3d9f",
     "crates/nsh-core/src/core/renders.rs": "eba08379b95272762630258bba8c9d1908f8e8ec94d9518bfd59470edf49b5cd",
     "crates/nsh-core/src/core/services.rs": "8812eefd00661841ff2b1de5d4f8cf68dd667da4151b4c79ed966cc940934752",
     "crates/nsh-core/src/core/sticky.rs": "2c508038c1677fc10f11b5e6c1bf245cb78a75a02beaac24d0b09b2033a4beaa",
-    "crates/nsh-core/src/core/tests.rs": "fdecbbbaee572484f54084e954911afd34f385e7f2cfb02874c82a7eca592386",
+    "crates/nsh-core/src/core/tests.rs": "d6f30766f59f6a3ad46c8e9d46b7416dd14142666f7743e6be2f82797316585a",
     "crates/nsh-core/src/core/touch.rs": "a8559c023a443a6defad135af2f319e60130e7df23af2a8353239b0862e494a8",
     "crates/nsh-core/src/core/views.rs": "c32c59533d5ee33bc16677b0459816f7670c224f3f8de3507c72029989660834",
     "crates/nsh-core/src/css.rs": "56760520c706f64505849d5a32a1eada2d9fd243a5c70e07f21bc8ed0105217f",
@@ -860,8 +860,8 @@
     "docs/dev/linux.md": "4441ec64b6edc5c03084bd203aa5114c066f9e2c0541ee320be8f17b6f82c3fe",
     "docs/dev/macos.md": "827c809b5774681c77daf05ac6603342c027dfd459e78f55558044861711dcd3",
     "docs/dev/native-pipeline.md": "07f803365af6ac90d5247c70d2e85ce9e03393f0e9e122c46690f85e381a0c55",
-    "docs/dev/performance.md": "55a4d5a9af1098aa3d7f1ee9fbb71d188576542e539b989aacdcaffc28d140bf",
-    "docs/dev/pitfalls.md": "366400d2c07ab095536caa2907e0e5e451dcc68c2a08ccb88264cbc2fe23e24d",
+    "docs/dev/performance.md": "4f23f433adab44865db61546c7b6e4515ea0a292ec3f625fe86881edf5e6997b",
+    "docs/dev/pitfalls.md": "80fc820be5136534546eee9790dbc3b824cd1053fe45432f0187f4d25641bdb3",
     "docs/dev/reactive-components.md": "cd447fe8cfbe9026d7cadd5fa42d9c387e4c1b1b7e1c5adddd55c3f1beb94a4d",
     "docs/dev/rust-classes.md": "1f70015213dbcf56e6d6e4641019092003c22eb57ca324d9c4a85578b4468139",
     "docs/dev/rust-modules.md": "f793bfb12272ded93e80876fd2c72ff8dc0f1bd0337977f39b750af495a83592",
@@ -1674,7 +1674,7 @@
     "website/zh-CN/modules/tailwind-reference.md": "9f366de10fe05a3fcf34f7e2ad7a6d7f8dc82379084f4958bef2c5761aff968f"
   },
   "upstream_repository": "https://github.com/longbridge/nsh",
-  "upstream_revision": "111b3a933319fadb0f1da9a59909ca526f256386",
+  "upstream_revision": "44278a653d73b7f8626e964f7895b8a4c4a964dc",
   "file_sources": {
     "AGENTS.md": {
       "repository": "https://github.com/longbridge/nsh",
@@ -1690,11 +1690,11 @@
     },
     "crates/nsh-core/src/core/layout_tree.rs": {
       "repository": "https://github.com/longbridge/nsh",
-      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+      "revision": "44278a653d73b7f8626e964f7895b8a4c4a964dc"
     },
     "crates/nsh-core/src/core/mod.rs": {
       "repository": "https://github.com/longbridge/nsh",
-      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+      "revision": "44278a653d73b7f8626e964f7895b8a4c4a964dc"
     },
     "crates/nsh-core/src/core/overlay.rs": {
       "repository": "https://github.com/longbridge/nsh",
@@ -1706,7 +1706,7 @@
     },
     "crates/nsh-core/src/core/tests.rs": {
       "repository": "https://github.com/longbridge/nsh",
-      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+      "revision": "44278a653d73b7f8626e964f7895b8a4c4a964dc"
     },
     "docs/dev/compatibility.md": {
       "repository": "https://github.com/longbridge/nsh",
@@ -1714,11 +1714,11 @@
     },
     "docs/dev/performance.md": {
       "repository": "https://github.com/longbridge/nsh",
-      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+      "revision": "44278a653d73b7f8626e964f7895b8a4c4a964dc"
     },
     "docs/dev/pitfalls.md": {
       "repository": "https://github.com/longbridge/nsh",
-      "revision": "111b3a933319fadb0f1da9a59909ca526f256386"
+      "revision": "44278a653d73b7f8626e964f7895b8a4c4a964dc"
     },
     "website/DESIGN.md": {
       "repository": "https://github.com/longbridge/nsh",
