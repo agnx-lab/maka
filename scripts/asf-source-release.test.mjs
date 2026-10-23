@@ -259,11 +259,23 @@ describe('ASF source release verification', () => {
     }
   });
 
-  test('accepts an inventoried source image', async () => {
+  test('accepts native source formats and an inventoried source image', async () => {
     const fixture = createFixtureCandidate({
       'docs/code-origin-audit.md':
         '### Source archive non-text inventory\n\n- `fixtures/*.png`: test-generated source images.\n',
       'fixtures/source.png': Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      'fixtures/prepare.Dockerfile': 'FROM scratch\n',
+      'fixtures/nsh.h': 'void nsh_init(void);\n',
+      'fixtures/View.java': 'final class View {}\n',
+      'fixtures/module.modulemap': 'module NativeShellC { header "nsh.h" export * }\n',
+      'fixtures/nsh.rb': 'class Nsh < Formula\nend\n',
+      'fixtures/shader.wgsl': '@compute @workgroup_size(1) fn main() {}\n',
+      'fixtures/Cargo.toml.orig': '[package]\nname = "source"\nversion = "0.1.0"\n',
+      'fixtures/CNAME': 'nsh.dev\n',
+      'fixtures/LICENSE-APACHE': 'Apache License, Version 2.0\n',
+      'fixtures/LICENSE-MIT': 'Permission is hereby granted, free of charge.\n',
+      'fixtures/default-env': '# Presentation metadata\nLANG\n',
+      'fixtures/layerfs': '#!/bin/sh\nexec python3 layerfs.py\n',
     });
     try {
       await assert.doesNotReject(() => verifySourceCandidate({ archivePath: fixture.archivePath }));
