@@ -137,7 +137,8 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         support::wait_draft(&client, &fixture.session, "Original draft stays with its owner").await;
         drop(view);
         bindings.close().await.unwrap();
-        let (mut view, bindings) = fixture.view(fixture.client().await, Some(fixture.session.clone()));
+        let client = fixture.client().await;
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
         wait_editable_composer(&mut view).await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Original draft stays with its owner"));
         support::click_button(&mut view, "Sandbox and approvals").await;
