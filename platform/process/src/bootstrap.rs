@@ -29,7 +29,7 @@ pub use elevation::{
 };
 mod backend;
 pub(crate) mod mxc;
-pub use mxc::{HELPER as MXC_HELPER, serve as serve_mxc};
+pub use mxc::{HELPER as MXC_HELPER, Lease as MxcLease, serve as serve_mxc};
 mod logon;
 pub(crate) mod protocol;
 mod runner;

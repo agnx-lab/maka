@@ -51,19 +51,40 @@ pub enum Removal {
 
 impl Target {
     pub fn capture(path: &Path) -> io::Result<(Self, File)> {
-        Self::capture_shared(path, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        Self::capture_shared(
+            path,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
+        )
     }
 
     /// Pin a protection boundary against rename/deletion until native execution
     /// settles. Independent executions may retain their own read-shared pins.
     pub fn pin(path: &Path) -> io::Result<(Self, File)> {
-        Self::capture_shared(path, FILE_SHARE_READ | FILE_SHARE_WRITE)
+        Self::capture_shared(
+            path,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
+        )
     }
 
-    fn capture_shared(path: &Path, share: FILE_SHARE_MODE) -> io::Result<(Self, File)> {
+    /// Pin a native filesystem boundary without acquiring ACL mutation rights.
+    pub fn pin_read(path: &Path) -> io::Result<(Self, File)> {
+        Self::capture_shared(
+            path,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            READ_CONTROL | FILE_READ_ATTRIBUTES,
+        )
+    }
+
+    fn capture_shared(
+        path: &Path,
+        share: FILE_SHARE_MODE,
+        access: FILE_ACCESS_RIGHTS,
+    ) -> io::Result<(Self, File)> {
         crate::path::validate(path).map_err(io::Error::other)?;
         let file = OpenOptions::new()
-            .access_mode(READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES)
+            .access_mode(access)
             .share_mode(share)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)?;
@@ -95,7 +116,13 @@ impl Target {
         };
         // A file-ID query alone does not prove that this filesystem supports
         // reopening it. Establish that while the original object is still live.
-        if target.reopen()?.is_none() {
+        if target
+            .reopen_shared(
+                access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            )?
+            .is_none()
+        {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "filesystem cannot recover this object's persistent identity",

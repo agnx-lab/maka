@@ -48,6 +48,7 @@ pub enum Launch {
         proxy_address: Option<std::net::SocketAddr>,
     },
     Mxc {
+        lease: super::MxcLease,
         executable: PathBuf,
         filesystem: Policy,
         network: Network,
@@ -66,11 +67,13 @@ impl Launch {
     pub(crate) async fn abort(self) -> io::Result<()> {
         match self {
             Self::Account { mut runner, .. } => runner.finish().await,
-            Self::Mxc { proxy, .. } => {
+            Self::Mxc {
+                mut lease, proxy, ..
+            } => {
                 if let Some(mut proxy) = proxy.and_then(std::sync::Arc::into_inner) {
                     proxy.close().await?;
                 }
-                Ok(())
+                lease.finish().await
             }
         }
     }
@@ -87,12 +90,13 @@ impl Launch {
                 ..
             } => runner.pipes(endpoint, command, capabilities).await,
             Self::Mxc {
+                lease,
                 executable,
                 filesystem,
                 network,
                 proxy,
                 ..
-            } => super::mxc::pipes(executable, filesystem, network, proxy, command).await,
+            } => super::mxc::pipes(executable, filesystem, network, proxy, lease, command).await,
         }
     }
 
@@ -109,12 +113,16 @@ impl Launch {
                 ..
             } => runner.terminal(endpoint, command, capabilities, size).await,
             Self::Mxc {
+                lease,
                 executable,
                 filesystem,
                 network,
                 proxy,
                 ..
-            } => super::mxc::terminal(executable, filesystem, network, proxy, command, size).await,
+            } => {
+                super::mxc::terminal(executable, filesystem, network, proxy, lease, command, size)
+                    .await
+            }
         }
     }
 }

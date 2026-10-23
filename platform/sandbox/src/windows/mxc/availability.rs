@@ -35,22 +35,17 @@ pub fn is_available() -> bool {
     static USABLE: OnceLock<bool> = OnceLock::new();
     *USABLE.get_or_init(|| {
         let policy = ContainerPolicy::default();
-        let specification = ProcessSecurityEnvironmentT {
-            version: SchemaVersionT { major: 1, minor: 0 },
-            disallow_win32k_system_calls: policy.ui.disable,
-            ui_restrictions: u64::from(to_job_object_uilimit_mask(&resolve_ui_restrictions(
-                &policy.ui,
-                &policy.base_process_ui,
-            ))),
-            network_policy: Some(Box::new(NetworkPolicyT {
-                egress: Some(Box::new(EndpointPolicyT {
-                    default_action: FilterAction::deny,
-                    ..Default::default()
-                })),
-                ..Default::default()
-            })),
-            ..Default::default()
-        };
+        let mut egress = EndpointPolicyT::default();
+        egress.default_action = FilterAction::deny;
+        let mut network = NetworkPolicyT::default();
+        network.egress = Some(Box::new(egress));
+        let mut specification = ProcessSecurityEnvironmentT::default();
+        specification.version = SchemaVersionT { major: 1, minor: 0 };
+        specification.disallow_win32k_system_calls = policy.ui.disable;
+        specification.ui_restrictions = u64::from(to_job_object_uilimit_mask(
+            &resolve_ui_restrictions(&policy.ui, &policy.base_process_ui),
+        ));
+        specification.network_policy = Some(Box::new(network));
         let mut builder = FlatBufferBuilder::new();
         let specification = specification.pack(&mut builder);
         finish_process_security_environment_buffer(&mut builder, specification);

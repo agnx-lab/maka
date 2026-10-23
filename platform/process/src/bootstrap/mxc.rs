@@ -20,6 +20,9 @@
 //! The helper owns MXC's SDK process until the execution owner settles its tree.
 //! It inherits the Host-created stdio or ConPTY; user requests cross only the
 //! authenticated local channel, never helper argv or process-global state.
+mod lease;
+pub use lease::Lease;
+
 use super::{
     Channel, Endpoint, channel,
     protocol::{Control, Controlled, Plan, Started},
@@ -73,6 +76,7 @@ struct Resources {
     job: Job,
     channel: Channel,
     proxy: Option<Arc<maka_network::proxy::Proxy>>,
+    lease: Lease,
     terminated: Arc<AtomicBool>,
 }
 impl Owner {
@@ -122,12 +126,16 @@ impl Resources {
         // Even a lost control channel must confirm tree exit before releasing
         // the execution's proxy. Never report successful cleanup after an error.
         self.job.terminate(130)?;
+        // Job accounting reaching zero is not a signalled process-object fence.
+        // Retain and observe the exact helper even after a broken control reply.
+        wait_process(&self.helper).await?;
         while !self.job.is_empty()? {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         if let Some(mut proxy) = self.proxy.take().and_then(Arc::into_inner) {
             proxy.close().await?;
         }
+        self.lease.finish().await?;
         if self.terminated.load(Ordering::Acquire) {
             Ok(())
         } else {
@@ -140,67 +148,32 @@ pub(crate) async fn pipes(
     executable: PathBuf,
     filesystem: Policy,
     network: Network,
-    proxy: Option<Arc<maka_network::proxy::Proxy>>,
+    mut proxy: Option<Arc<maka_network::proxy::Proxy>>,
+    lease: Lease,
     plan: crate::command::Prepared,
 ) -> io::Result<pipe::Spawned> {
     let _directory = plan.directory();
     let cancellation = plan.startup_cancellation();
-    let endpoint = Endpoint::current_user()?;
-    let helper = helper(executable, endpoint.id()).await?;
-    let (stdin, input_peer) = crate::windows::pipe::input().await?;
-    let (stdout, output_peer) = crate::windows::pipe::output().await?;
-    let (stderr, error_peer) = crate::windows::pipe::output().await?;
-    let job = Job::new()?;
-    let (helper_process, _) = crate::windows::spawn::launch(
-        &helper,
-        &job,
-        [&input_peer, &output_peer, &error_peer],
-        crate::windows::spawn::Console::None,
-    )?;
-    let (process, pid, owner) = admit(
-        endpoint,
-        helper_process,
-        &job,
-        proxy,
-        Start {
-            plan: plan.runner_plan(),
-            filesystem,
-            network,
-        },
-        &cancellation,
-    )
-    .await?;
-    Ok(pipe::Spawned {
-        child: pipe::Child::from_mxc(process, pid, job, owner),
-        stdin,
-        stdout,
-        stderr,
-    })
-}
-
-pub(crate) async fn terminal(
-    executable: PathBuf,
-    filesystem: Policy,
-    network: Network,
-    proxy: Option<Arc<maka_network::proxy::Proxy>>,
-    plan: crate::command::Prepared,
-    size: TerminalSize,
-) -> io::Result<(pty::PtyChild, pty::PtyIo)> {
-    let _directory = plan.directory();
-    let cancellation = plan.startup_cancellation();
-    let endpoint = Endpoint::current_user()?;
-    let helper = helper(executable, endpoint.id()).await?;
-    let (output, output_peer) = crate::windows::pipe::pty_output().await?;
-    let (input, input_peer) = crate::windows::pipe::pty_input().await?;
-    let job = Job::new()?;
-    let console = pty::windows::console::Console::new(size, &input_peer, &output_peer)?;
-    let launch = async {
-        let (helper_process, _) = pty::windows::spawn::launch(&helper, &console, &job)?;
-        admit(
+    let mut lease = Some(lease);
+    let result = async {
+        let endpoint = Endpoint::current_user()?;
+        let helper = helper(executable, endpoint.id()).await?;
+        let (stdin, input_peer) = crate::windows::pipe::input().await?;
+        let (stdout, output_peer) = crate::windows::pipe::output().await?;
+        let (stderr, error_peer) = crate::windows::pipe::output().await?;
+        let job = lease.as_ref().expect("preparation owns lease").job()?;
+        let (helper_process, _) = crate::windows::spawn::launch(
+            &helper,
+            &job,
+            [&input_peer, &output_peer, &error_peer],
+            crate::windows::spawn::Console::None,
+        )?;
+        let (process, pid, owner) = admit(
             endpoint,
             helper_process,
             &job,
-            proxy,
+            proxy.take(),
+            lease.take().expect("admission takes lease"),
             Start {
                 plan: plan.runner_plan(),
                 filesystem,
@@ -208,21 +181,85 @@ pub(crate) async fn terminal(
             },
             &cancellation,
         )
-        .await
+        .await?;
+        Ok(pipe::Spawned {
+            child: pipe::Child::from_mxc(process, pid, job, owner),
+            stdin,
+            stdout,
+            stderr,
+        })
     }
     .await;
-    match launch {
-        Ok((process, pid, owner)) => Ok(pty::windows::from_mxc(
-            process, pid, job, input, output, console, owner,
-        )),
-        Err(error) => {
-            let _ = output.disconnect();
-            tokio::task::spawn_blocking(move || drop(console))
-                .await
-                .map_err(io::Error::other)?;
-            Err(error)
+    if let Some(mut lease) = lease {
+        close_proxy(proxy).await.map_err(cleanup_error)?;
+        lease.finish().await.map_err(cleanup_error)?;
+    }
+    result
+}
+
+pub(crate) async fn terminal(
+    executable: PathBuf,
+    filesystem: Policy,
+    network: Network,
+    mut proxy: Option<Arc<maka_network::proxy::Proxy>>,
+    lease: Lease,
+    plan: crate::command::Prepared,
+    size: TerminalSize,
+) -> io::Result<(pty::PtyChild, pty::PtyIo)> {
+    let _directory = plan.directory();
+    let cancellation = plan.startup_cancellation();
+    let mut lease = Some(lease);
+    let result = async {
+        let endpoint = Endpoint::current_user()?;
+        let helper = helper(executable, endpoint.id()).await?;
+        let (output, output_peer) = crate::windows::pipe::pty_output().await?;
+        let (input, input_peer) = crate::windows::pipe::pty_input().await?;
+        let job = lease.as_ref().expect("preparation owns lease").job()?;
+        let console = pty::windows::console::Console::new(size, &input_peer, &output_peer)?;
+        let launch = async {
+            let (helper_process, _) = pty::windows::spawn::launch(&helper, &console, &job)?;
+            admit(
+                endpoint,
+                helper_process,
+                &job,
+                proxy.take(),
+                lease.take().expect("admission takes lease"),
+                Start {
+                    plan: plan.runner_plan(),
+                    filesystem,
+                    network,
+                },
+                &cancellation,
+            )
+            .await
+        }
+        .await;
+        match launch {
+            Ok((process, pid, owner)) => Ok(pty::windows::from_mxc(
+                process, pid, job, input, output, console, owner,
+            )),
+            Err(error) => {
+                let _ = output.disconnect();
+                tokio::task::spawn_blocking(move || drop(console))
+                    .await
+                    .map_err(io::Error::other)?;
+                Err(error)
+            }
         }
     }
+    .await;
+    if let Some(mut lease) = lease {
+        close_proxy(proxy).await.map_err(cleanup_error)?;
+        lease.finish().await.map_err(cleanup_error)?;
+    }
+    result
+}
+
+async fn close_proxy(proxy: Option<Arc<maka_network::proxy::Proxy>>) -> io::Result<()> {
+    if let Some(mut proxy) = proxy.and_then(Arc::into_inner) {
+        proxy.close().await?;
+    }
+    Ok(())
 }
 
 async fn helper(executable: PathBuf, endpoint: uuid::Uuid) -> io::Result<crate::command::Prepared> {
@@ -247,6 +284,7 @@ async fn admit(
     helper: OwnedHandle,
     job: &Job,
     proxy: Option<Arc<maka_network::proxy::Proxy>>,
+    mut lease: Lease,
     request: Start,
     cancellation: &tokio_util::sync::CancellationToken,
 ) -> io::Result<(OwnedHandle, u32, Owner)> {
@@ -291,6 +329,7 @@ async fn admit(
                     job: execution_job,
                     channel,
                     proxy,
+                    lease,
                     terminated: terminated.clone(),
                 }),
                 terminated,
@@ -300,12 +339,14 @@ async fn admit(
         Err(error) => {
             let cleanup = async {
                 job.terminate(130)?;
+                // Termination is asynchronous; ActiveProcesses == 0 alone must
+                // not publish admission cancellation while this helper is alive.
+                wait_process(&helper).await?;
                 while !job.is_empty()? {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
-                if let Some(mut proxy) = proxy.take().and_then(Arc::into_inner) {
-                    proxy.close().await?;
-                }
+                close_proxy(proxy.take()).await?;
+                lease.finish().await?;
                 Ok::<_, io::Error>(())
             }
             .await;

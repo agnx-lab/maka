@@ -88,9 +88,9 @@ fn filesystem_policy(
         }
     }
     for rule in &filesystem.rules {
-        if rule.scope == Scope::Exact {
+        if rule.scope == Scope::Exact || rule.access != Access::Deny {
             match fs::metadata(&rule.path) {
-                Ok(metadata) if metadata.is_dir() => {
+                Ok(metadata) if rule.scope == Scope::Exact && metadata.is_dir() => {
                     return Err(Error::Unsupported(
                         "native MXC cannot express an exact directory permission".into(),
                     ));
@@ -101,9 +101,9 @@ fn filesystem_policy(
                             "MXC policy contains a dangling filesystem link".into(),
                         ));
                     }
-                    if rule.access == Access::Write {
+                    if rule.access != Access::Deny {
                         return Err(Error::Unsupported(
-                            "native MXC cannot grant an exact missing file path".into(),
+                            "native MXC ignores missing filesystem grants; prepare existing boundaries before launch".into(),
                         ));
                     }
                 }

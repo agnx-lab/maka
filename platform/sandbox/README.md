@@ -25,13 +25,17 @@ Prepares authorized commands for operating-system isolation. The Host decides pe
 
 macOS uses Seatbelt; Linux uses bubblewrap and network namespaces. Linux requires bubblewrap 0.11 or newer at `/usr/bin/bwrap`. Unsupported policies fail before execution.
 
-Windows prefers [Microsoft MXC](https://github.com/microsoft/mxc), using a native process security environment for each command tree. Maka probes actual creation and startup support, then checks the filesystem policy's requirements. Supported commands need no UAC prompt, dedicated account, host ACL mutation or `sandbox setup`. The execution owner retains isolation after the root process exits, until its background processes are settled. Read-only, workspace-write and disabled sandbox choices retain their existing meaning.
+Windows prefers [Microsoft MXC](https://github.com/microsoft/mxc), using a native process security environment for each command tree. Maka probes actual creation and startup support, then checks the filesystem policy's requirements. Supported commands need no UAC prompt, dedicated account, changes to existing objects' ACLs or `sandbox setup`. The execution owner retains isolation after the root process exits, until its background processes are settled. Read-only, workspace-write and disabled sandbox choices retain their existing meaning.
+
+For read-only exceptions inside writable trees, the Host reuses recoverable filesystem guards: it creates temporary placeholders for missing paths and pins boundaries and ancestors against renaming. One protected registry per Windows account owns their staging and recovery records. Publishing a placeholder requires a same-volume atomic move that cannot replace an existing object; an unavailable capability is rejected before execution. After the command tree settles, cleanup removes only empty objects created by those guards.
 
 Only unsupported capabilities or policies select the existing low-privilege-account backend, which requires explicit `maka sandbox setup --root PATH` and uses WFP rules and Jobs. A failed MXC launch or cleanup is reported; it never retries the command with another backend or without isolation. The Host remains unelevated.
 
 Destination-restricted traffic passes through an execution-owned gateway. Routing and credentials stay with the Host, and redirects need their own destination permission. Linux and Windows expand deny globs before launch; future matching paths are covered on a subsequent launch, not by that existing snapshot.
 
-MXC networking follows Codex: `denied` blocks network access including IPv4/IPv6 loopback. `restricted` allows local clients and servers on `127.0.0.0/8` and `::1`; remote destinations must pass through the execution-owned proxy, which enforces the granted destination host and port. Thus the restricted policy permits access to local services beyond the proxy itself. `allowed` permits normal networking.
+Filesystem permissions apply to paths. MXC tightens conflicting object aliases listed in the policy; it does not scan writable trees for pre-existing, unlisted hard links.
+
+MXC networking follows Codex: `denied` blocks network access including IPv4/IPv6 loopback. `restricted` permits Windows host-loopback access, including `127.0.0.0/8`, `::1` and the host's other local interface addresses. Remote destinations must pass through the execution-owned proxy, which enforces the granted destination host and port. Thus the restricted policy permits access to local services beyond the proxy itself. `allowed` permits normal networking.
 
 To exercise a policy with the production backend:
 
@@ -53,7 +57,7 @@ The native Windows acceptance fixture builds the real Host backend and process t
 cargo build -p maka-host-runtime --example windows_mxc --target x86_64-pc-windows-msvc
 ```
 
-Run the resulting `windows_mxc.exe` from a Windows local path as a normal user. It creates and removes its own `LOCALAPPDATA` temporary directory and verifies filesystem restrictions, arguments and environment, pipe and ConPTY I/O, descendant lifetime, cancellation, and networking. Unavailable MXC support is a failure, not a skipped check.
+Run the resulting `windows_mxc.exe` from a Windows local path as a normal user. It creates and removes its own `LOCALAPPDATA` temporary directory and verifies filesystem restrictions, arguments and environment, pipe and ConPTY I/O, descendant lifetime, cancellation, and networking. Its network checks require the unsandboxed host to reach `example.com:443` over TCP as a positive control; no HTTP request is sent. Unavailable MXC support is a failure, not a skipped check.
 
 ## Source provenance
 `src/seatbelt/{base,network}.sbpl` are copied unchanged from Codex's

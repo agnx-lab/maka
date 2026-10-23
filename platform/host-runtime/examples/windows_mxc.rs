@@ -33,6 +33,7 @@ fn main() -> native::Result<()> {
 
 #[cfg(windows)]
 mod native {
+    use futures_util::FutureExt;
     use maka_agent_facts::terminal::TerminalSize;
     use maka_host_runtime::sandbox::windows::{self, Backend, Installation, Status};
     use maka_process::{
@@ -45,7 +46,7 @@ mod native {
     use serde_json::json;
     use std::{
         io::{self, BufRead, Read, Write},
-        net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+        net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs, UdpSocket},
         os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
         path::{Path, PathBuf},
         process::Stdio,
@@ -105,6 +106,70 @@ mod native {
         work: PathBuf,
         executable: PathBuf,
         backend: Arc<Backend>,
+    }
+
+    #[derive(Debug)]
+    struct MetadataProbe {
+        directory: bool,
+        metadata: io::Result<std::fs::Metadata>,
+        create: io::Result<()>,
+        write: io::Result<()>,
+        delete: io::Result<()>,
+        rename: io::Result<()>,
+    }
+
+    impl MetadataProbe {
+        fn capture(path: &Path, directory: bool) -> Self {
+            let metadata = std::fs::metadata(path);
+            let create = if directory {
+                std::fs::create_dir(path)
+            } else {
+                std::fs::OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(path)
+                    .map(drop)
+            };
+            let write = std::fs::write(
+                if directory {
+                    path.join("probe")
+                } else {
+                    path.to_owned()
+                },
+                "metadata-escaped",
+            );
+            let delete = if directory {
+                std::fs::remove_dir(path)
+            } else {
+                std::fs::remove_file(path)
+            };
+            let moved = path.with_file_name(format!(
+                "{}-moved",
+                path.file_name().unwrap().to_string_lossy()
+            ));
+            let rename = std::fs::rename(path, moved);
+            Self {
+                directory,
+                metadata,
+                create,
+                write,
+                delete,
+                rename,
+            }
+        }
+
+        fn protected(&self) -> bool {
+            self.metadata.as_ref().is_ok_and(|metadata| {
+                if self.directory {
+                    metadata.is_dir()
+                } else {
+                    metadata.is_file()
+                }
+            }) && self.create.is_err()
+                && self.write.as_ref().err().and_then(io::Error::raw_os_error) == Some(5)
+                && self.delete.is_err()
+                && self.rename.is_err()
+        }
     }
 
     // Observe the real prepared proxy without retaining its owner or replacing
@@ -208,22 +273,45 @@ mod native {
         async fn capture(&self, command: Command) -> Result<String> {
             let mut spawned = pipe::spawn(command).await?;
             drop(spawned.stdin);
-            let mut output = String::new();
-            let mut errors = String::new();
+            let mut output = Vec::new();
+            let mut errors = Vec::new();
             let (status, out, err) = tokio::join!(
                 spawned.child.wait(),
-                spawned.stdout.read_to_string(&mut output),
-                spawned.stderr.read_to_string(&mut errors),
+                spawned.stdout.read_to_end(&mut output),
+                spawned.stderr.read_to_end(&mut errors),
             );
             out?;
             err?;
+            if let Err(error) = &status {
+                eprintln!(
+                    "process wait failed: {error}; stdout bytes {output:?}: {}; stderr bytes {errors:?}: {}",
+                    String::from_utf8_lossy(&output),
+                    String::from_utf8_lossy(&errors)
+                );
+            }
             assert_eq!(
                 status?.code(),
                 Some(0),
-                "stdout: {output}\nstderr: {errors}"
+                "stdout bytes: {output:?}\nstdout: {}\nstderr bytes: {errors:?}\nstderr: {}",
+                String::from_utf8_lossy(&output),
+                String::from_utf8_lossy(&errors)
             );
-            assert_eq!(errors, "");
-            Ok(output)
+            assert!(
+                errors.is_empty(),
+                "stderr bytes: {errors:?}\nstderr: {}",
+                String::from_utf8_lossy(&errors)
+            );
+            String::from_utf8(output).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "stdout is not UTF-8: bytes {:?}; lossy {}",
+                        error.as_bytes(),
+                        String::from_utf8_lossy(error.as_bytes())
+                    ),
+                )
+                .into()
+            })
         }
     }
 
@@ -239,28 +327,65 @@ mod native {
         );
         assert_eq!(windows::status(&fixture.state)?, Status::NotRequired);
 
-        filesystem(&fixture).await?;
-        nested_filesystem(&fixture).await?;
-        missing_metadata(&fixture).await?;
-        filesystem_aliases(&fixture).await?;
-        protected_ancestor(&fixture).await?;
-        unsupported_reopening(&fixture).await?;
-        arguments_and_environment(&fixture).await?;
-        pipe_input(&fixture).await?;
-        cancel_hung_admission(&fixture).await?;
-        cancel_tree(&fixture).await?;
-        terminal(&fixture).await?;
-        background(&fixture).await?;
-        network(&fixture).await?;
-
-        assert_eq!(
-            Installation::new(&fixture.state).status()?,
-            Status::NotConfigured
-        );
-        assert!(
-            !fixture.state.exists(),
-            "MXC must not provision an account installation"
-        );
+        let mut failures = Vec::new();
+        macro_rules! run_case {
+            ($case:ident) => {
+                run_case!($case, $case(&fixture))
+            };
+            ($case:ident, $future:expr) => {
+                match std::panic::AssertUnwindSafe($future).catch_unwind().await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        eprintln!("FAIL {}: {error}", stringify!($case));
+                        failures.push(stringify!($case));
+                    }
+                    Err(payload) => {
+                        let message = payload
+                            .downcast_ref::<String>()
+                            .map(String::as_str)
+                            .or_else(|| payload.downcast_ref::<&str>().copied())
+                            .unwrap_or("non-string panic");
+                        eprintln!("FAIL {}: {message}", stringify!($case));
+                        failures.push(stringify!($case));
+                    }
+                }
+            };
+        }
+        run_case!(filesystem);
+        run_case!(default_deny);
+        run_case!(nested_filesystem);
+        run_case!(missing_metadata);
+        run_case!(filesystem_aliases);
+        run_case!(hardlink_conflict);
+        run_case!(protected_ancestor);
+        run_case!(guard_registry);
+        run_case!(unsupported_reopening);
+        run_case!(arguments_and_environment);
+        run_case!(pipe_input);
+        run_case!(cancel_hung_admission);
+        run_case!(cancel_tree);
+        run_case!(terminal);
+        run_case!(background);
+        run_case!(network);
+        run_case!(installation_unchanged, async {
+            assert_eq!(
+                Installation::new(&fixture.state).status()?,
+                Status::NotConfigured
+            );
+            assert!(
+                !fixture.state.exists(),
+                "MXC must not provision an account installation"
+            );
+            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+        });
+        if !failures.is_empty() {
+            return Err(format!(
+                "native Windows MXC failed {} cases: {}",
+                failures.len(),
+                failures.join(", ")
+            )
+            .into());
+        }
         println!(
             "PASS native Windows MXC: Host selection, filesystem, argv/environment, pipes, cancellation, ConPTY, background lifetime, network"
         );
@@ -274,6 +399,12 @@ mod native {
         std::fs::write(fixture.work.join("private/secret"), "private-original")?;
         let outside = fixture.directory.path().join("outside");
         std::fs::write(&outside, "outside-original")?;
+        for name in [".agents", ".maka", ".maka-workspace.json"] {
+            assert!(
+                !fixture.work.join(name).exists(),
+                "metadata must be missing before admission: {name}"
+            );
+        }
         let mut command = fixture.command("filesystem", Network::Denied)?;
         command.arg(&outside);
         assert_eq!(fixture.capture(command).await?, "filesystem-ok\n");
@@ -291,6 +422,7 @@ mod native {
             "private-original"
         );
         assert!(!fixture.work.join(".maka").exists());
+        assert!(!fixture.work.join(".maka-moved").exists());
 
         let readonly =
             fixture
@@ -308,6 +440,36 @@ mod native {
         assert_eq!(std::fs::read_to_string(&outside)?, "unrestricted-write");
         println!(
             "PASS filesystem: read-only/workspace-write/disabled, outside and private denial, missing metadata protection"
+        );
+        Ok(())
+    }
+
+    async fn default_deny(fixture: &Fixture) -> Result<()> {
+        let system_root =
+            PathBuf::from(std::env::var_os("SystemRoot").ok_or("missing SystemRoot")?);
+        let filesystem = Policy {
+            default: Access::Deny,
+            rules: vec![
+                Rule::subtree(&system_root, Access::Read),
+                Rule::subtree(&fixture.work, Access::Write),
+            ],
+            deny_globs: vec![],
+        };
+        assert_eq!(
+            filesystem.compile()?.access(&fixture.executable),
+            Access::Deny,
+            "the trusted fixture helper must be outside command grants"
+        );
+        let mut command = Command::new(system_root.join("System32/cmd.exe"), &fixture.work)
+            .with_backend(fixture.backend.clone())
+            .sandbox(&Sandbox::Managed {
+                filesystem,
+                network: Network::Denied,
+            })?;
+        command.raw_arg("/d /c echo DENY_DEFAULT_OK");
+        assert_eq!(fixture.capture(command).await?, "DENY_DEFAULT_OK\r\n");
+        println!(
+            "PASS default-deny executes an authorized command without granting its trusted helper"
         );
         Ok(())
     }
@@ -369,6 +531,12 @@ mod native {
         std::fs::write(&marker, "host-positive-control")?;
         std::fs::remove_file(&marker)?;
         filesystem.rules.push(Rule::exact(&marker, Access::Read));
+        for name in [".git", ".agents", ".maka", ".maka-workspace.json"] {
+            assert!(
+                !root.join(name).exists(),
+                "metadata must be missing before admission: {name}"
+            );
+        }
         let mut command = fixture
             .command("missing-metadata", Network::Denied)?
             .sandbox(&Sandbox::Managed {
@@ -386,20 +554,16 @@ mod native {
                 !root.join(name).exists(),
                 "created protected metadata: {name}"
             );
+            assert!(
+                !root.join(format!("{name}-moved")).exists(),
+                "renamed protected metadata: {name}"
+            );
         }
         println!("PASS missing .git/.agents/.maka and exact workspace marker cannot be created");
         Ok(())
     }
 
     async fn filesystem_aliases(fixture: &Fixture) -> Result<()> {
-        let outside = fixture.directory.path().join("hardlink-original");
-        let hardlink = fixture.work.join("hardlink-alias");
-        std::fs::write(&outside, "hardlink-original")?;
-        std::fs::hard_link(&outside, &hardlink)?;
-        std::fs::write(&hardlink, "host-hardlink-write")?;
-        assert_eq!(std::fs::read_to_string(&outside)?, "host-hardlink-write");
-        std::fs::write(&outside, "hardlink-original")?;
-
         let outside_directory = fixture.directory.path().join("junction-original");
         std::fs::create_dir(&outside_directory)?;
         std::fs::write(outside_directory.join("original"), "junction-original")?;
@@ -427,7 +591,6 @@ mod native {
                 .await?,
             "filesystem-aliases-ok\n"
         );
-        assert_eq!(std::fs::read_to_string(&outside)?, "hardlink-original");
         assert_eq!(
             std::fs::read_to_string(outside_directory.join("original"))?,
             "junction-original"
@@ -438,7 +601,54 @@ mod native {
         );
         std::fs::remove_dir(private_alias)?;
         std::fs::remove_dir(junction)?;
-        println!("PASS hardlink and junction aliases cannot reopen readonly or denied objects");
+        println!("PASS junction aliases cannot reopen readonly or denied targets");
+        Ok(())
+    }
+
+    async fn hardlink_conflict(fixture: &Fixture) -> Result<()> {
+        let outside = fixture.directory.path().join("hardlink-original");
+        let hardlink = fixture.work.join("hardlink-alias");
+        std::fs::write(&outside, "hardlink-original")?;
+        std::fs::hard_link(&outside, &hardlink)?;
+        std::fs::write(&hardlink, "host-hardlink-write")?;
+        assert_eq!(std::fs::read_to_string(&outside)?, "host-hardlink-write");
+        std::fs::write(&outside, "hardlink-original")?;
+
+        let system_root =
+            PathBuf::from(std::env::var_os("SystemRoot").ok_or("missing SystemRoot")?);
+        let readonly = Rule::exact(&outside, Access::Read);
+        let writable = Rule::exact(&hardlink, Access::Write);
+        let filesystem = Policy {
+            default: Access::Deny,
+            rules: vec![
+                Rule::subtree(system_root, Access::Read),
+                Rule::exact(&fixture.executable, Access::Read),
+                Rule::subtree(&fixture.work, Access::Read),
+                readonly.clone(),
+                writable.clone(),
+            ],
+            deny_globs: vec![],
+        };
+        let compiled = filesystem.compile()?;
+        assert!(compiled.policy().rules.contains(&readonly));
+        assert!(compiled.policy().rules.contains(&writable));
+        assert_eq!(compiled.access(&outside), Access::Read);
+        assert_eq!(compiled.access(&hardlink), Access::Write);
+
+        let mut command = Command::new(&fixture.executable, &fixture.work)
+            .with_backend(fixture.backend.clone())
+            .sandbox(&Sandbox::Managed {
+                filesystem,
+                network: Network::Denied,
+            })?;
+        command
+            .args(["__fixture", "hardlink-conflict"])
+            .arg(&outside)
+            .arg(&hardlink);
+        assert_eq!(fixture.capture(command).await?, "hardlink-conflict-ok\n");
+        assert_eq!(std::fs::read_to_string(&outside)?, "hardlink-original");
+        assert_eq!(std::fs::read_to_string(&hardlink)?, "hardlink-original");
+        println!("PASS explicitly listed hardlink aliases normalize to read-only");
         Ok(())
     }
 
@@ -470,13 +680,65 @@ mod native {
         Ok(())
     }
 
+    async fn guard_registry(fixture: &Fixture) -> Result<()> {
+        let home = maka_event_log::root::windows::account_home()?;
+        let registry = home.join(".maka-sandbox-guards");
+        maka_event_log::root::private_directory(&registry)?;
+        let id = uuid::Uuid::new_v4();
+        let canary = tempfile::Builder::new()
+            .prefix(&format!("fixture-{id}-"))
+            .tempfile_in(&registry)?
+            .into_temp_path();
+        // Close the Host file handle: denial must come from the execution policy,
+        // rather than a sharing violation on the canary.
+        std::fs::write(&canary, "host-positive-control")?;
+        assert_eq!(std::fs::read_to_string(&canary)?, "host-positive-control");
+        std::fs::write(&canary, "registry-original")?;
+        let probe = registry.join(format!("fixture-probe-{id}"));
+        let moved_canary = registry.join(format!("fixture-moved-{id}"));
+        let moved_registry = home.join(format!(".maka-sandbox-guards-fixture-{id}"));
+        let filesystem = Policy {
+            default: Access::Read,
+            rules: vec![Rule::subtree(home, Access::Write)],
+            deny_globs: vec![],
+        };
+        let mut command = fixture
+            .command("guard-registry", Network::Denied)?
+            .sandbox(&Sandbox::Managed {
+                filesystem,
+                network: Network::Denied,
+            })?;
+        command
+            .arg(&registry)
+            .arg(canary.as_os_str())
+            .arg(&probe)
+            .arg(&moved_registry)
+            .arg(&moved_canary);
+        assert_eq!(fixture.capture(command).await?, "guard-registry-ok\n");
+        assert_eq!(std::fs::read_to_string(&canary)?, "registry-original");
+        assert_eq!(
+            std::fs::read_to_string(fixture.work.join("registry-ordinary"))?,
+            "home-write-allowed"
+        );
+        assert!(!probe.exists());
+        assert!(!moved_canary.exists());
+        assert!(!moved_registry.exists());
+        println!("PASS home-wide Write cannot read, mutate or rename the guard registry");
+        Ok(())
+    }
+
     async fn unsupported_reopening(fixture: &Fixture) -> Result<()> {
         let reopened = fixture.work.join("private/reopened");
         std::fs::create_dir(&reopened)?;
-        let mut filesystem = fixture.filesystem_policy();
-        filesystem
-            .rules
-            .push(Rule::subtree(&reopened, Access::Write));
+        let filesystem = Policy {
+            default: Access::Read,
+            rules: vec![
+                Rule::subtree(&fixture.work, Access::Write),
+                Rule::subtree(fixture.work.join("private"), Access::Deny),
+                Rule::subtree(&reopened, Access::Write),
+            ],
+            deny_globs: vec![],
+        };
         assert!(matches!(
             maka_sandbox::windows::mxc::PreparedPolicy::new(&filesystem, &Network::Denied, &fixture.work),
             Err(maka_sandbox::Error::Unsupported(reason)) if reason == "native MXC cannot reopen a descendant of a denied path"
@@ -504,16 +766,25 @@ mod native {
     }
 
     fn junction_directory(link: &Path, target: &Path) -> Result<()> {
-        let cmd = PathBuf::from(std::env::var_os("SystemRoot").ok_or("missing SystemRoot")?)
-            .join("System32/cmd.exe");
-        let result = std::process::Command::new(cmd)
-            .args(["/d", "/c", "mklink", "/J"])
-            .arg(link)
-            .arg(target)
+        let powershell = PathBuf::from(std::env::var_os("SystemRoot").ok_or("missing SystemRoot")?)
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        let result = std::process::Command::new(powershell)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "New-Item -ItemType Junction -Path $env:MAKA_MXC_JUNCTION_LINK -Target $env:MAKA_MXC_JUNCTION_TARGET -ErrorAction Stop | Out-Null",
+            ])
+            .env("MAKA_MXC_JUNCTION_LINK", link)
+            .env("MAKA_MXC_JUNCTION_TARGET", target)
             .output()?;
         assert!(
             result.status.success(),
-            "junction positive control failed: {}",
+            "junction positive control failed: stdout bytes {:?}: {}; stderr bytes {:?}: {}",
+            result.stdout,
+            String::from_utf8_lossy(&result.stdout),
+            result.stderr,
             String::from_utf8_lossy(&result.stderr)
         );
         Ok(())
@@ -544,6 +815,21 @@ mod native {
             .env("localappdata", r"Q:\poison");
         let output = fixture.capture(command).await?;
         let value: serde_json::Value = serde_json::from_str(output.trim())?;
+        let local = value["LOCALAPPDATA"]
+            .as_str()
+            .ok_or("missing SDK LOCALAPPDATA")?;
+        let packages = PathBuf::from(std::env::var("LOCALAPPDATA")?).join("Packages");
+        let relative = Path::new(local).strip_prefix(&packages).map_err(|_| {
+            format!("SDK LOCALAPPDATA is outside the Host Packages directory: {local:?}")
+        })?;
+        let parts: Vec<_> = relative.iter().collect();
+        assert_eq!(parts.len(), 2, "unexpected SDK profile: {local}");
+        assert_eq!(parts[1], std::ffi::OsStr::new("AC"));
+        let profile = parts[0]
+            .to_str()
+            .and_then(|name| name.strip_prefix("sandbox."))
+            .ok_or("SDK profile is not sandbox.UUID")?;
+        uuid::Uuid::parse_str(profile)?;
         assert_eq!(
             value,
             json!({
@@ -552,7 +838,7 @@ mod native {
                 "userprofile": null,
                 "SystemRoot": std::env::var("SystemRoot")?,
                 "SystemDrive": std::env::var("SystemDrive")?,
-                "LOCALAPPDATA": std::env::var("LOCALAPPDATA")?,
+                "LOCALAPPDATA": local,
             })
         );
         println!("PASS raw/quoted arguments and env_clear with poisoned startup locations");
@@ -597,12 +883,17 @@ mod native {
             .with_backend(backend)
             .with_startup_cancellation(cancellation.clone());
         let mut startup = tokio::spawn(async move { pipe::spawn(command).await });
+        let mut settled = false;
+        // Assertion failures must also cancel and join the real admission owner
+        // before TempDir tries to remove its still-running helper executable.
+        let result = std::panic::AssertUnwindSafe(async {
         let proxy = prepared.await?;
         // The listener belongs to the real production launch, not the observer.
         drop(tokio::net::TcpStream::connect(proxy).await?);
         let pids: [u32; 2] = loop {
             tokio::select! {
                 outcome = &mut startup => {
+                    settled = true;
                     match outcome? {
                         Ok(mut spawned) => {
                             spawned.child.terminate()?;
@@ -626,7 +917,9 @@ mod native {
         assert_running(&helper_process);
         assert_running(&descendant);
         cancellation.cancel();
-        let failure = match startup.await? {
+        let outcome = (&mut startup).await;
+        settled = true;
+        let failure = match outcome? {
             Err(failure) => failure,
             Ok(mut spawned) => {
                 spawned.child.terminate()?;
@@ -638,8 +931,8 @@ mod native {
             matches!(failure, maka_agent_facts::tools::ToolError::Failed(ref message) if message == "sandbox launch cancelled"),
             "{failure}"
         );
-        assert_exited(&helper_process);
-        assert_exited(&descendant);
+        assert_exited(&helper_process, "cancelled startup helper");
+        assert_exited(&descendant, "cancelled startup descendant");
         assert!(
             tokio::net::TcpStream::connect(proxy).await.is_err(),
             "cancelled startup retained its execution proxy"
@@ -651,7 +944,25 @@ mod native {
         println!(
             "PASS startup cancellation settles a hung trusted helper, its descendants and its real execution proxy"
         );
-        Ok(())
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+        }).catch_unwind().await;
+        cancellation.cancel();
+        if !settled {
+            match startup.await? {
+                Ok(mut spawned) => {
+                    spawned.child.terminate()?;
+                    spawned.child.wait().await?;
+                }
+                Err(maka_agent_facts::tools::ToolError::CleanupUnconfirmed(message)) => {
+                    return Err(message.into());
+                }
+                Err(_) => {}
+            }
+        }
+        match result {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
     }
 
     fn hung_helper() -> Result<()> {
@@ -712,7 +1023,7 @@ mod native {
         ));
         assert_eq!(captured.stdout, line);
         assert_eq!(captured.stderr, "");
-        assert_exited(&descendant);
+        assert_exited(&descendant, "foreground cancelled descendant");
         println!("PASS foreground cancellation settles the complete descendant tree");
         Ok(())
     }
@@ -762,7 +1073,7 @@ mod native {
         let (closed, drained) = tokio::join!(child.close(), drain(&io));
         closed?;
         drained?;
-        assert_exited(&descendant);
+        assert_exited(&descendant, "settled background descendant");
         println!(
             "PASS root exit keeps background processes isolated until explicit owner settlement"
         );
@@ -776,9 +1087,41 @@ mod native {
         for address in addresses {
             tokio::net::TcpStream::connect(address).await?;
         }
+        // UDP connect selects the native route without transmitting a packet.
+        // Codex host-loopback access includes the Host's own interface IP;
+        // distinguish that local service from an actual nonlocal destination.
+        let route = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+        route.connect((Ipv4Addr::new(192, 0, 2, 1), 9))?;
+        let native_ip = route.local_addr()?.ip();
+        if native_ip.is_unspecified() || native_ip.is_loopback() {
+            return Err("native Windows routing did not select a non-loopback address".into());
+        }
+        let direct = tokio::net::TcpListener::bind((native_ip, 0)).await?;
+        let direct_address = direct.local_addr()?;
+        drop(tokio::net::TcpStream::connect(direct_address).await?);
+        let remote = ("example.com", 443)
+            .to_socket_addrs()?
+            .find(SocketAddr::is_ipv4)
+            .ok_or("example.com has no IPv4 address for the public TCP control")?;
+        assert!(
+            !remote.ip().is_loopback() && !remote.ip().is_unspecified() && remote.ip() != native_ip,
+            "public TCP control resolved to a local address: {remote}"
+        );
+        drop(
+            TcpStream::connect_timeout(&remote, Duration::from_secs(10)).map_err(|error| {
+                io::Error::other(format!(
+                    "public TCP positive control {remote} is unavailable: {error}"
+                ))
+            })?,
+        );
         let mut denied = fixture.command("network-denied", Network::Denied)?;
         denied.args(addresses.map(|address| address.to_string()));
-        assert_eq!(fixture.capture(denied).await?, "blocked-v4\nblocked-v6\n");
+        denied.arg(direct_address.to_string());
+        denied.arg(remote.to_string());
+        assert_eq!(
+            fixture.capture(denied).await?,
+            "blocked-v4\nblocked-v6\nblocked-direct\nblocked-remote\n"
+        );
 
         let allowed = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
         let destination = allowed.local_addr()?;
@@ -810,13 +1153,15 @@ mod native {
         )?;
         restricted.args(addresses.map(|address| address.to_string()));
         restricted.arg(destination.to_string());
+        restricted.arg(direct_address.to_string());
+        restricted.arg(remote.to_string());
         assert_eq!(
             fixture.capture(restricted).await?,
-            "loopback-v4\nloopback-v6\nproxy-allowed\nproxy-denied\n"
+            "loopback-v4\nloopback-v6\nlocal-interface\nblocked-remote\nproxy-allowed\nproxy-denied\n"
         );
         server.await??;
         println!(
-            "PASS denied IPv4/IPv6, Codex-compatible local loopback, destination-enforcing execution proxy"
+            "PASS local IPv4/IPv6/interface semantics, public direct egress blocked, destination-enforcing execution proxy"
         );
         Ok(())
     }
@@ -832,9 +1177,14 @@ mod native {
                     std::fs::read("private/secret").unwrap_err().raw_os_error(),
                     Some(5)
                 );
-                assert_eq!(
-                    std::fs::create_dir(".maka").unwrap_err().raw_os_error(),
-                    Some(5)
+                let guarded = MetadataProbe::capture(Path::new(".maka"), true);
+                if !guarded.protected() {
+                    println!("guarded .maka: {guarded:?}");
+                    io::stdout().flush()?;
+                }
+                assert!(
+                    guarded.protected(),
+                    "materialized .maka must reject child writes, deletion and rename"
                 );
                 println!("filesystem-ok");
             }
@@ -871,20 +1221,27 @@ mod native {
             Some("missing-metadata") => {
                 let root = Path::new(&args[1]);
                 std::fs::write(root.join("ordinary"), "ordinary-write")?;
+                let mut results = Vec::new();
                 for name in [".git", ".agents", ".maka"] {
-                    assert_eq!(
-                        std::fs::create_dir(root.join(name))
-                            .unwrap_err()
-                            .raw_os_error(),
-                        Some(5),
-                        "{name}"
-                    );
+                    results.push((name, MetadataProbe::capture(&root.join(name), true)));
                 }
-                denied_write(&root.join(".maka-workspace.json"));
+                let marker = MetadataProbe::capture(&root.join(".maka-workspace.json"), false);
+                let all_denied =
+                    results.iter().all(|(_, probe)| probe.protected()) && marker.protected();
+                if !all_denied {
+                    for (name, probe) in &results {
+                        println!("guarded {name}: {probe:?}");
+                    }
+                    println!("guarded .maka-workspace.json: {marker:?}");
+                    io::stdout().flush()?;
+                }
+                assert!(
+                    all_denied,
+                    "materialized metadata must exist, reject child writes/marker overwrite with ERROR_ACCESS_DENIED, and reject deletion/rename"
+                );
                 println!("missing-metadata-ok");
             }
             Some("filesystem-aliases") => {
-                denied_write(Path::new("hardlink-alias"));
                 denied_write(Path::new("junction-alias/original"));
                 denied_write(Path::new("private-alias/secret"));
                 assert_eq!(
@@ -895,6 +1252,14 @@ mod native {
                 );
                 println!("filesystem-aliases-ok");
             }
+            Some("hardlink-conflict") => {
+                assert_eq!(args.len(), 3, "both hardlink names must reach the worker");
+                for path in &args[1..] {
+                    assert_eq!(std::fs::read_to_string(path)?, "hardlink-original");
+                    denied_write(Path::new(path));
+                }
+                println!("hardlink-conflict-ok");
+            }
             Some("protected-ancestor") => {
                 std::fs::write("protected-ancestor/ordinary", "ordinary-write")?;
                 assert!(
@@ -903,6 +1268,52 @@ mod native {
                 );
                 denied_write(Path::new("protected-ancestor/metadata/original"));
                 println!("protected-ancestor-ok");
+            }
+            Some("guard-registry") => {
+                let registry = Path::new(&args[1]);
+                let canary = Path::new(&args[2]);
+                let probe = Path::new(&args[3]);
+                let moved_registry = Path::new(&args[4]);
+                let moved_canary = Path::new(&args[5]);
+                std::fs::write("registry-ordinary", "home-write-allowed")?;
+                let read = std::fs::read(canary).map(drop);
+                let write = std::fs::write(canary, "registry-escaped");
+                let delete = std::fs::remove_file(canary);
+                let rename = std::fs::rename(canary, moved_canary);
+                if rename.is_ok() {
+                    std::fs::rename(moved_canary, canary)?;
+                }
+                let create = std::fs::OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(probe)
+                    .map(drop);
+                if create.is_ok() {
+                    std::fs::remove_file(probe)?;
+                }
+                let rename_registry = std::fs::rename(registry, moved_registry);
+                if rename_registry.is_ok() {
+                    // Restore immediately if the protection under test failed.
+                    std::fs::rename(moved_registry, registry)?;
+                }
+                for (operation, result) in [
+                    ("read", read),
+                    ("write", write),
+                    ("delete", delete),
+                    ("rename canary", rename),
+                    ("create", create),
+                ] {
+                    assert_eq!(
+                        result.as_ref().err().and_then(io::Error::raw_os_error),
+                        Some(5),
+                        "home-wide Write bypassed registry denial: {operation}: {result:?}"
+                    );
+                }
+                assert!(
+                    rename_registry.is_err(),
+                    "home-wide Write renamed the protected registry"
+                );
+                println!("guard-registry-ok");
             }
             Some("must-not-run") => {
                 std::fs::write("unexpected-execution", "policy-was-bypassed")?;
@@ -969,7 +1380,12 @@ mod native {
                 }
             }
             Some("network-denied") => {
-                for (address, marker) in args[1..].iter().zip(["blocked-v4", "blocked-v6"]) {
+                for (address, marker) in args[1..].iter().zip([
+                    "blocked-v4",
+                    "blocked-v6",
+                    "blocked-direct",
+                    "blocked-remote",
+                ]) {
                     assert!(
                         TcpStream::connect_timeout(&address.parse()?, Duration::from_secs(10))
                             .is_err(),
@@ -983,6 +1399,14 @@ mod native {
                     TcpStream::connect_timeout(&address.parse()?, Duration::from_secs(10))?;
                     println!("{marker}");
                 }
+                TcpStream::connect_timeout(&args[4].parse()?, Duration::from_secs(10))?;
+                println!("local-interface");
+                assert!(
+                    TcpStream::connect_timeout(&args[5].parse()?, Duration::from_secs(10)).is_err(),
+                    "restricted networking bypassed its proxy to public destination: {}",
+                    args[5]
+                );
+                println!("blocked-remote");
                 let proxy = std::env::var("HTTP_PROXY")?;
                 let proxy = proxy
                     .strip_prefix("http://")
@@ -1054,11 +1478,12 @@ mod native {
         );
     }
 
-    fn assert_exited(process: &OwnedHandle) {
+    fn assert_exited(process: &OwnedHandle, label: &str) {
         // SAFETY: settlement has completed; this checks the exact retained process object.
         assert_eq!(
             unsafe { WaitForSingleObject(process.as_raw_handle(), 0) },
-            WAIT_OBJECT_0
+            WAIT_OBJECT_0,
+            "{label} must already be signalled at settlement"
         );
     }
 
