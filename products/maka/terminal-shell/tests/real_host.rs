@@ -1096,6 +1096,48 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
             assert_eq!(resized.origin.x.0, editor.origin.x.0 + f32::from(delta) * 8.0);
             assert_eq!(resized.size.width.0, editor.size.width.0 - f32::from(delta) * 8.0);
         }
+
+        // A height-only resize ends the native gesture at its applied width.
+        // The next button step must start there, not at the pre-drag preference.
+        let nodes = view.accessibility_snapshot();
+        let divider = nodes.iter().find(|node| node.label == "Resize session browser").unwrap().frame;
+        let editor = nodes.iter().find(|node| node.id == composer).unwrap().frame;
+        let selection = view.surface().input_context().unwrap().selection;
+        let viewport = view.surface().viewport();
+        let column = (divider.origin.x.0 / 8.0).round() as u16;
+        let target = column + 3;
+        let dragged_x = divider.origin.x.0 + 24.0;
+        for (kind, column) in [
+            (MouseEventKind::Down(MouseButton::Left), column),
+            (MouseEventKind::Drag(MouseButton::Left), target),
+        ] {
+            view.handle_event(Event::Mouse(MouseEvent {kind,column,row:1,modifiers:KeyModifiers::NONE}));
+        }
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.label == "Resize session browser" && node.frame.origin.x.0 == dragged_x)).await;
+        assert_eq!(view.surface().focused(), Some(composer));
+        assert_eq!(view.surface().input_context().unwrap().selection, selection);
+        view.resize((viewport.width.0 / 8.0) as u16, (viewport.height.0 / 16.0) as u16 + 1);
+        // The full-height divider proves the new native layout was applied;
+        // the empty conversation's composer is vertically centered.
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.label == "Resize session browser" && node.frame.size.height.0 == divider.size.height.0 + 16.0)).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == "Resize session browser" && node.frame.origin.x.0 == dragged_x));
+        view.handle_event(Event::Mouse(MouseEvent {kind:MouseEventKind::Up(MouseButton::Left),column:target,row:1,modifiers:KeyModifiers::NONE}));
+        assert_eq!(view.surface().focused(), Some(composer));
+        let context = view.surface().input_context().unwrap();
+        assert_eq!(context.text.as_deref(), Some("Draft A stays in its own conversation"));
+        assert_eq!(context.selection, selection);
+        let wider = support::wait_enabled_button(&mut view, "Wider session browser").await;
+        support::click_node(&mut view, wider.clone());
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.label == "Resize session browser" && node.frame.origin.x.0 != dragged_x)).await;
+        let nodes = view.accessibility_snapshot();
+        let widened = nodes.iter().find(|node| node.label == "Resize session browser").unwrap().frame;
+        assert_eq!(widened.origin.x.0, dragged_x + 16.0, "Wider must continue from the width applied before the native gesture ended");
+        let resized = nodes.iter().find(|node| node.id == composer).unwrap().frame;
+        assert_eq!(resized.origin.x.0, editor.origin.x.0 + 40.0);
+        assert_eq!(resized.size.width.0, editor.size.width.0 - 40.0);
+        assert_eq!(view.surface().focused(), Some(wider.id), "the activated Wider button must receive normal pointer focus");
+        view.resize((viewport.width.0 / 8.0) as u16, (viewport.height.0 / 16.0) as u16);
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.label == "Resize session browser" && node.frame.size.height.0 == divider.size.height.0)).await;
         support::wait_draft(&client, &fixture.session, "Draft A stays in its own conversation").await;
 
         shortcut(&mut view, 'p');
@@ -2731,8 +2773,18 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
                 && !screen.contains("| RICH_TABLE_NAME")
         }).await;
         evidence("rich-response-live-table", &rendered_table);
+        let reference = "\n\n[RICH_REFERENCE][later]";
+        request.delta(reference).await;
+        wait_view(&mut view, |screen| screen.contains("[RICH_REFERENCE][later]")).await;
+        let definition = "\n\n[later]: https://example.test/streamed-reference";
+        request.delta(definition).await;
+        wait_view_state(&mut view, |view, _| {
+            view.accessibility_snapshot().iter().any(|node| {
+                node.role == nsh_core::AccessibilityRole::Link && node.label == "RICH_REFERENCE"
+            })
+        }).await;
         let code = "\n\n```txt\nRICH_CODE_BLOCK 中文原文\n\tkeep trailing  \n\n```";
-        let suffix = format!("{table}{code}");
+        let suffix = format!("{table}{reference}{definition}{code}");
         request.delta("\n\n```txt\nRICH_CODE_BLOCK 中文原文\n").await;
         // The stream remains physically open: parsing cannot wait for final.
         // Copying the long user message can leave its reader anchored above

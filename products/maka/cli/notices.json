@@ -1122,7 +1122,7 @@
     "third-party/nsh/crates/nsh-base/src/progress.rs": "a8c02bb828f10f2d0e30056a1791fcacb0e458684d6e9dde33093fcc5e10f224",
     "third-party/nsh/crates/nsh-base/src/radio.rs": "8b12775c2ac3a93b839bc0fc7693948fd6694884658037ab6a9efc80f41a7470",
     "third-party/nsh/crates/nsh-base/src/resizable/mod.rs": "7344f45b4f047f4f63fe845a8890d422cd37a150f321caebc0afd4a40dc9d423",
-    "third-party/nsh/crates/nsh-base/src/resizable/panel.rs": "4f3aff3d27fe3ed4a72fb01cc65c36ee6142a168ddfc2c460b6f5e1c7a1c0956",
+    "third-party/nsh/crates/nsh-base/src/resizable/panel.rs": "ea4a8d7e9a2c47aa57c84ea51617c1d2060fe8eca7cf3789d423ff65fc3c2b96",
     "third-party/nsh/crates/nsh-base/src/resizable/resize_handle.rs": "88276350b420007dc52c3c4c0caafe0c7c7c089c83fc0606f0633c0ab8f15e1d",
     "third-party/nsh/crates/nsh-base/src/resizable/state.rs": "874194e34f301181eeffb2d88884fad8000878dba733255da02aee841aa50b8a",
     "third-party/nsh/crates/nsh-base/src/safe_area.rs": "08c050e264e44e7e0dbd7b007debce030e25764837f7859fcf8ec5e932d5d25c",
