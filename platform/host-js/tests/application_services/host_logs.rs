@@ -284,8 +284,29 @@ async fn failed_startup_retirement_waits_for_cleanup_without_blocking_session_ad
         let owner = Arc::new(RootOwner::create(&root, &namespaces).unwrap());
         let root_id = owner.root_id().to_owned();
         let store = Arc::new(EventLog::for_root(owner).await.unwrap());
-        let provider = native_package();
-        let consumer = consumer();
+        let mut provider = entry(
+            true,
+            Implementation::Native {
+                implementation: "native.echo".into(),
+            },
+            MethodMode::Query,
+        );
+        provider.exports.get_mut("echo").unwrap().contract.transport = Transport::Remote;
+        let provider = package("native", provider, None);
+        let mut consumer = entry(
+            false,
+            Implementation::JavaScript {
+                module: "host.mjs".into(),
+                realm: Realm::Shared,
+            },
+            MethodMode::Query,
+        );
+        consumer.imports.get_mut("echo").unwrap().contract.transport = Transport::Remote;
+        let consumer = package(
+            "consumer",
+            consumer,
+            Some("export function activate() { return {}; }".into()),
+        );
         let source = store
             .commit_application(
                 Uuid::new_v4(),
