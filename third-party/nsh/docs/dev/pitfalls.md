@@ -110,6 +110,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## iOS, UIKit and Mac Catalyst
 
+- **A standalone `UITabBar` can establish its natural height before its native component host is sized** (verified on
+  the iOS 27 simulator). Flexible-height autoresizing then adds the host's height to that initial height. In
+  `system_tab_bar.rs`, fill the immediate host's bounds exactly during layout, and report intrinsic height with
+  `sizeThatFits` at the laid-out width. `sizeToFit` changes the frame and must not run on selection updates.
+
 - **Pressed-style observers must leave ancestor clicks working**: a view with only `activeStyle` / `active:`
   has a `PressRecognizer` to report its pressed state, but yields the click to the nearest ancestor with press
   handlers. `handled_deeper` counts handlers and pressable text spans; a style-only recognizer ends as failed
@@ -446,6 +451,17 @@ Things that were found the hard way. Read the section of the area you change bef
   Safari: the wasm twice in 4 of 11 cold loads on Wi-Fi, each time the runtime asked before the preload was done;
   Chromium hands it over). The published page starts its downloads with `fetch` in a head script instead
   (`web::page`, `fetches`).
+- **A scroll view's smooth wheel and key scrolling is nsh's glide, which no browser call cancels**: `wheel` and the
+  scroll keys are prevented and `scrollSmoothly` moves the view on animation frames, so an instant `scrollTo` lasted
+  one frame and the glide's next one put its offset back (Chromium 141: a 900 px wheel notch, `scrollTo(0)` 50 ms
+  later, then 778, 848, … 900). Commands stop the glide first (`stopGlide`) and `op_sb` moves it. A `scrollTo` to
+  where the view already is, instant or smooth, sends neither `scroll` nor `scrollend` (Chromium 152): `stopGlide`
+  sends the `onScrollEnd` of the scroll it stops then. Headless Chrome (141, 155) scrolls a wheel's delta at once by
+  itself: the scroll that animates there is the glide.
+- **Fractional scroll targets can move less than half a CSS pixel**: at DPR 2, Chromium rounds a target of 40.4
+  to 40.5. A half-pixel stationary tolerance therefore ends the scroll early and duplicates `onScrollEnd`.
+  `stopGlide` compares clamped offsets exactly; a quiet-period fallback covers targets rounded back to the
+  current offset, for which the browser emits no `scrollend`.
 
 ## Testing on simulators and emulators
 

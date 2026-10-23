@@ -3738,6 +3738,13 @@ impl Mounter {
         }
     }
 
+    /// Scroll view `id` came to rest (`onScrollEnd`).
+    pub(crate) fn scroll_ended(&mut self, id: NodeId) {
+        if let Some(node) = self.slot(id).and_then(|s| s.scroll_value) {
+            self.animator.settle(node);
+        }
+    }
+
     /// Display link frame.
     pub(crate) fn tick(&mut self) {
         if self.animator.tick() {

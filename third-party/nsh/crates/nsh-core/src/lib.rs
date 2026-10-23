@@ -29,6 +29,7 @@ pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
+pub mod mobile;
 mod mount;
 pub mod navigation;
 pub mod open_url;

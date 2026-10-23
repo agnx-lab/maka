@@ -588,7 +588,13 @@ between them); the core bounds their travel by the list's end. A cell's animated
 
 A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),
 as the native backends move theirs: setting `scrollTop` would stop the browser's smooth scroll. The user's wheel,
-pointer, touch or key takes it over.
+pointer, touch or key takes it over. The glides of the wheel and the keys are nsh's (`scrollSmoothly`, on animation
+frames), and each frame writes the glide's offset: a `ScrollBy` moves the glide with the content, and `scrollTo` /
+`scrollToEnd` stop it where it is (`stopGlide`) before they scroll, as the native backends interrupt theirs. The
+scroll they stop ends with theirs (the browser's `scrollend`), or at once when they leave the view where it is.
+The stationary check uses exact clamped offsets: fractional movement can reach another physical pixel. If a
+fractional target instead rounds back to the current offset, a 200 ms quiet-period fallback ends the scroll;
+scroll events postpone it, and the browser's `scrollend` cancels it.
 
 ## Platform services
 

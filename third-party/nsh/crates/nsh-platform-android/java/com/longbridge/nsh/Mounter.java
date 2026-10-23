@@ -193,6 +193,7 @@ final class Mounter {
         this.context = host.getContext();
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
+        components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
             long handle = handle();
@@ -380,6 +381,12 @@ final class Mounter {
                 }
                 case APPEARANCE: {
                     appearance = b.getInt();
+                    for (int i = 0; i < views.size(); i++) {
+                        View v = views.valueAt(i);
+                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
+                            ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
+                        }
+                    }
                     if (barStyle == 0) {
                         SystemUi.statusBar(context, barStyle, barHidden, night());
                         for (ModalHost m : shownModals) m.statusBar(barStyle, barHidden, night());
@@ -609,7 +616,10 @@ final class Mounter {
         if (layoutAnimation != null) created.add(id);
     }
 
-    /** The components the app registered ({@link NshView#registerComponent}). */
+    /**
+     * The components the app registered ({@link NshView#registerComponent}),
+     * and NSH's own (named under {@code nsh/}), which the app cannot replace.
+     */
     final java.util.Map<String, NshComponent.Factory> components = new java.util.HashMap<>();
     private final java.util.Set<String> missingComponents = new java.util.HashSet<>();
 
@@ -2358,6 +2368,11 @@ final class Mounter {
 
     void scroll(int id, float x, float y, int applied) {
         outputs(Native.scroll(handle(), id, x, y, applied));
+    }
+
+    /** Scroll view {@code id} came to rest: snapping animated values settle. */
+    void scrollEnded(int id) {
+        outputs(Native.scrollEnded(handle(), id));
     }
 
     void pan(int id, int state, float tx, float ty, float vx, float vy) {

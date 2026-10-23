@@ -685,6 +685,11 @@ impl EventTarget {
     }
 
     fn scroll_event(&self, scroll: &UIScrollView, event: EventKind) {
+        if event == EventKind::ScrollEnd {
+            // Snapping animated values that follow it settle.
+            let id = scroll.tag() as NodeId;
+            self.with_mounter(move |m| m.scroll_ended(id));
+        }
         let offset = scroll.contentOffset();
         self.dispatch(
             scroll.tag() as NodeId,

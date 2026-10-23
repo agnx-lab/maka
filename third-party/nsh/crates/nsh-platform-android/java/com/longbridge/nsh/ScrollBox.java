@@ -501,6 +501,7 @@ final class ScrollBox extends FrameLayout implements Node {
             momentum = false;
             emit(Native.MOMENTUM_END);
         }
+        mounter.scrollEnded(id);
         float d = mounter.density;
         mounter.event(id, Native.SCROLL_END, null, 0, scroller.getScrollX() / d, scroller.getScrollY() / d);
     }

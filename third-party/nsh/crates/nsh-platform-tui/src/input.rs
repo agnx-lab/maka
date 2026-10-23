@@ -1890,6 +1890,7 @@ impl Surface {
             }
         }
         self.scroll_to(id, x, y);
+        self.scroll_settled(id);
         if let Some(node) = self.node(id) {
             let payload = EventPayload::Scroll(point(node.scroll.x, node.scroll.y));
             self.emit_if(id, EventKind::ScrollEnd, payload);

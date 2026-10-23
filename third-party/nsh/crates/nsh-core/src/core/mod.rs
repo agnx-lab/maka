@@ -3500,8 +3500,20 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Component(name) => {
+                let created = node.created;
                 if let Some(component) = node.component.as_mut() {
                     match &component.name {
+                        // Named after its native view was made (a Rust
+                        // component whose root is `native()` takes its
+                        // host's place, which is made first): the platform
+                        // is told now, and gets every prop again after it.
+                        None if created => {
+                            component.name = Some(name.clone());
+                            component.changed =
+                                component.props.iter().map(|(k, _)| k.clone()).collect();
+                            self.mount.push(MountItem::Component { id, name });
+                            flags |= dirty::COMPONENT;
+                        }
                         None => component.name = Some(name),
                         Some(old) if *old != name => log::warn!(
                             target: "js",
@@ -4217,12 +4229,13 @@ impl<M: TextEngine> Core<M> {
             },
         });
         if let Some(component) = self.nodes[key as usize].component.as_mut() {
-            match &component.name {
-                Some(name) => self.mount.push(MountItem::Component {
+            // Unnamed, it is named later in this commit (`set_prop`), or
+            // never: the flush of its props says which.
+            if let Some(name) = &component.name {
+                self.mount.push(MountItem::Component {
                     id,
                     name: name.clone(),
-                }),
-                None => log::warn!(target: "js", "a <native> element without `component`"),
+                });
             }
             // The new component gets every property.
             component.changed = component.props.iter().map(|(k, _)| k.clone()).collect();
@@ -4460,6 +4473,12 @@ impl<M: TextEngine> Core<M> {
                     id,
                     config: Box::new(config),
                 });
+            }
+            if flags & dirty::COMPONENT != 0
+                && let Some(component) = self.nodes[key as usize].component.as_ref()
+                && component.name.is_none()
+            {
+                log::warn!(target: "js", "a <native> element without `component`");
             }
             if flags & dirty::COMPONENT != 0
                 && let Some(component) = self.nodes[key as usize].component.as_mut()

@@ -284,6 +284,8 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UISceneSession",
   "UIScreen",
   "UIScrollView",
+  "UITabBar",
+  "UITabBarItem",
   "UITapGestureRecognizer",
   "UITextField",
   "UITextInput",

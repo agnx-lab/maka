@@ -1534,6 +1534,13 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     })
 }
 
+/// Scroll view `id` came to rest (`onScrollEnd`, sent or not): the snapping
+/// animated values that follow it settle.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_scroll_ended(id: u32) -> f64 {
+    send(|app| app.animation.scroll_ended(id))
+}
+
 /// The user zoomed zoomable scroll view `id` to `scale` (reported before
 /// the offset it scrolled to).
 #[unsafe(no_mangle)]
