@@ -114,10 +114,9 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
     };
   }, [browser, sessionId]);
 
-  // Mirror the strip's on-screen rect to main every animation frame while it is
-  // showable. Position shifts on window resize and sidebar drags even when the
-  // size is unchanged, which a ResizeObserver would miss; a getBoundingClientRect
-  // per frame is negligible and the IPC only fires when the rect changes.
+  // Mirror the strip's on-screen rect to main while showable. Prefer
+  // ResizeObserver + resize/scroll wakeups; only use rAF while the key is
+  // changing or a top-layer menu is occluding (menus animate without resize).
   const showView = !hidden && state.hasPage;
   useEffect(() => {
     // Capture the injected capability because this passive cleanup may run
@@ -130,11 +129,25 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
     const el = stripRef.current;
     if (!el) return;
     let raf = 0;
+    let occludeTimer = 0;
     let last = '';
     let active = true;
     let covered = false;
     let revision = 0;
+    let settling = 0;
+    const clearSchedulers = () => {
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      if (occludeTimer) {
+        window.clearTimeout(occludeTimer);
+        occludeTimer = 0;
+      }
+    };
     const tick = () => {
+      raf = 0;
+      occludeTimer = 0;
       const r = el.getBoundingClientRect();
       const rect = {
         x: Math.round(r.left),
@@ -155,21 +168,49 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
           });
           // Input must yield now, even while the optional capture is pending.
           browser.setViewport({ sessionId, rect: null });
+          console.warn(
+            `FREEZE_CHAIN|${JSON.stringify({ phase: 'G.browser.occluded', data: { sessionId } })}`,
+          );
         } else setBackdrop(undefined);
         last = '';
       }
-      if (occluded) { raf = requestAnimationFrame(tick); return; }
+      if (occluded) {
+        // 嵌入 Agnx 时若顶层菜单粘住，永续 rAF 会钉死 Guest 主线程。
+        // 遮挡态改为最多 ~4fps 轮询，菜单动画仍可跟上，但不饿死输入。
+        if (!occludeTimer) {
+          occludeTimer = window.setTimeout(() => {
+            occludeTimer = 0;
+            tick();
+          }, 250);
+        }
+        return;
+      }
       const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
       if (key !== last) {
         last = key;
+        settling = 8;
         browser.setViewport({ sessionId, rect });
       }
+      if (settling > 0) {
+        settling -= 1;
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    const wake = () => {
+      if (!active || raf || occludeTimer) return;
       raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
+    wake();
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(wake) : null;
+    resizeObserver?.observe(el);
+    window.addEventListener('resize', wake);
+    document.addEventListener('scroll', wake, true);
     return () => {
       active = false;
-      cancelAnimationFrame(raf);
+      clearSchedulers();
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', wake);
+      document.removeEventListener('scroll', wake, true);
       browser.setViewport({ sessionId, rect: null });
     };
   }, [browser, sessionId, showView]);

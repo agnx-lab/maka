@@ -30,7 +30,7 @@
     "build:smoke": "npm run build:resources && npm run build:renderer",
     "clean:main": "node ../../scripts/clean-paths.mjs dist/main tsconfig.main.tsbuildinfo",
     "build:main": "tsc -p tsconfig.main.json",
-    "build:preload": "esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --outfile=dist/preload/preload.cjs --external:electron",
+    "build:preload": "esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --outfile=dist/preload/preload.cjs --external:electron && npm run build:agnx-embed",
     "build:overlay": "node ../../scripts/build-cursor-overlay.mjs",
     "build:renderer": "vite build && node scripts/check-renderer-entry-output.mjs && node ../../scripts/check-third-party-notices.mjs",
     "build:workspace-deps": "npm --workspace @maka/core run build && npm --workspace @maka/storage run build && npm --workspace @maka/mcp run build && npm --workspace @maka/runtime run build && npm --workspace @maka/runtime-host run build && npm --workspace @maka/computer-use run build && npm --workspace @maka/ui run build",
@@ -51,7 +51,8 @@
     "launch:fixture": "npm run build:with-deps && node ../../scripts/desktop-real-window-smoke.mjs --manual",
     "smoke:browser": "npm run build:workspace-deps && npm run build:main && npm run smoke:browser:run",
     "smoke:workhub-browser:run": "electron scripts/workhub-browser-presentation-smoke.mjs",
-    "smoke:browser:run": "electron scripts/browser-observe-act-smoke.mjs"
+    "smoke:browser:run": "electron scripts/browser-observe-act-smoke.mjs",
+    "build:agnx-embed": "esbuild src/preload/agnx-embed.ts --bundle --platform=node --format=cjs --outfile=dist/preload/agnx-embed.cjs --external:electron"
   },
   "dependencies": {
     "@jackwener/opencli": "1.8.7",
