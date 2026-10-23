@@ -134,8 +134,11 @@ export class Composer {
      * A task's own pick is saved as its backend preference (selectBackend).
      */
     this.newBackend = null;
-    /** The tasks whose model or thinking level change is under way, by session id. */
-    this.changing = new Set();
+    /**
+     * sessionId -> the change of that task's model or thinking level under
+     * way, resolving with whether it was saved (pick).
+     */
+    this.changing = new Map();
     /** Whether the permission menu is open. */
     this.accessOpen = false;
     /** The permission level picked for a new task, or null for the Host's default. */
@@ -386,8 +389,19 @@ export class Composer {
     }
     // The chips wait while a change to this task is under way (locked).
     if (this.changing.has(transcript.id)) return false;
-    this.changing.add(transcript.id);
+    const change = this.selectBackend(transcript, backend, choice);
+    this.changing.set(transcript.id, change);
     this.hooks.changed();
+    try {
+      return await change;
+    } finally {
+      this.changing.delete(transcript.id);
+      this.hooks.changed();
+    }
+  }
+
+  /** Saves `backend` as the task's own; false, having said why, when it was not. */
+  async selectBackend(transcript, backend, choice) {
     try {
       // The Host commits against the session's revision itself; a read marker
       // or a run moving it meanwhile is answered with a conflict, tried once more.
@@ -401,7 +415,7 @@ export class Composer {
           transcript.backend = result.session.backend ?? backend;
           transcript.backendRevision = result.session.revision;
           log(
-            `composer: ${transcript.id} uses ${choiceLabel(choice)} at ${thinkingLevel ?? 'default'}`,
+            `composer: ${transcript.id} uses ${choiceLabel(choice)} at ${backend.thinkingLevel ?? 'default'}`,
           );
           return true;
         }
@@ -413,9 +427,6 @@ export class Composer {
     } catch (error) {
       this.hooks.report(t('modelChangeFailed', { value: error.message }));
       return false;
-    } finally {
-      this.changing.delete(transcript.id);
-      this.hooks.changed();
     }
   }
 
@@ -499,10 +510,15 @@ export class Composer {
 
   /**
    * The `model` and `thinkingLevel` to send with: the session's own backend
-   * (`agent.observe`, as agent-screen/actions.ts reads it), else the default.
-   * The backend has no connection revision, so its choice is looked up.
+   * (`agent.observe`, as agent-screen/actions.ts reads it), else the default,
+   * once a change to it under way is saved. The backend has no connection
+   * revision, so its choice is looked up.
    */
   async selection(transcript) {
+    // A model or level just picked is the one meant: its change is waited
+    // for, and nothing goes with the choice it was to replace.
+    const change = this.changing.get(transcript.id);
+    if (change !== undefined && !(await change)) throw new Error(t('modelChangeNotSaved'));
     const backend = transcript.backend;
     if (backend?.kind === 'executor') {
       throw new Error(t('executorCannotStart'));

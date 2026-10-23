@@ -65,6 +65,7 @@ const { Composer } = await import('../../products/maka/desktop-shell/app/compose
 const { Workbar } = await import('../../products/maka/desktop-shell/app/workbar.js');
 const { Transcript } = await import('../../products/maka/desktop-shell/app/transcript.js');
 const { default: MakaDesktop } = await import('../../products/maka/desktop-shell/app/main.js');
+const { t } = await import('../../products/maka/desktop-shell/app/locale.js');
 hooks.deregister();
 
 const THINKING = {
@@ -299,6 +300,55 @@ test("the chips wait for a task's own model, and a change to one task does not h
   assert.equal(await changing, true);
   assert.equal(composer.locked(other), false);
   assert.deepEqual(reports, []);
+});
+
+test('a message sent while a model or level change is saved goes with the new choice, and not at all if it fails', async () => {
+  for (const [answer, sent] of [
+    [{ kind: 'committed' }, [['send', 'plain', undefined]]],
+    [{ kind: 'rejected', reason: 'busy' }, []],
+  ]) {
+    const { composer, mutations, reports } = await setup();
+    const task = transcriptOf('task', backend('thinking', 'low'));
+    let commit;
+    globalThis[Symbol.for('composer.test.mutate')] = async (endpoint, method, input) => {
+      mutations.push([method, structuredClone(input)]);
+      if (method === 'selectBackend') {
+        return new Promise((resolve) => {
+          commit = () =>
+            resolve(
+              returned(
+                answer.kind === 'committed'
+                  ? { kind: 'committed', session: session('task', input.backend) }
+                  : answer,
+              ),
+            );
+        });
+      }
+      return returned({ kind: 'started', invocationId: 'run', messageId: 'message' });
+    };
+    const picking = composer.choose(task, PLAIN);
+    composer.draft.set_value('hello');
+    const sending = composer.send(task);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      mutations.map(([method]) => method),
+      ['selectBackend'],
+      'the send waits for the change',
+    );
+    commit();
+    await picking;
+    await sending;
+    assert.deepEqual(
+      mutations
+        .filter(([method]) => method === 'send')
+        .map(([method, input]) => [method, input.model.modelId, input.thinkingLevel]),
+      sent,
+    );
+    if (sent.length === 0) {
+      assert.equal(composer.draft.value(), 'hello', 'the draft is kept');
+      assert.equal(reports.at(-1), t('sendFailed', { value: t('modelChangeNotSaved') }));
+    }
+  }
 });
 
 /** The window's layout state, as MakaDesktop keeps it, at `width`, with a Workbar that may be open. */

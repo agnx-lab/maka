@@ -246,6 +246,11 @@ export const MESSAGES = {
     '切换模型失败：{value}',
     '切換模型失敗：{value}',
   ],
+  modelChangeNotSaved: [
+    'the model just picked wasn’t saved',
+    '刚选的模型没有保存成功',
+    '剛選的模型沒有儲存成功',
+  ],
   // The thinking levels, named as the TUI names them (locale-messages.ts).
   thinkingLevel: ['Thinking level', '思考等级', '思考等級'],
   thinkingChip: ['Thinking: {level}', '思考：{level}', '思考：{level}'],
