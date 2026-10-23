@@ -117,7 +117,11 @@ export function MarkdownImageView(props: {
   const content = () => (
     <View style={{ gap: 4, width: width() }}>
       <Each
-        of={source() && !error() && (props.width === undefined || props.width() > 0) ? [source()!] : []}
+        of={
+          source() && !error() && (props.width === undefined || props.width() > 0)
+            ? [source()!]
+            : []
+        }
         key={(image) => image.uri}
       >
         {(image) => {
