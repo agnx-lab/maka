@@ -27,7 +27,10 @@ use nsh_platform_gpui::{AppOptions, AppView};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -58,13 +61,20 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     let received = frames.clone();
     let count = Rc::new(Cell::new(0usize));
     let submitted = count.clone();
+    let owner = std::thread::current().id();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let wake = wakes.clone();
     let platform = TerminalPlatform::new(
         Box::new(gpui_wgpu::WgpuHeadlessRenderer::new().unwrap()),
         Box::new(move |frame| {
             submitted.set(submitted.get() + 1);
             received.borrow_mut().push(frame);
         }),
-        Arc::new(|| {}),
+        Arc::new(move || {
+            if std::thread::current().id() == owner {
+                wake.fetch_add(1, Ordering::SeqCst);
+            }
+        }),
     )
     .unwrap();
     let errors = Rc::new(RefCell::new(None));
@@ -226,6 +236,16 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     let end = platform.input_caret_bounds().unwrap();
     assert!(end.origin.x > start.origin.x);
     assert_eq!(end.origin.y, start.origin.y);
+    assert_eq!(count.get(), initial_count.get());
+    // Reading the live IME anchor must not keep waking the owner for a frame
+    // already pending behind deferred pixel output. Background engine work
+    // retains its independent wake and is not counted as an owner self-wake.
+    assert!(platform.has_pending());
+    let before_queries = wakes.load(Ordering::SeqCst);
+    for _ in 0..3 {
+        assert_eq!(platform.input_caret_bounds().unwrap(), end);
+    }
+    assert_eq!(wakes.load(Ordering::SeqCst), before_queries);
     assert_eq!(count.get(), initial_count.get());
 
     // The same registered handler must consult live focus: clicking another

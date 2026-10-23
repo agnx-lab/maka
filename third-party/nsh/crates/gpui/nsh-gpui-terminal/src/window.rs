@@ -159,8 +159,10 @@ impl TerminalWindow {
 }
 
 impl WindowState {
-    fn wake(&mut self) {
-        self.frame_requested = true;
+    fn wake(&mut self) -> bool {
+        // Deferred drawing keeps this demand pending. Repeated GPUI updates
+        // must not wake the owner again for the same unconsumed frame.
+        !std::mem::replace(&mut self.frame_requested, true)
     }
 
     pub(crate) fn active(&self) -> bool {
@@ -575,16 +577,20 @@ impl PlatformWindow for TerminalWindow {
         let state = Rc::downgrade(&self.0);
         Some(Rc::new(move || {
             if let Some(state) = state.upgrade() {
-                state.borrow_mut().wake();
-                let wake = state.borrow().wake.clone();
-                wake();
+                let requested = state.borrow_mut().wake();
+                if requested {
+                    let wake = state.borrow().wake.clone();
+                    wake();
+                }
             }
         }))
     }
     fn schedule_frame(&self) {
-        self.0.borrow_mut().wake();
-        let wake = self.0.borrow().wake.clone();
-        wake();
+        let requested = self.0.borrow_mut().wake();
+        if requested {
+            let wake = self.0.borrow().wake.clone();
+            wake();
+        }
     }
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.0.borrow_mut().callbacks.frame = Some(callback);
