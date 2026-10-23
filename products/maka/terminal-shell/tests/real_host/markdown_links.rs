@@ -38,7 +38,11 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
     use image::{ExtendedColorType, ImageEncoder, codecs::png};
     use nsh_platform_tui::ServiceOutput;
     use std::sync::{Arc, atomic::AtomicUsize};
-    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, task::JoinSet};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        task::JoinSet,
+    };
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;

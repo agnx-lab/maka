@@ -202,11 +202,15 @@ mod tests {
             uri,
             "https://example.test/image%20%E4%BD%A0%E5%A5%BD.png?q=%E4%B8%AD%E6%96%87#part"
         );
-        let MarkdownImageSource::Workspace { path } = markdown_image("docs/image%20你好.png").unwrap()
+        let MarkdownImageSource::Workspace { path } =
+            markdown_image("docs/image%20你好.png").unwrap()
         else {
             panic!("expected original Host workspace image selector")
         };
-        assert_eq!(STANDARD.decode(path).unwrap(), "docs/image 你好.png".as_bytes());
+        assert_eq!(
+            STANDARD.decode(path).unwrap(),
+            "docs/image 你好.png".as_bytes()
+        );
         for target in ["a.txt#L4", "a.txt?download=1#L4"] {
             let Destination::Workspace(path, _) = destination(target).unwrap() else {
                 panic!("expected file component")
@@ -231,7 +235,10 @@ mod tests {
             "https://example.test/\n",
         ] {
             assert!(destination(invalid).is_err(), "accepted {invalid:?}");
-            assert!(markdown_image(invalid).is_err(), "accepted image {invalid:?}");
+            assert!(
+                markdown_image(invalid).is_err(),
+                "accepted image {invalid:?}"
+            );
         }
     }
 }
