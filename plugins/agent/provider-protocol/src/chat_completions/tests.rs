@@ -201,7 +201,13 @@ fn image_detail_survives_wire_encoding_without_affecting_video() {
         metadata_namespace: "vendor".into(),
         multipart_tool_content: false,
     };
-    for detail in [None, Some("auto"), Some("low"), Some("high")] {
+    for detail in [
+        None,
+        Some("auto"),
+        Some("low"),
+        Some("high"),
+        Some("original"),
+    ] {
         let image = File {
             media_type: "image/png".into(),
             filename: None,

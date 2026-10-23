@@ -59,6 +59,7 @@ enum ImageDetail {
     Auto,
     Low,
     High,
+    Original,
 }
 #[derive(Serialize)]
 struct Url {
