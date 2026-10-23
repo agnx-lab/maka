@@ -28,8 +28,13 @@
 //! While the window is open it follows the Root's Host: once the Host its
 //! client reaches stops, it connects to the next one and loads the workbench
 //! again in the same window.
+//!
+//! The window opens where it was when it last closed (see [`Placement`]).
 
-use crate::host::{self, Connection, Root};
+use crate::{
+    host::{self, Connection, Root},
+    placement::Placement,
+};
 use maka_workbench::bindings::Bindings;
 use nsh_engine::{EngineConfig, Limits};
 use nsh_platform_gpui::{
@@ -65,12 +70,13 @@ pub fn run(first: Connection, root: Root, runtime: tokio::runtime::Runtime) -> R
     let Connection {
         bindings,
         config,
+        directory,
         endpoint,
         epoch,
     } = first;
     let handle = runtime.handle().clone();
     let detach = Detach::new(bindings, (endpoint.clone(), epoch), runtime);
-    let mut start = Some((config, endpoint, epoch, root));
+    let mut start = Some((config, Placement::new(&directory), endpoint, epoch, root));
     // Quitting waits for the detach: GPUI's default quits Linux and Windows
     // apps as their last window closes, giving the detach no more than its
     // quit handlers' 200 ms.
@@ -83,34 +89,50 @@ pub fn run(first: Connection, root: Root, runtime: tokio::runtime::Runtime) -> R
             }
         })
         .detach();
-        // Quitting from elsewhere (the Dock, logging out) gets the time GPUI
-        // gives quit handlers.
-        let quitting = detach.clone();
-        cx.on_app_quit(move |cx| quitting.start(cx)).detach();
-        let (config, endpoint, epoch, root) = start.take().expect("the app starts once");
-        match open(config, cx) {
-            Ok(window) => follow(window, (endpoint, epoch), root, handle.clone(), &detach, cx),
+        let (config, placement, endpoint, epoch, root) = start.take().expect("the app starts once");
+        let placement = Rc::new(placement);
+        let window = match open(config, placement.clone(), cx) {
+            Ok(window) => window,
             Err(error) => {
                 eprintln!("maka-desktop-shell: cannot open a window: {error}");
                 std::process::exit(1);
             }
-        }
+        };
+        // Quitting from elsewhere (the Dock, logging out) gets the time GPUI
+        // gives quit handlers; a window still open records its place first.
+        let quitting = detach.clone();
+        cx.on_app_quit(move |cx| {
+            let _ = window.update(cx, |_, window, cx| placement.save(window, cx));
+            quitting.start(cx)
+        })
+        .detach();
+        follow(window, (endpoint, epoch), root, handle.clone(), &detach, cx);
         cx.activate(true);
     });
     Ok(())
 }
 
-fn open(config: EngineConfig, cx: &mut App) -> Result<WindowHandle<AppView>, String> {
-    let bounds = gpui::Bounds::centered(
-        None,
-        gpui::size(gpui::px(SIZE.0 as f32), gpui::px(SIZE.1 as f32)),
-        cx,
-    );
+fn open(
+    config: EngineConfig,
+    placement: Rc<Placement>,
+    cx: &mut App,
+) -> Result<WindowHandle<AppView>, String> {
+    let min = gpui::size(gpui::px(MIN_SIZE.0), gpui::px(MIN_SIZE.1));
+    // Where the window last closed, or centered on the main display.
+    let (display_id, bounds) = match placement.restore(min, cx) {
+        Some((display, bounds)) => (Some(display), bounds),
+        None => {
+            let size = gpui::size(gpui::px(SIZE.0 as f32), gpui::px(SIZE.1 as f32));
+            let bounds = gpui::Bounds::centered(None, size, cx);
+            (None, gpui::WindowBounds::Windowed(bounds))
+        }
+    };
     let options = gpui::WindowOptions {
-        window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+        window_bounds: Some(bounds),
+        display_id,
         titlebar: Some(titlebar_options(TITLE)),
         app_id: Some(APP_ID.into()),
-        window_min_size: Some(gpui::size(gpui::px(MIN_SIZE.0), gpui::px(MIN_SIZE.1))),
+        window_min_size: Some(min),
         // Linux: the window manager's decorations until the app hides the
         // title bar.
         window_decorations: Some(gpui::WindowDecorations::Server),
@@ -137,8 +159,12 @@ fn open(config: EngineConfig, cx: &mut App) -> Result<WindowHandle<AppView>, Str
         });
         let app = view.read(cx);
         app.own_window(window, cx);
-        // Quit and close both close the window; the last one closed detaches.
-        app.on_close_request(|_, window, _| window.remove_window());
+        // Quit and close both close the window, which records its place;
+        // the last one closed detaches.
+        app.on_close_request(move |_, window, cx| {
+            placement.save(window, cx);
+            window.remove_window();
+        });
         app.load_with_config(config);
         let focus = view.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
@@ -206,6 +232,7 @@ fn follow(
                 config,
                 endpoint,
                 epoch,
+                ..
             } = connection;
             if let Err(bindings) = detach.put(bindings, (endpoint.clone(), epoch)) {
                 // Quitting began during the attempt: this client detaches

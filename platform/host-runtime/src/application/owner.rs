@@ -64,6 +64,7 @@ struct Owned {
     resource: Resource,
     close: Option<Close>,
     initializing: bool,
+    retiring: bool,
     closing: bool,
     native_owner: Option<Arc<dyn NativeOwner>>,
     vm: Option<usize>,
@@ -645,6 +646,22 @@ impl Owner {
             if self
                 .runtime
                 .status(activation)
+                .is_ok_and(|s| s.phase == Phase::Retiring)
+                && let Some(owned) = self.owned.get_mut(id)
+                && !owned.initializing
+                && !owned.retiring
+            {
+                owned.retiring = true;
+                if let Some(native) = &owned.native_owner
+                    && std::panic::catch_unwind(AssertUnwindSafe(|| native.retiring())).is_err()
+                {
+                    self.cleanup_error
+                        .get_or_insert("native retirement notification panicked".into());
+                }
+            }
+            if self
+                .runtime
+                .status(activation)
                 .is_ok_and(|s| s.phase == Phase::Retiring && s.calls == 0)
                 && let Some(owned) = self.owned.get_mut(id)
                 && !owned.initializing
@@ -744,6 +761,7 @@ impl Owner {
                 resource,
                 close: None,
                 initializing: true,
+                retiring: false,
                 closing: false,
                 native_owner: None,
                 vm: None,

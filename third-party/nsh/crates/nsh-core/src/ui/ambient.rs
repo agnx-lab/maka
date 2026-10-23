@@ -439,6 +439,31 @@ pub fn clipboard_files() -> Answer<Vec<String>> {
     answer
 }
 
+/// Shows the system's picker for images and gives the ones the user picked,
+/// prepared as `request` says, none when cancelled (TS:
+/// `Picker.pickImages`), to await in a task.
+pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::picker::PickedFile>> {
+    let (answer, action) = super::services::pick_images(request);
+    act(action);
+    answer
+}
+
+/// The value function `name` of the embedding app returns for `args`
+/// (TS: `host.call`), to await in a task.
+pub(crate) fn host_call(
+    name: String,
+    args: crate::JsonValue,
+) -> Answer<Result<crate::JsonValue, String>> {
+    let (answer, action) = super::services::host_call(name, args);
+    act(action);
+    answer
+}
+
+/// Forgets the host calls whose answers were dropped (they timed out).
+pub(crate) fn forget_host_calls() {
+    act(Action::ForgetHostCalls);
+}
+
 /// Shows `message` at the bottom of the screen (Android's toasts, TS:
 /// `Toast.show`); nothing happens elsewhere.
 pub fn toast(message: impl Into<String>, duration: super::ToastDuration) {

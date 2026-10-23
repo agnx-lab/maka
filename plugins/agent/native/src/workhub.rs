@@ -388,6 +388,9 @@ impl Handler for Hub {
     }
 }
 impl NativeOwner for Hub {
+    fn retiring(&self) {
+        self.agent.0.retiring();
+    }
     fn activated(&self) {
         self.agent.0.activated();
         self.tasks.start_notifications(&self.agent.0);

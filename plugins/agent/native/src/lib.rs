@@ -23,6 +23,7 @@
 use maka_agent_api::contract;
 mod diagnostics;
 pub mod executor;
+mod mcp;
 mod model;
 mod owner;
 mod service;

@@ -277,14 +277,15 @@ impl Owner {
         self.validate_background(&basis).await?;
         self.validate_graph_basis(&invocation.session_id, &basis)
             .await?;
+        let selected_catalog = self.mcp_projects.catalog(basis.mcp_revision.as_deref())?;
         let tools_changed = if basis.executor.is_some() {
             !basis.tools.is_empty()
                 || !basis.internal_tools.is_empty()
                 || !basis.internal_bindings.is_empty()
         } else {
             basis.tools != self.tool_basis
-                || basis.internal_tools != self.internal_tools
-                || basis.internal_bindings != self.internal_bindings
+                || basis.internal_tools != selected_catalog.definitions
+                || basis.internal_bindings != selected_catalog.bindings
         };
         if tools_changed {
             return Err("agent_tools_changed".into());
@@ -406,7 +407,7 @@ impl Owner {
                 configuration.code_language = source.accepted.code_language;
                 configuration.editing_tools = source.accepted.editing_tools;
                 let tools =
-                    self.selected_tools(&basis, basis.tool_discovery, configuration.editing_tools);
+                    self.selected_tools(&basis, basis.tool_discovery, configuration.editing_tools)?;
                 PreparedRun::Model(Box::new(RunInput {
                     model_source: Some(Arc::new(source)),
                     model_revision: Some(prepared.revision),

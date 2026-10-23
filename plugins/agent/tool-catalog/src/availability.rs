@@ -92,6 +92,7 @@ impl Availability {
             invocation,
             cwd,
             tools: catalog.names().into_iter().collect(),
+            available_tools: catalog.names().into_iter().collect(),
             cancellation,
         };
         catalog.bind_native_request(request).await?;

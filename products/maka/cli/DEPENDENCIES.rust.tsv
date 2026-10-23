@@ -599,6 +599,7 @@ maka-interactions-native@0.2.0		X
 maka-jev-native@0.2.0		X																
 maka-jev@0.2.0		X																
 maka-js-runtime@0.2.0		X																
+maka-mcp@0.2.0		X																
 maka-model@0.2.0		X																
 maka-network@0.2.0		X																
 maka-packages@0.2.0		X																
@@ -893,6 +894,7 @@ resvg@0.46.0		X										X
 rfc6979@0.6.0		X										X						
 rgb@0.8.53												X						
 ring@0.17.14		X									X							
+rmcp@3.7.0		X																
 rolldown_common@1.2.13												X						
 rolldown_dev_common@1.2.13												X						
 rolldown_devtools_action@1.2.14												X						
@@ -1027,6 +1029,7 @@ sqlx-macros-core@0.9.0		X										X
 sqlx-macros@0.9.0		X										X						
 sqlx-sqlite@0.9.0		X										X						
 sqlx@0.9.0		X										X						
+sse-stream@0.2.6		X										X						
 stable_deref_trait@1.2.1		X										X						
 stacker@0.1.25		X										X						
 static_assertions@1.1.0		X										X						

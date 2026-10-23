@@ -1101,6 +1101,16 @@ impl Surface {
             Command::Announce(text) => self.announce(text),
             Command::SetClipboard(text) => self.write_clipboard(text),
             Command::ReadClipboard { id, has_only } => self.read_clipboard(id, has_only),
+            // A terminal has no system image picker. Complete the request as
+            // cancelled instead of leaving the app's answer pending.
+            Command::PickImages { id, .. } => self.emit(
+                ROOT_ID,
+                EventKind::Pick,
+                EventPayload::Picked {
+                    id,
+                    files: Vec::new(),
+                },
+            ),
             Command::ImageInfo { id, uri } => self.request_image(uri, Some(id)),
             Command::Native { name, args } => {
                 let response = self
@@ -1948,6 +1958,33 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn an_unsupported_image_pick_answers_once_with_no_files() {
+        let mut surface = Surface::new(10, 5, CellMetrics::default());
+        surface.set_access(Access::all());
+        assert!(surface.access.allows_picker());
+        surface.apply(MountBatch {
+            items: vec![MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickImages {
+                    id: 42,
+                    request: nsh_core::picker::PickRequest::new(true, 2),
+                },
+            }],
+        });
+        let events: Vec<_> = surface.drain_events().collect();
+        assert!(matches!(
+            events.as_slice(),
+            [SurfaceEvent::Event(
+                ROOT_ID,
+                EventKind::Pick,
+                EventPayload::Picked { id: 42, files }
+            )] if files.is_empty()
+        ));
+        surface.tick(1.0);
+        assert!(surface.drain_events().next().is_none());
+    }
+
     fn create(
         surface: &mut Surface,
         id: NodeId,
@@ -2117,6 +2154,7 @@ mod tests {
                 }
                 let mut binds = Vec::new();
                 core.take_list_binds(&mut binds);
+                core.take_paced_list_binds(usize::MAX, &mut binds);
                 if binds.is_empty() {
                     return;
                 }

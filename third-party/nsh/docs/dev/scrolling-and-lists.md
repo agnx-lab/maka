@@ -95,5 +95,13 @@
 - **Indexed data**: TSX `each` also accepts `ReadonlyListSource<T>`, a readonly snapshot with `length` and `at(index)`.
   Only bound and viewable items are read. Replacing a snapshot's identity replaces the full range without reading its
   items; arrays retain their identity-based common-prefix / suffix splice behavior. Counts use the core's existing u32 range.
+- **Paced binding** (the runtime's lists): the window keeps a viewport of overscan on either side, and a fast scroll or
+  a jump assigns a screen of cells at once, updating each cell's item and index signals together. What shows binds in
+  the commit that assigns it: the viewport, two scroll steps ahead of it, sticky items and cells whose item moved (a splice tells them
+  their new index). The rest of the overscan waits in the core (`Slot::requested`: what JS was last asked to show, so
+  nothing stale is queued and cells whose items went are never asked for) and the engine binds it as its per-turn
+  budget allows (`PACED_BIND_OPS` ops or `PACED_BIND_TIME` of JS, at least one cell; nearest the leading edge first,
+  one cell per list in turn), then on the next display frames (`MountSink::request_frame`). Cells assigned but not
+  bound yet are moved out of sight like unassigned ones. Rust components' lists bind in the core, unpaced.
 - **Rust components**: the same props are `Scrollable`'s methods (`scroll()`, `virtual_list(..)`) and
   `VirtualList`'s (header, footer, empty view, separators, sticky rows, viewability); `docs/dev/components.md`.

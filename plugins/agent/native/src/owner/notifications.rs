@@ -101,7 +101,23 @@ impl Owner {
             .map_err(|_| "agent_preferences_unavailable")?;
         let language = self.resolve_language(&snapshot);
         let text = render(language);
+        drop(runs);
+        let mcp_revision = self.mcp_projects.capture(&route.workspace).await?;
+        let runs = self.runs.lock().await;
+        if runs.closing || self.stop.is_cancelled() {
+            return Err("agent_closed".into());
+        }
+        let current = self.session(&source.session_id).await?;
+        if runs.controls.contains_key(&source.session_id)
+            || current.configuration != session.configuration
+            || current.archived
+        {
+            return Ok(None);
+        }
+
+        let selected_catalog = self.mcp_projects.catalog(mcp_revision.as_deref())?;
         let mut basis = MessageBasis {
+            mcp_revision,
             language,
             compaction_prompt: Some(self.effective_compaction_prompt(&snapshot, language)),
             graph: None,
@@ -115,8 +131,8 @@ impl Owner {
             workspace: route.workspace.clone(),
             fingerprint: hex::encode(Sha256::digest(text.as_bytes())),
             tools: self.tool_basis.clone(),
-            internal_tools: self.internal_tools.clone(),
-            internal_bindings: self.internal_bindings.clone(),
+            internal_tools: selected_catalog.definitions.clone(),
+            internal_bindings: selected_catalog.bindings.clone(),
             behavior: self
                 .capture_behavior(&route.workspace, &snapshot, language)
                 .await?,

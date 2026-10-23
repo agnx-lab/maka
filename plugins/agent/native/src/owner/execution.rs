@@ -277,7 +277,32 @@ impl Owner {
             Ok(graph) => graph,
             Err(_) => return Ok(parked(Reason::SourceNotResumable)),
         };
+        drop(runs);
+        let mcp_revision = self.mcp_projects.capture(workspace).await?;
+        runs = self.runs.lock().await;
+        if runs.closing || self.stop.is_cancelled() {
+            return Ok(parked(Reason::Closed));
+        }
+        let current = self.session(&input.session_id).await?;
+        if current.configuration != session.configuration || current.archived {
+            return Ok(parked(Reason::WorkspaceChanged));
+        }
+        if runs.controls.contains_key(&input.session_id) {
+            return Ok(parked(Reason::Busy));
+        }
+        if self
+            .store
+            .continuation_for_source(&source_boundary)
+            .await
+            .map_err(|_| "agent_execution_unavailable")?
+            .is_some()
+        {
+            return Ok(parked(Reason::AlreadyContinued));
+        }
+
+        let selected_catalog = self.mcp_projects.catalog(mcp_revision.as_deref())?;
         let basis = MessageBasis {
+            mcp_revision,
             language: configuration.language,
             compaction_prompt: configuration.compaction_prompt.clone(),
             graph,
@@ -286,8 +311,8 @@ impl Owner {
             tool_discovery: configuration.tool_discovery,
             allowed_tools: session.configuration.tools.clone(),
             background: None,
-            internal_tools: self.internal_tools.clone(),
-            internal_bindings: self.internal_bindings.clone(),
+            internal_tools: selected_catalog.definitions.clone(),
+            internal_bindings: selected_catalog.bindings.clone(),
             // Ordinary Agents retain their existing queue compatibility. A
             // coordinator continuation cannot silently adopt a newer behavior.
             behavior: self
@@ -308,7 +333,7 @@ impl Owner {
             &basis,
             configuration.tool_discovery,
             configuration.editing_tools,
-        );
+        )?;
         let run = RunInput {
             invocation: invocation.clone(),
             model_source: Some(Arc::new(source)),

@@ -544,6 +544,24 @@ export interface ServiceMethods {
       input: Runtime.AgentProjectChange;
       output: Runtime.AgentProjectResult;
     };
+    projectMcp: {
+      mode: 'query';
+      input: {
+        sessionId: string;
+      };
+      output:
+        | {
+            kind: 'absent';
+          }
+        | {
+            path: string;
+            revision: string;
+            trusted: boolean;
+            servers: AgentProjectMcpOutput_AgentMcpServerView[];
+            disabled: string[];
+            kind: 'configuration';
+          };
+    };
     projects: {
       mode: 'query';
       input: Runtime.AgentProjectsRead;
@@ -679,6 +697,20 @@ export interface ServiceMethods {
       mode: 'query';
       input: {};
       output: Runtime.AgentToolNames;
+    };
+    trustProjectMcp: {
+      mode: 'mutation';
+      input: {
+        sessionId: string;
+        revision: string;
+      };
+      output:
+        | {
+            kind: 'trusted';
+          }
+        | {
+            kind: 'changed';
+          };
     };
     updateGlobalInstructions: {
       mode: 'mutation';
@@ -1107,6 +1139,18 @@ export interface AgentCompactOutput_AgentExecution {
    */
   highWater: number;
   state: AgentCompactOutput_AgentExecutionState;
+}
+/**
+ * Displayed only to the user. Credentials are omitted, but their values remain
+ * part of the revision that is explicitly confirmed.
+ */
+export interface AgentProjectMcpOutput_AgentMcpServerView {
+  name: string;
+  launch: string;
+  environment: string[];
+  headers: string[];
+  preapproved: boolean;
+  readOnlyTools: string[];
 }
 /**
  * Exact public selection observed by a caller, checked once at run admission.

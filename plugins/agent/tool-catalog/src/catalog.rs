@@ -117,6 +117,24 @@ impl ToolCatalog {
         })
     }
 
+    /// Add independently validated registrations without losing request bindings
+    /// or visibility of the existing catalog. Duplicate names are rejected.
+    pub fn with_additional(
+        mut self,
+        registrations: impl IntoIterator<Item = ToolRegistration>,
+    ) -> Result<Self, CatalogError> {
+        let additional = Self::new(registrations)?;
+        let entries = Arc::make_mut(&mut self.entries);
+        for (name, entry) in additional.entries.iter() {
+            if entries.insert(name.clone(), entry.clone()).is_some() {
+                return Err(CatalogError::Invalid(
+                    "duplicate additional tool name".into(),
+                ));
+            }
+        }
+        Ok(self)
+    }
+
     /// Defer non-core schemas until discovered within this Session.
     pub fn with_discovery(mut self) -> Self {
         self.discovery = true;

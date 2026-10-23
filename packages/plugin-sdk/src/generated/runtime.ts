@@ -1330,6 +1330,36 @@ export type EditorCapture =
       revision: number;
       kind: 'at_revision';
     };
+export type McpTransport =
+  | {
+      command: string;
+      args?: string[];
+      /**
+       * Absolute working directory, independent of model-controlled arguments.
+       */
+      cwd: string;
+      env?: {
+        [k: string]: string | undefined;
+      };
+      /**
+       * Environment variable names explicitly forwarded from the Host.
+       */
+      passEnv?: string[];
+      type: 'stdio';
+    }
+  | {
+      url: string;
+      headers?: {
+        [k: string]: string | undefined;
+      };
+      /**
+       * Header name to Host environment variable; keeps tokens out of config.
+       */
+      headerEnv?: {
+        [k: string]: string | undefined;
+      };
+      type: 'streamable_http';
+    };
 /**
  * Session sandbox policy. Full access explicitly disables filesystem and process isolation.
  */
@@ -6430,6 +6460,10 @@ export interface TextChunk {
 }
 export interface AgentConfiguration {
   /**
+   * Explicitly trusted MCP servers. Catalogs are captured on Agent activation.
+   */
+  mcpServers?: McpServerConfiguration[];
+  /**
    * Deployment locale fallback; saved Root preference takes precedence.
    */
   locale?: string;
@@ -6499,6 +6533,32 @@ export interface AgentConfiguration {
    * Explicitly selected, frozen application service tools, alongside configured native tools.
    */
   tools: AgentServiceTool[];
+}
+/**
+ * Explicit installation trust for an external MCP server. Tool annotations
+ * never expand these permissions. Changes require reactivating the Agent.
+ */
+export interface McpServerConfiguration {
+  /**
+   * Stable namespace, using ASCII letters, digits, underscores and hyphens.
+   */
+  name: string;
+  transport: McpTransport;
+  /**
+   * Omitted selects all tools discovered from this explicitly trusted server.
+   */
+  tools?: string[] | null;
+  /**
+   * Explicitly permit these remote tools in read-only workspaces and plans.
+   * The server's readOnlyHint is descriptive and cannot grant this access.
+   */
+  readOnlyTools?: string[];
+  /**
+   * Skip per-call confirmation only when the installer explicitly grants it.
+   */
+  preapproved?: boolean;
+  startupTimeoutMs?: number;
+  callTimeoutMs?: number;
 }
 export interface AgentAssistantConfiguration {
   /**
