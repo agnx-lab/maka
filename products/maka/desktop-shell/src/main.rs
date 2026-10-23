@@ -23,8 +23,12 @@
 //! its own through NSH's GPUI backend. `maka desktop` starts it for the Host
 //! it admitted, named by `MAKA_HOST_ROOT`, `MAKA_HOST_ENDPOINT` and
 //! `MAKA_HOST_EPOCH`. Closing the window detaches this client; the Host keeps
-//! the work it accepted.
+//! the work it accepted. If that Host stops while the window is open, the
+//! window connects to the Root's next Host, which the launcher named by
+//! `MAKA_LAUNCHER` starts, and loads the workbench again.
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+mod host;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod window;
 
@@ -33,14 +37,16 @@ use std::{path::PathBuf, process::ExitCode};
 const ROOT: &str = "MAKA_HOST_ROOT";
 const ENDPOINT: &str = "MAKA_HOST_ENDPOINT";
 const EPOCH: &str = "MAKA_HOST_EPOCH";
+const LAUNCHER: &str = "MAKA_LAUNCHER";
 
 /// The Host `maka desktop` admitted: its Root, its endpoint and the epoch the
-/// connection must find there.
+/// connection must find there, and the launcher that starts the Root's Host.
 #[derive(Debug, PartialEq)]
 struct Target {
     root: PathBuf,
     endpoint: PathBuf,
     epoch: uuid::Uuid,
+    launcher: PathBuf,
 }
 
 impl Target {
@@ -50,10 +56,15 @@ impl Target {
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| format!("{name} is not set; start the desktop with `maka desktop`"))
         };
-        let root = PathBuf::from(read(ROOT)?);
-        if !root.is_absolute() {
-            return Err(format!("{ROOT} is not an absolute path"));
-        }
+        let absolute = |name: &str| {
+            let path = PathBuf::from(read(name)?);
+            if path.is_absolute() {
+                Ok(path)
+            } else {
+                Err(format!("{name} is not an absolute path"))
+            }
+        };
+        let root = absolute(ROOT)?;
         let endpoint = PathBuf::from(read(ENDPOINT)?);
         let epoch = read(EPOCH)?;
         let epoch = epoch
@@ -64,6 +75,7 @@ impl Target {
             root,
             endpoint,
             epoch,
+            launcher: absolute(LAUNCHER)?,
         })
     }
 }
@@ -77,7 +89,7 @@ fn answer(arguments: impl IntoIterator<Item = std::ffi::OsString>) -> Option<Str
         if argument == "--help" || argument == "-h" {
             return Some(format!(
                 "{version}\n\nStarted by `maka desktop --root PATH`, which names the Host in \
-                 {ROOT}, {ENDPOINT} and {EPOCH}."
+                 {ROOT}, {ENDPOINT} and {EPOCH}, and itself in {LAUNCHER}."
             ));
         }
         if argument == "--version" || argument == "-V" {
@@ -104,20 +116,16 @@ fn main() -> ExitCode {
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn run() -> Result<(), String> {
     use maka_host_runtime::application::host::Client as HostClient;
-    use maka_workbench::bindings::Bindings;
 
     let target = Target::from(|name| std::env::var_os(name))?;
+    let root = host::Root::find(target.root, target.launcher)?;
     let runtime = tokio::runtime::Runtime::new().map_err(|error| error.to_string())?;
-    let (client, directory) = runtime.block_on(async {
+    let first = runtime.block_on(async {
         let host = HostClient::connect(&target.endpoint, Some(target.epoch)).await?;
-        maka_workbench::host::admit(host, &target.root, "desktop").await
+        let handle = tokio::runtime::Handle::current();
+        host::Connection::admit(host, target.endpoint, root.path(), handle).await
     })?;
-    let bindings = Bindings::new(client, runtime.handle().clone());
-    let mut config =
-        maka_workbench::configuration(bindings.registry(None), runtime.handle().clone());
-    config.data_dir = Some(directory);
-    config.assets = Some(bindings.assets());
-    window::run(config, bindings, runtime)
+    window::run(first, root, runtime)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -158,6 +166,7 @@ mod tests {
             (ROOT, "/hosts/main"),
             (ENDPOINT, "/run/maka/host.sock"),
             (EPOCH, epoch),
+            (LAUNCHER, "/opt/maka/maka"),
         ];
         assert_eq!(
             target(&complete),
@@ -165,9 +174,10 @@ mod tests {
                 root: "/hosts/main".into(),
                 endpoint: "/run/maka/host.sock".into(),
                 epoch: epoch.parse().unwrap(),
+                launcher: "/opt/maka/maka".into(),
             })
         );
-        for missing in [ROOT, ENDPOINT, EPOCH] {
+        for missing in [ROOT, ENDPOINT, EPOCH, LAUNCHER] {
             let vars: Vec<_> = complete
                 .iter()
                 .copied()
@@ -179,15 +189,21 @@ mod tests {
                 "{error}"
             );
         }
-        let relative = [(ROOT, "hosts/main"), (ENDPOINT, "/sock"), (EPOCH, epoch)];
-        assert_eq!(
-            target(&relative),
-            Err(format!("{ROOT} is not an absolute path"))
-        );
+        for relative in [ROOT, LAUNCHER] {
+            let vars: Vec<_> = complete
+                .iter()
+                .map(|&(name, value)| (name, if name == relative { "maka" } else { value }))
+                .collect();
+            assert_eq!(
+                target(&vars),
+                Err(format!("{relative} is not an absolute path"))
+            );
+        }
         let latest = [
             (ROOT, "/hosts/main"),
             (ENDPOINT, "/sock"),
             (EPOCH, "latest"),
+            (LAUNCHER, "/opt/maka/maka"),
         ];
         assert_eq!(
             target(&latest),

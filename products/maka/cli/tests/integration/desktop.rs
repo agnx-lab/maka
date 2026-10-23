@@ -49,7 +49,7 @@ fn shell(directory: &Path) -> PathBuf {
 fn shell_at(executable: PathBuf) -> PathBuf {
     std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
     std::fs::write(&executable,
-        "#!/bin/sh\nprintf '%s\n' \"$MAKA_HOST_ROOT\" \"$MAKA_HOST_ENDPOINT\" \"$MAKA_HOST_EPOCH\" \"$$\" \"$#\"\nread status || exit 1\nexit \"$status\"\n",
+        "#!/bin/sh\nprintf '%s\n' \"$MAKA_HOST_ROOT\" \"$MAKA_LAUNCHER\" \"$MAKA_HOST_ENDPOINT\" \"$MAKA_HOST_EPOCH\" \"$$\" \"$#\"\nread status || exit 1\nexit \"$status\"\n",
     ).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     executable
@@ -73,6 +73,12 @@ async fn started(executable: &Path, root: &Path) -> (Child, PathBuf, uuid::Uuid,
     assert_eq!(
         std::fs::canonicalize(&shell_root).unwrap(),
         std::fs::canonicalize(root).unwrap()
+    );
+    let launcher = PathBuf::from(lines.next_line().await.unwrap().expect("shell launcher"));
+    assert_eq!(
+        std::fs::canonicalize(&launcher).unwrap(),
+        std::fs::canonicalize(executable).unwrap(),
+        "the shell starts the Root's next Host through the launcher itself"
     );
     let endpoint = PathBuf::from(lines.next_line().await.unwrap().expect("shell endpoint"));
     let epoch = lines
@@ -207,6 +213,38 @@ async fn desktop_shell_owns_its_child_and_preserves_the_selected_host_and_other_
     })
     .await
     .expect("desktop launcher lifecycle did not settle");
+}
+
+#[tokio::test]
+async fn desktop_launcher_succeeds_when_its_host_stopped_under_the_shell() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = launcher(directory.path());
+        shell(directory.path());
+        let fixture = CandidateFixture::new(directory.path().join("root"));
+        let (mut child, endpoint, epoch, _) = started(&executable, &fixture.root).await;
+        // The Host stops while the window is open, as when it is retired
+        // over its clients or crashes; the window then moves to the next Host.
+        assert!(
+            Client::retire_with_options(&endpoint, epoch, true, true)
+                .await
+                .unwrap()
+        );
+        while Client::status(&endpoint, Some(epoch))
+            .await
+            .is_ok_and(|status| !status.closed)
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        child.stdin.take().unwrap().write_all(b"0\n").await.unwrap();
+        let status = child.wait().await.unwrap();
+        assert!(
+            status.success(),
+            "a stopped Host leaves the launcher nothing to detach: {status}"
+        );
+    })
+    .await
+    .expect("desktop launcher did not settle after its Host stopped");
 }
 
 #[tokio::test]

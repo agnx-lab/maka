@@ -38,6 +38,8 @@ Start it with the launcher:
 /absolute/path/to/maka desktop --root /absolute/path/to/business-host
 ```
 
-`--root` is required and names the actual business Host Root. The launcher initializes a missing Root with the standard read-only business Host or reopens its saved deployment, verifies discovery against the connected Host endpoint, source and epoch, and supplies `MAKA_HOST_ROOT`, `MAKA_HOST_ENDPOINT` and `MAKA_HOST_EPOCH` to the shell. The shell admits itself to that Host as the terminal shell does and keeps its client data under the Root.
+`--root` is required and names the actual business Host Root. The launcher initializes a missing Root with the standard read-only business Host or reopens its saved deployment, verifies discovery against the connected Host endpoint, source and epoch, and supplies `MAKA_HOST_ROOT`, `MAKA_HOST_ENDPOINT` and `MAKA_HOST_EPOCH` to the shell, with its own path in `MAKA_LAUNCHER`. The shell admits itself to that Host as the terminal shell does and keeps its client data under the Root.
 
 Closing the window, the quit menu item and the quit key all close the window; the shell then detaches from the Host and exits. The launcher detaches as well, so the Host finishes the work it accepted and stops once no client is left. Cancelling the launcher stops only its shell.
+
+If the Host stops while the window is open (it crashed, or was retired over its clients), the shell notices within a few seconds, connects to the Root's next Host, starting one through the launcher as `maka desktop` does, and loads the workbench again in the same window. The workbench starts over, as when the desktop opens; a turn the stopped Host was running shows as stopped. Until a Host is reached the window keeps the last workbench, whose actions fail, and the shell retries with growing pauses of up to 30 seconds. It reconnects only while the Root it opened is still at its path: a moved or deleted Root is not initialized afresh.

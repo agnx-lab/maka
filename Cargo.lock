@@ -8783,6 +8783,7 @@ name = "maka-desktop-shell"
 version = "0.2.0"
 dependencies = [
  "gpui-fast-platform",
+ "maka-event-log",
  "maka-host-runtime",
  "maka-workbench",
  "nsh-engine",
