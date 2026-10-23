@@ -36,12 +36,12 @@ use maka_agent_facts::tools::JournaledTools;
 use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
+use maka_code_runtime::{
+    CellAbort, CellContext, CellDiagnosticKind, CellLimits, CellResult, CellStore, ToolMetadata,
+};
 use maka_event_log::EventLog;
 use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadScope, WriteCoordinator, WriteScope};
-use maka_js_runtime::{
-    CellAbort, CellContext, CellDiagnosticKind, CellLimits, CellResult, CellStore, CodeExecutor,
-    ToolMetadata,
-};
+use maka_js_runtime::CodeExecutor;
 use maka_sandbox::{
     Sandbox,
     filesystem::{Access, Rule},
@@ -182,6 +182,7 @@ pub(super) async fn run(args: Args) -> Result<(), maka_host_runtime::HostError> 
                 collaboration_mode: CollaborationMode::Agent,
                 orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::CodeMode,
+                code_language: Default::default(),
                 model: None,
                 thinking_level: None,
             })),

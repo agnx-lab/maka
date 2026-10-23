@@ -68,6 +68,8 @@ export async function buildCli({
     'maka-cli',
     '-p',
     'maka-desktop-shell',
+    '-p',
+    'maka-python-runtime',
     '--target-dir',
     targetDirectory,
   ];

@@ -22,6 +22,7 @@ import { host } from './host';
 import { message, UiError } from './text';
 import type {
   CatalogMutationResult,
+  CodeLanguage,
   ConnectionVersionBasis,
   CredentialStatus,
   ModelOverride,
@@ -59,6 +60,8 @@ export type RemovalAction = ConnectionAction & {
   modelId: string | null;
 };
 export type ModelEditor = {
+  codeMode: boolean | null;
+  codeModeLanguage: CodeLanguage | null;
   originalId: string | null;
   id: string;
   label: string;
@@ -569,6 +572,8 @@ export function createModelSettings(
       originalId: id,
       id: id ?? '',
       label: raw?.displayName ?? '',
+      codeMode: raw?.codeMode ?? null,
+      codeModeLanguage: raw?.codeModeLanguage ?? null,
       thinkingLevels: raw?.thinkingLevels ? [...raw.thinkingLevels] : null,
       defaultThinkingLevel: raw?.defaultThinkingLevel ?? null,
       effective: null,
@@ -641,6 +646,12 @@ export function createModelSettings(
     )
       changeModel({ defaultThinkingLevel: request.level });
   };
+  const changeCodeMode = (request: ModelAction & { enabled: boolean | null }) => {
+    if (currentModel(request)) changeModel({ codeMode: request.enabled });
+  };
+  const changeCodeLanguage = (request: ModelAction & { language: CodeLanguage }) => {
+    if (currentModel(request)) changeModel({ codeModeLanguage: request.language });
+  };
   const showModels = (request: ConnectionAction) => {
     if (current(request) && !busy() && !dirty() && editor()?.baseline) {
       page.set('models');
@@ -668,6 +679,10 @@ export function createModelSettings(
       else value.thinkingLevels = current.thinkingLevels;
       if (current.defaultThinkingLevel) value.defaultThinkingLevel = current.defaultThinkingLevel;
       else delete value.defaultThinkingLevel;
+      if (current.codeMode === null) delete value.codeMode;
+      else value.codeMode = current.codeMode;
+      if (current.codeModeLanguage === null) delete value.codeModeLanguage;
+      else value.codeModeLanguage = current.codeModeLanguage;
       overrides[id] = value;
       const result = await mutate('settings', 'update', {
         expected: basis(form.baseline),
@@ -859,6 +874,8 @@ export function createModelSettings(
     toggleThinking,
     useProviderThinking,
     defaultThinking,
+    changeCodeMode,
+    changeCodeLanguage,
     showModels,
     saveModel,
     setDefault,

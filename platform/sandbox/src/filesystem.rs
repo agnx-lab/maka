@@ -201,6 +201,21 @@ impl Compiled {
         }
         self.path_access(path, true)
     }
+    /// Authority inherited before this rule applies. An exact rule can override
+    /// a subtree grant at the same path; a subtree rule inherits only its parents.
+    pub fn inherited_access(&self, rule: &Rule) -> Access {
+        self.policy
+            .rules
+            .iter()
+            .filter(|ancestor| {
+                ancestor.scope == Scope::Subtree
+                    && crate::path::within(&rule.path, &ancestor.path)
+                    && (rule.scope == Scope::Exact
+                        || !crate::path::compare(&rule.path, &ancestor.path).is_eq())
+            })
+            .max_by_key(|ancestor| ancestor.path.components().count())
+            .map_or(self.policy.default, |ancestor| ancestor.access)
+    }
     /// Directory mutations affect descendants too. Unknown future glob matches
     /// cannot authorize moving a subtree; callers must keep those names in place.
     pub fn permits_subtree(&self, path: &Path, access: Access) -> bool {
@@ -242,6 +257,42 @@ pub(crate) fn compile_glob(pattern: &str) -> Result<globset::Glob, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inherited_authority_uses_subtree_rules_instead_of_exact_parent_access() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let policy = Policy {
+            default: Access::Read,
+            rules: vec![
+                Rule::subtree(root, Access::Write),
+                Rule::exact(root, Access::Read),
+                Rule::subtree(root.join("metadata"), Access::Read),
+                Rule::subtree(root.join("metadata/output"), Access::Write),
+                Rule::exact(root.join("file"), Access::Read),
+            ],
+            deny_globs: Vec::new(),
+        }
+        .compile()
+        .unwrap();
+        assert_eq!(policy.access(root), Access::Read);
+        assert_eq!(policy.access(&root.join("ordinary")), Access::Write);
+        for (path, scope, inherited) in [
+            (root.to_path_buf(), Scope::Subtree, Access::Read),
+            (root.to_path_buf(), Scope::Exact, Access::Write),
+            (root.join("metadata"), Scope::Subtree, Access::Write),
+            (root.join("metadata/output"), Scope::Subtree, Access::Read),
+            (root.join("file"), Scope::Exact, Access::Write),
+        ] {
+            let rule = policy
+                .policy()
+                .rules
+                .iter()
+                .find(|rule| rule.path == path && rule.scope == scope)
+                .unwrap();
+            assert_eq!(policy.inherited_access(rule), inherited, "{path:?}");
+        }
+    }
 
     #[test]
     fn normalization_removes_noop_boundaries_without_erasing_nested_reopenings() {

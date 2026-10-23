@@ -208,7 +208,7 @@ export async function generateNotices(root = repository) {
     );
     const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
     const catalog = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
-    const pending = ['maka-cli', 'maka-desktop-shell'].map(
+    const pending = ['maka-cli', 'maka-desktop-shell', 'maka-python-runtime'].map(
       (name) => metadata.packages.find((pkg) => pkg.name === name).id,
     );
     const seen = new Set();

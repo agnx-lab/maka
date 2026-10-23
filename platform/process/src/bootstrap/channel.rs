@@ -25,7 +25,6 @@ use std::{
     mem::size_of,
     os::windows::io::{AsRawHandle, BorrowedHandle},
     ptr,
-    time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -49,6 +48,10 @@ pub struct Channel(NamedPipeServer);
 impl Endpoint {
     pub fn new(account: &Account) -> io::Result<Self> {
         Self::principal(account.sid())
+    }
+
+    pub(super) fn current_user() -> io::Result<Self> {
+        Self::principal("OW")
     }
 
     pub(super) fn administrative() -> io::Result<Self> {
@@ -103,25 +106,24 @@ impl Endpoint {
 
     /// No credential or command is sent until the connecting process matches
     /// the live process handle returned by the account launch.
-    pub async fn accept(self, process: BorrowedHandle<'_>) -> io::Result<Channel> {
+    pub async fn accept(
+        self,
+        process: BorrowedHandle<'_>,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> io::Result<Channel> {
         let expected = unsafe { GetProcessId(process.as_raw_handle()) };
         if expected == 0 {
             return Err(io::Error::last_os_error());
         }
         let process = process.try_clone_to_owned()?;
-        tokio::time::timeout(Duration::from_secs(15), async {
-            tokio::select! {
-                biased;
-                connected = self.server.connect() => connected,
-                status = crate::windows::wait_process(&process) => {
-                    Err(io::Error::other(format!("sandbox helper exited before connecting: {}", status?)))
-                }
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(cancelled()),
+            connected = self.server.connect() => connected,
+            status = crate::windows::wait_process(&process) => {
+                Err(io::Error::other(format!("sandbox helper exited before connecting: {}", status?)))
             }
-        })
-            .await
-            .map_err(|_| {
-                io::Error::new(io::ErrorKind::TimedOut, "sandbox runner did not connect")
-            })??;
+        }?;
         let mut client = 0;
         checked(unsafe { GetNamedPipeClientProcessId(self.server.as_raw_handle(), &mut client) })?;
         if client != expected {
@@ -167,4 +169,8 @@ pub(super) async fn receive<T: DeserializeOwned>(
     let mut bytes = vec![0; size];
     input.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(io::Error::other)
+}
+
+pub(super) fn cancelled() -> io::Error {
+    io::Error::new(io::ErrorKind::Interrupted, "sandbox launch cancelled")
 }

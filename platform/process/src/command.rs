@@ -49,6 +49,8 @@ pub struct Command {
     #[cfg(windows)]
     backend: Option<std::sync::Arc<dyn crate::bootstrap::Backend>>,
     #[cfg(windows)]
+    startup_cancellation: tokio_util::sync::CancellationToken,
+    #[cfg(windows)]
     launch: Option<crate::bootstrap::Launch>,
     #[cfg(windows)]
     write_token: Option<std::sync::Arc<maka_sandbox::windows::WriteToken>>,
@@ -112,6 +114,8 @@ impl Command {
             #[cfg(windows)]
             backend: None,
             #[cfg(windows)]
+            startup_cancellation: tokio_util::sync::CancellationToken::new(),
+            #[cfg(windows)]
             launch: None,
             #[cfg(windows)]
             write_token: None,
@@ -149,6 +153,17 @@ impl Command {
     #[cfg(windows)]
     pub fn with_backend(mut self, backend: std::sync::Arc<dyn crate::bootstrap::Backend>) -> Self {
         self.backend = Some(backend);
+        self
+    }
+
+    /// Connect admission to its actual execution owner. Startup still settles
+    /// every acquired native resource before reporting cancellation.
+    #[cfg(windows)]
+    pub fn with_startup_cancellation(
+        mut self,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        self.startup_cancellation = cancellation;
         self
     }
 
@@ -279,7 +294,7 @@ impl Command {
                 .await
                 .map_err(crate::launch_error)?;
             let mut command = command;
-            if let Some(address) = launch.proxy_address {
+            if let Some(address) = launch.proxy_address() {
                 let url = format!("http://{address}");
                 for key in [
                     "HTTP_PROXY",
@@ -434,8 +449,8 @@ impl Prepared {
             failure.get_or_insert_with(|| error.to_string());
         }
         #[cfg(windows)]
-        if let Some(launch) = &mut self.0.launch {
-            if let Err(error) = launch.runner.finish().await {
+        if let Some(launch) = self.0.launch.take() {
+            if let Err(error) = launch.abort().await {
                 failure = Some(error.to_string());
             }
         }
@@ -453,6 +468,11 @@ impl Prepared {
     #[cfg(windows)]
     pub(crate) fn take_launch(&mut self) -> Option<crate::bootstrap::Launch> {
         self.0.launch.take()
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn startup_cancellation(&self) -> tokio_util::sync::CancellationToken {
+        self.0.startup_cancellation.clone()
     }
 
     #[cfg(windows)]

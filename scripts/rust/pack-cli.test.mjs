@@ -50,6 +50,8 @@ test('native archives carry the CLI and desktop shell without a terminal sidecar
       'maka-desktop-shell',
       'maka-desktop-shell.exe',
       'maka-service.exe',
+      'maka-python-worker',
+      'maka-python-worker.exe',
     ])
       await writeFile(join(root, 'build', name), name + ' bytes');
     // Exercise the actual external validator call without executing foreign-target
@@ -73,6 +75,7 @@ test('native archives carry the CLI and desktop shell without a terminal sidecar
       assert.equal(execFileSync('tar', ['-xOf', archive, shell], {encoding:'utf8'}), shell.split('/').pop() + ' bytes');
       if (process.platform !== 'win32') assert.match(execFileSync('tar', ['-tvzf', archive, shell], {encoding:'utf8'}), /^-rwx/);
       assert.equal(files.includes('package/bin/maka-service.exe'), windows);
+      assert.ok(files.includes('package/bin/' + (windows ? 'maka-python-worker.exe' : 'maka-python-worker')));
       assert.equal(files.some((file) => file.startsWith('package/bin/Maka.app/')), macos);
       assert.ok(!files.some((file) => file.includes('/app/')));
       assert.equal(files.includes('package/bin/maka-desktop-shell'), !macos && !windows);

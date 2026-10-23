@@ -958,6 +958,7 @@ async fn accepted_tool_policy_survives_settings_changes_and_requires_explicit_fi
             "fixture-model".into(),
             ModelOverride {
                 code_mode: Some(true),
+                code_mode_language: Some(maka_agent_facts::execution::CodeLanguage::Python),
                 apply_patch: Some(false),
                 context_window: Some(1_000_000),
                 input_limit: Some(900_000),
@@ -979,6 +980,10 @@ async fn accepted_tool_policy_survives_settings_changes_and_requires_explicit_fi
     .await
     .unwrap();
     assert_eq!(source.accepted.tool_mode, ToolMode::CodeMode);
+    assert_eq!(
+        source.accepted.code_language,
+        maka_agent_facts::execution::CodeLanguage::Python
+    );
     assert_eq!(
         source.accepted.editing_tools,
         Some(maka_agent_facts::execution::EditingTools::Structured)
@@ -1025,6 +1030,10 @@ async fn accepted_tool_policy_survives_settings_changes_and_requires_explicit_fi
     assert_eq!(restored.capture().await.unwrap().context, Some(context));
     assert_eq!(restored.accepted.tool_mode, ToolMode::CodeMode);
     assert_eq!(
+        restored.accepted.code_language,
+        maka_agent_facts::execution::CodeLanguage::Python
+    );
+    assert_eq!(
         restored.accepted.editing_tools,
         Some(maka_agent_facts::execution::EditingTools::Structured)
     );
@@ -1045,6 +1054,10 @@ async fn accepted_tool_policy_survives_settings_changes_and_requires_explicit_fi
     assert_eq!(context.context_window, Some(96_000));
     assert_eq!(context.declared_window, Some(81_600));
     assert_eq!(next.accepted.tool_mode, ToolMode::Direct);
+    assert_eq!(
+        next.accepted.code_language,
+        maka_agent_facts::execution::CodeLanguage::JavaScript
+    );
     assert_eq!(
         next.accepted.editing_tools,
         Some(maka_agent_facts::execution::EditingTools::ApplyPatch)

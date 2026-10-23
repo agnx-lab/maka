@@ -17,7 +17,7 @@
 
 [workspace]
 exclude = ["third-party/nsh", "third-party/gpui-fast", "third-party/async-io", "third-party/gix-index", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto", "third-party/termina"]
-default-members = ["products/maka/cli"]
+default-members = ["products/maka/cli", "platform/python-runtime"]
 members = [
     "plugins/agent/facts",
     "platform/packages",
@@ -56,6 +56,8 @@ members = [
     "plugins/agent/insights",
     "plugins/workspace/workspace-jev/engine",
     "platform/js-runtime",
+    "platform/code-runtime",
+    "platform/python-runtime",
     "plugins/agent/model",
     "plugins/agent/provider-protocol",
     "platform/network",
@@ -90,6 +92,9 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+mxc-sdk = { git = "https://github.com/microsoft/mxc", rev = "b21120168d70befe12356411423266bfef168446" }
+flatbuffers = "25"
+maka-python-runtime = { path = "platform/python-runtime" }
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }
@@ -154,6 +159,7 @@ maka-graph = { path = "plugins/agent/graph" }
 maka-insights = { path = "plugins/agent/insights" }
 maka-jev = { path = "plugins/workspace/workspace-jev/engine" }
 maka-js-runtime = { path = "platform/js-runtime" }
+maka-code-runtime = { path = "platform/code-runtime" }
 maka-model = { path = "plugins/agent/model" }
 maka-provider-protocol = { path = "plugins/agent/provider-protocol" }
 maka-network = { path = "platform/network" }

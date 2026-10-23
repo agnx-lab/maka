@@ -20,6 +20,23 @@
 use super::ToolMode;
 use serde::{Deserialize, Serialize};
 
+/// Interpreter used only for model-facing Code Mode cells.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeLanguage {
+    #[default]
+    #[serde(rename = "javascript")]
+    JavaScript,
+    Python,
+}
+impl CodeLanguage {
+    pub fn is_javascript(&self) -> bool {
+        *self == Self::JavaScript
+    }
+}
+
 impl ToolMode {
     /// Product default, not capability detection. A model override always wins.
     pub fn for_model(model_id: &str, request_url: &str, enabled: Option<bool>) -> Self {

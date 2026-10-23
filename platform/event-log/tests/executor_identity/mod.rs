@@ -80,6 +80,7 @@ fn opening(cwd: &std::path::Path, external: bool) -> Fact {
                 collaboration_mode: CollaborationMode::Agent,
                 orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::Direct,
+                code_language: Default::default(),
             })
         }),
     }

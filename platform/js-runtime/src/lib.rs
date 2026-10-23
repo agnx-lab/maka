@@ -18,43 +18,23 @@
  */
 
 mod bridge;
-mod cell_context;
 mod evaluate;
 mod execution_budget;
 mod module;
 pub mod plugin;
 pub mod repl;
-mod result;
 
-use bridge::{Admission, ToolScope, maka_code};
-pub use cell_context::{CellContext, CellOutput, CellStore, NotificationGate, ToolMetadata};
+use bridge::maka_code;
 use deno_core::{JsRuntime, RuntimeOptions, v8};
 use evaluate::evaluate;
 use execution_budget::ExecutionBudget;
 use maka_agent_facts::tools::ToolExecutor;
-use result::complete;
-pub use result::{CellAbort, CellDiagnostic, CellDiagnosticKind, CellResult, ToolCall};
+use maka_code_runtime::complete;
+use maka_code_runtime::{CellAbort, CellDiagnostic, CellDiagnosticKind, CellResult};
+use maka_code_runtime::{CellContext, CellLimits, CellOutput, CellStore, ToolMetadata, ToolScope};
 use std::sync::{Arc, Mutex, Once};
-use std::time::Duration;
 use tokio::runtime::Handle;
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
-
-#[derive(Clone, Debug)]
-pub struct CellLimits {
-    /// Cumulative synchronous VM execution, excluding asynchronous Host tool waits.
-    pub timeout: Duration,
-    /// V8 heap limit only; not an OS memory limit or a process sandbox.
-    pub heap_bytes: usize,
-}
-
-impl Default for CellLimits {
-    fn default() -> Self {
-        Self {
-            timeout: Duration::from_secs(30),
-            heap_bytes: 64 * 1024 * 1024,
-        }
-    }
-}
+use tokio_util::sync::CancellationToken;
 
 /// Fresh isolates off the host's async worker threads, each retaining ownership
 /// of admitted Rust tools until they have finished cleanup.
@@ -73,7 +53,6 @@ impl CodeExecutor {
         {
             return Err(CellAbort::Internal("invalid cell limits".into()));
         }
-        initialize_platform();
         Ok(Self { limits })
     }
 
@@ -187,15 +166,13 @@ async fn run_cell(
         return Err(CellAbort::Cancelled);
     }
     let names = executor.names();
-    let scope = Arc::new(ToolScope {
-        context: context.clone(),
+    let scope = ToolScope::new(
+        context.clone(),
         executor,
-        names: names.iter().cloned().collect(),
-        cancellation: cancellation.child_token(),
-        tasks: TaskTracker::new(),
-        host: host.clone(),
-        admission: Mutex::new(Admission::default()),
-    });
+        cancellation.child_token(),
+        host.clone(),
+    );
+    initialize_platform();
     let mut runtime = JsRuntime::try_new(RuntimeOptions {
         extensions: vec![maka_code::init()],
         create_params: Some(v8::CreateParams::default().heap_limits(0, limits.heap_bytes)),
@@ -267,12 +244,11 @@ async fn run_cell(
         }
     };
     if module || result.is_err() {
-        scope.cancellation.cancel();
+        scope.cancel();
     }
     // No more ops can enter once the runtime is destroyed.
     drop(runtime);
-    scope.tasks.close();
-    scope.tasks.wait().await;
+    scope.settle().await;
     finished.cancel();
     monitor
         .await
@@ -291,10 +267,7 @@ async fn run_cell(
         Some(StopReason::HeapLimit) => Err(CellDiagnostic::limit("JavaScript heap")),
         None => result,
     };
-    Ok(complete(
-        result,
-        scope.admission.lock().unwrap().calls.clone(),
-    ))
+    Ok(complete(result, scope.calls()))
 }
 
 #[derive(Clone, Copy)]

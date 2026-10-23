@@ -32,9 +32,11 @@ pub fn resolve(mode: Mode, cwd: &Path) -> Result<(Sandbox, Sandbox), Error> {
     let mut filesystem = Policy::uniform(Access::Read);
     if mode == Mode::WorkspaceWrite {
         filesystem.rules.push(Rule::subtree(cwd, Access::Write));
-        let mut temporary = vec![std::env::temp_dir()];
-        #[cfg(unix)]
-        temporary.push(PathBuf::from("/tmp"));
+        let temporary = [
+            std::env::temp_dir(),
+            #[cfg(unix)]
+            PathBuf::from("/tmp"),
+        ];
         for path in temporary {
             let path = path.canonicalize()?;
             let path = PathBuf::from(

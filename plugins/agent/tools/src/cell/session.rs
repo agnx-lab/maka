@@ -26,7 +26,7 @@ use maka_agent_facts::tool_output::ToolContent;
 use maka_agent_facts::tool_output::ToolOutput;
 use maka_agent_facts::tool_output::ToolSuccess;
 use maka_agent_facts::tools::ToolError;
-use maka_js_runtime::{
+use maka_code_runtime::{
     CellAbort, CellContext, CellOutput, CellStore, NotificationGate, ToolMetadata,
 };
 use serde::Serialize;
@@ -166,8 +166,11 @@ impl Cells {
             .catalog
             .definitions()
             .map(|definition| ToolMetadata {
-                name: maka_js_runtime::tool_identifier(&definition.name),
-                description: super::declarations(std::slice::from_ref(definition)),
+                name: tool.cells.tool_identifier(&definition.name),
+                description: super::declarations(
+                    std::slice::from_ref(definition),
+                    tool.cells.language(),
+                ),
             })
             .collect();
         let context = CellContext::with_notification_gate(
@@ -353,7 +356,7 @@ impl Cells {
             return Err(error);
         }
         // Fatal failures always escape before consuming output or permitting a
-        // new model step, even if JS caught its own nested exception.
+        // new model step, even if user code caught its own nested exception.
         self.check()?;
         let content = cell.context.take_output();
         let observation = match result {

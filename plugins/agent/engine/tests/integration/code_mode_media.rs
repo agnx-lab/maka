@@ -24,9 +24,10 @@ use maka_agent_facts::event::Fact;
 use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
+use maka_code_runtime::CellLimits;
 use maka_event_log::EventLog;
-use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::{ModelExecutor, ProviderKind};
+use maka_tools::CodeExecutor;
 use maka_tools::{
     ToolCatalog, ToolDefinition, ToolHandler, ToolNesting, ToolRegistration, ToolSemantics,
 };

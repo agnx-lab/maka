@@ -21,6 +21,6 @@
 
 [简体中文](README.zh-CN.md)
 
-Dispatches journaled tool calls and provides Code Mode. `RequestTools`, `RunTools` and `StepTools` retain the tool selection at their respective execution scopes. Code Mode uses the shared JavaScript runtime and forwards through the same authorized tool path. Tool results, cancellation and physical cleanup remain separate outcomes.
+Dispatches journaled tool calls and provides Code Mode. `RequestTools`, `RunTools` and `StepTools` retain the tool selection at their respective execution scopes. Code Mode defaults to the shared JavaScript runtime; a model can opt into the bundled Monty Python worker with `codeModeLanguage: "python"`. Both forward through the same authorized tool path and share the session JSON store. Tool results, cancellation and physical cleanup remain separate outcomes.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

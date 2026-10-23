@@ -245,6 +245,7 @@ async fn title_accounting_uses_first_opening_after_stop_and_never_replays_after_
         collaboration_mode: CollaborationMode::Agent,
         orchestration_mode: BehaviorId::default(),
         tool_mode: ToolMode::Direct,
+        code_language: Default::default(),
     };
     let opening = Fact::InvocationOpened {
         configuration: Some(Box::new(configuration)),

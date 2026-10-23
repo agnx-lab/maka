@@ -58,6 +58,76 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           hint={tr('Optional. Empty uses the provider’s name.')}
         />
         <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
+          {tr('Code Mode')}
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+          <Each
+            of={
+              [
+                { label: 'Default', value: null },
+                { label: 'Enabled', value: true },
+                { label: 'Disabled', value: false },
+              ] as const
+            }
+            key={(item) => item.label}
+          >
+            {(item) => (
+              <Button
+                disabled={disabled()}
+                selected={model().codeMode === item().value}
+                onPress={inputAction(owner.changeCodeMode, {
+                  ...owner.modelAction(),
+                  enabled: item().value,
+                })}
+                style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
+              >
+                <ChoiceIndicator
+                  kind="radio"
+                  checked={model().codeMode === item().value}
+                  disabled={disabled()}
+                />
+                <Text style={{ ...captionTextStyle, color: C.text }}>{tr(item().label)}</Text>
+              </Button>
+            )}
+          </Each>
+        </View>
+        <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
+          {tr('Code Mode language')}
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+          <Each of={['javascript', 'python'] as const} key={(language) => language}>
+            {(language) => (
+              <Button
+                disabled={disabled()}
+                selected={(model().codeModeLanguage ?? 'javascript') === language()}
+                onPress={inputAction(owner.changeCodeLanguage, {
+                  ...owner.modelAction(),
+                  language: language(),
+                })}
+                style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
+              >
+                <ChoiceIndicator
+                  kind="radio"
+                  checked={(model().codeModeLanguage ?? 'javascript') === language()}
+                  disabled={disabled()}
+                />
+                <Text style={{ ...captionTextStyle, color: C.text }}>
+                  {language() === 'python' ? 'Python' : 'JavaScript'}
+                </Text>
+              </Button>
+            )}
+          </Each>
+        </View>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>
+          {tr('Used when Code Mode is enabled. Applies to newly submitted messages.')}
+        </Text>
+        <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
           {tr('Supported reasoning efforts')}
         </Text>
         <If when={model().effective}>

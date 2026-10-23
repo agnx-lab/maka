@@ -573,6 +573,7 @@ mod tests {
             }
         }
         append(target.executable(), &binary);
+        append(target.python_worker(), &binary);
         if let Some(gui) = desktop_gui {
             if target == Target::Win32X64 {
                 binary[156..158].copy_from_slice(&(if gui { 2_u16 } else { 3_u16 }).to_le_bytes());
@@ -684,6 +685,7 @@ mod tests {
                 .unwrap();
             assert_eq!(artifact.integrity, integrity);
             assert!(artifact.executable.is_file());
+            assert!(artifact.directory.join(target.python_worker()).is_file());
             let desktop = artifact.directory.join(target.desktop_executable());
             assert!(desktop.is_file());
             assert_eq!(
@@ -943,6 +945,13 @@ mod tests {
             (linux, Some("bin/maka-desktop"), false, None),
             (linux, Some("bin/maka-terminal-shell"), false, None),
             (linux, Some("bin/app/main.js"), false, None),
+            (linux, None, false, Some("bin/maka-python-worker")),
+            (
+                Target::Win32X64,
+                None,
+                false,
+                Some("bin/maka-python-worker.exe"),
+            ),
             (macos, None, false, Some("bin/Maka.app/Contents/Info.plist")),
             (
                 macos,

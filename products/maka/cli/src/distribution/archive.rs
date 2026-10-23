@@ -69,6 +69,7 @@ fn required(target: Target) -> impl Iterator<Item = &'static str> {
         "THIRD_PARTY_NOTICES.txt",
         target.executable(),
         target.desktop_executable(),
+        target.python_worker(),
     ]
     .into_iter()
     .chain(target.desktop_members().iter().copied())
@@ -388,6 +389,10 @@ fn validate_package(directory: &Path, target: Target, version: &str) -> Result<(
     target.validate_binary(
         &mut regular_file(&directory.join(target.desktop_executable()))?,
         true,
+    )?;
+    target.validate_binary(
+        &mut regular_file(&directory.join(target.python_worker()))?,
+        false,
     )?;
     if let Some(service) = target.service_executable() {
         target.validate_binary(&mut regular_file(&directory.join(service))?, true)?;

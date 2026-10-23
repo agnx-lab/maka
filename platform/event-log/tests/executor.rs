@@ -73,6 +73,7 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             collaboration_mode: CollaborationMode::Agent,
             orchestration_mode: BehaviorId::default(),
             tool_mode: ToolMode::Direct,
+            code_language: Default::default(),
         })),
     }))
     .await

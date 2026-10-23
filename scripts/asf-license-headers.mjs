@@ -257,6 +257,7 @@ export const exclusionRules = [
       'platform/computer-use/src/api.md',
       'platform/computer-use/src/api.zh-CN.md',
       'platform/computer-use/src/api.zh-TW.md',
+      'plugins/agent/tools/src/cell/python.md',
     ),
   },
   {
@@ -319,6 +320,14 @@ const reviewedProvenance = new Map([
   [
     'plugins/workspace/workspace-files/patch/SOURCE.md',
     'Maka-authored adaptation record quoting the attributed upstream copyright.',
+  ],
+  [
+    'platform/sandbox/README.md',
+    'Maka-authored sandbox documentation records attributed Codex source provenance.',
+  ],
+  [
+    'platform/sandbox/README.zh-CN.md',
+    'Maka-authored sandbox documentation records attributed Codex source provenance.',
   ],
   ['website/src/copy/en.ts', 'Website footer copy includes the ASF copyright statement.'],
   ['website/src/copy/zh-CN.ts', 'Website footer copy includes the ASF copyright statement.'],

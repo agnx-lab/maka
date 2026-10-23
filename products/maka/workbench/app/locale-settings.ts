@@ -59,6 +59,13 @@ import {
 } from '../../../../plugins/shared/tui-messages.js';
 
 export const settingsMessages = {
+  'Code Mode': ['Code Mode', 'Code Mode', 'Code Mode'],
+  'Code Mode language': ['Code Mode language', 'Code Mode 语言', 'Code Mode 語言'],
+  'Used when Code Mode is enabled. Applies to newly submitted messages.': [
+    'Used when Code Mode is enabled. Applies to newly submitted messages.',
+    '启用 Code Mode 时使用，设置对新提交的消息生效。',
+    '啟用 Code Mode 時使用，設定對新提交的訊息生效。',
+  ],
   'A provider credential is stored. Leave blank to keep it; enter a key to replace it.': [
     'A provider credential is stored. Leave blank to keep it; enter a key to replace it.',
     '已保存提供商凭据。留空可保留，输入密钥可替换。',
