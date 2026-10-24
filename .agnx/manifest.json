@@ -1,0 +1,46 @@
+{
+  "id": "maka",
+  "name": "Apache Maka",
+  "version": "0.2.0",
+  "description": "Apache Maka — 独立窗接入（短 id maka）；禁止 Tab 内 electron-module",
+  "engines": {
+    "agnx": ">=1.0.0"
+  },
+  "main": "./dist/index.js",
+  "icon": "./apps/desktop/assets/app-icons/sky.png",
+  "platforms": {
+    "desktop": "supported",
+    "web": "unsupported",
+    "mobile": "unsupported"
+  },
+  "runtime": {
+    "sidecars": [
+      {
+        "id": "desktop-window",
+        "ensureTool": ".agnx/tools/ensure-maka-desktop-window.mjs",
+        "stateFile": "maka-desktop-window.json",
+        "kind": "generic",
+        "healthKind": "process"
+      }
+    ]
+  },
+  "guest": {
+    "kind": "none",
+    "preferStrategy": "auto"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "maka.open",
+        "title": "Apache Maka"
+      }
+    ],
+    "panels": [
+      {
+        "id": "maka.main",
+        "title": "Apache Maka"
+      }
+    ]
+  },
+  "iconDark": "./apps/desktop/assets/app-icons/mono-white.png"
+}
